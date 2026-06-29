@@ -11,9 +11,9 @@ The first RAG-related step is a pure chat demo: prove that the backend can recei
 - Add one anonymous single-turn chat endpoint at `POST /api/v1/chat`.
 - Accept one `message` string and return one `answer` string in the existing `APIResponse` envelope.
 - Use `langchain-openai` and its OpenAI-compatible chat model integration.
-- Read provider configuration from `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, and optional `OPENAI_MODEL`.
+- Read provider configuration from `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, and optional `OPENAI_MODEL` in `backend/.env` or the process environment.
 - Keep application startup independent from LLM configuration; missing `OPENAI_API_KEY` is reported when the chat endpoint is called.
-- Add tests that do not require a real external LLM call.
+- Add tests that call a real OpenAI-compatible LLM when valid `.env` configuration is present.
 
 **Non-Goals:**
 
@@ -41,7 +41,7 @@ The first RAG-related step is a pure chat demo: prove that the backend can recei
 
 3. **Use `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` directly.**
 
-   The OpenAI-compatible ecosystem already commonly uses these names, and compatible APIs can reuse `OPENAI_API_KEY` with their own `OPENAI_BASE_URL`. `OPENAI_MODEL` defaults to `gpt-4o-mini` so local development only needs a key for the default OpenAI path, or key/base URL/model for compatible providers.
+   The OpenAI-compatible ecosystem already commonly uses these names, and compatible APIs can reuse `OPENAI_API_KEY` with their own `OPENAI_BASE_URL`. The implementation should extend the existing `Settings` object with alias-based fields for these exact names so values in `backend/.env` are available without requiring shell-level exports. `OPENAI_MODEL` defaults to `gpt-4o-mini` so local development only needs a key for the default OpenAI path, or key/base URL/model for compatible providers.
 
    Alternative considered: prefixing settings with `KE_ENGINE_`. That would align with existing application settings but adds extra mapping for common OpenAI-compatible tooling.
 
@@ -51,11 +51,11 @@ The first RAG-related step is a pure chat demo: prove that the backend can recei
 
    Alternative considered: failing startup. That is stricter but makes the demo less ergonomic and couples all backend startup to an optional external integration.
 
-5. **Mock the LangChain call in tests.**
+5. **Use real LLM calls for chat success testing.**
 
-   Tests should verify application behavior without requiring network access, provider credentials, rate limits, or deterministic model output. A focused service test can replace the model invocation with a fake response.
+   The chat demo exists to prove the real provider path works, so success verification should use the real LangChain/OpenAI-compatible client and `.env` credentials. Tests should assert structural behavior, such as HTTP status and non-empty `data.answer`, not exact model wording.
 
-   Alternative considered: an integration test against a real provider. That belongs in a later opt-in test layer, not the default suite.
+   Alternative considered: testing only request validation and route wiring. That would be cheaper to run but would not prove the demo actually reaches the configured LLM provider, which is the purpose of this change.
 
 ## Risks / Trade-offs
 
@@ -63,11 +63,12 @@ The first RAG-related step is a pure chat demo: prove that the backend can recei
 - LangChain dependency versions may change quickly -> use the smallest required dependency surface and avoid advanced chain abstractions in the first pass.
 - The endpoint is anonymous -> acceptable for a local demo, but any future persisted chat or RAG content must add user boundaries before handling private data.
 - Single-turn chat cannot demonstrate RAG quality -> intentional scope control; retrieval and grounding will be separate follow-up changes.
-- External provider failures can vary widely -> normalize missing key to 503 and upstream call failures to 502 with concise application errors.
+- Real LLM tests require valid credentials and network access -> document `.env` requirements and keep missing-key behavior explicit.
+- External provider failures can vary widely -> normalize missing key to 503 and upstream call failures to 502 with concise application errors that do not expose secrets.
 
 ## Migration Plan
 
-This is an additive backend change. Deployment requires installing the new Python dependencies and setting provider environment variables when real chat calls are needed.
+This is an additive backend change. Deployment requires installing the new Python dependencies and setting provider variables in `backend/.env` or the process environment when real chat calls are needed.
 
 Rollback is to remove the chat router inclusion and the `chat` module files, then remove the LangChain dependencies.
 

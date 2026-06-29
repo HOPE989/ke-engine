@@ -14,9 +14,9 @@ In scope:
 - Single-turn request with one `message` field.
 - Success response wrapped in the existing `APIResponse` shape.
 - LangChain OpenAI-compatible chat call through `langchain-openai`.
-- Runtime provider configuration from `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, and optional `OPENAI_MODEL`.
-- Clear endpoint errors for missing API key, upstream provider failure, and empty model response.
-- Tests that avoid real LLM network calls.
+- Runtime provider configuration from `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, and optional `OPENAI_MODEL` in `backend/.env` or the process environment.
+- Clear endpoint errors for missing API key and upstream provider failure.
+- Tests that use the real configured OpenAI-compatible LLM for the successful chat path.
 
 Out of scope:
 
@@ -59,10 +59,10 @@ Success response:
 Error behavior:
 
 - Empty or whitespace-only `message`: HTTP 400 application error.
-- Missing `message`: request validation error.
-- Missing `OPENAI_API_KEY`: HTTP 503 application error.
-- Provider call failure: HTTP 502 application error.
-- Empty provider answer: HTTP 502 application error.
+- Missing `message`: HTTP 422 request validation error.
+- Non-string `message`: HTTP 422 request validation error.
+- Missing, empty, or whitespace-only `OPENAI_API_KEY`: HTTP 503 application error.
+- Provider call failure: HTTP 502 application error that does not expose secrets.
 
 ## Architecture
 
@@ -86,7 +86,7 @@ POST /api/v1/chat
   -> APIResponse[{ answer }]
 ```
 
-The versioned API router includes the chat router at `/chat`. The route handler validates blank messages before calling the service. The service reads OpenAI-compatible environment variables at call time so application startup and health checks still work without LLM credentials.
+The versioned API router includes the chat router at `/chat` and exposes the exact no-trailing-slash path `POST /api/v1/chat`. The route handler validates blank messages before calling the service. The service reads OpenAI-compatible settings at call time so application startup and health checks still work without LLM credentials.
 
 ## Configuration
 
@@ -98,19 +98,19 @@ OPENAI_BASE_URL  optional compatible API base URL
 OPENAI_MODEL     optional model name, default gpt-4o-mini
 ```
 
-No `KE_ENGINE_` mapping is added for this first demo. Compatible providers can be used by setting `OPENAI_BASE_URL` and `OPENAI_MODEL`.
+No `KE_ENGINE_` mapping is added for this first demo. The existing `Settings` object should be extended with alias-based fields for these exact names so `backend/.env` works without shell-level exports. Compatible providers can be used by setting `OPENAI_BASE_URL` and `OPENAI_MODEL`.
 
 ## Testing
 
 Tests should cover:
 
 - The chat route is mounted at `POST /api/v1/chat`.
-- A non-empty message returns the expected response envelope when the LLM call is mocked.
+- A non-empty message returns the expected response envelope through a real OpenAI-compatible LLM call configured from `backend/.env`.
 - Blank messages return HTTP 400 and do not call the provider.
 - Missing `OPENAI_API_KEY` returns HTTP 503 from the endpoint, while app import and health checks still work.
-- Provider exceptions and empty provider responses return HTTP 502.
+- Invalid provider configuration returns HTTP 502 without leaking secret values.
 
-Default tests must not require a real API key, external network call, or deterministic model output.
+Success-path tests require valid real LLM configuration. They must assert response structure and non-empty `data.answer`, not exact model wording.
 
 ## OpenSpec
 
