@@ -13,7 +13,7 @@ The first RAG-related step is a pure chat demo: prove that the backend can recei
 - Use `langchain-openai` and its OpenAI-compatible chat model integration.
 - Read provider configuration from `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, and optional `OPENAI_MODEL` in `backend/.env` or the process environment.
 - Keep application startup independent from LLM configuration; missing `OPENAI_API_KEY` is reported when the chat endpoint is called.
-- Add tests that call a real OpenAI-compatible LLM when valid `.env` configuration is present.
+- Add tests that exercise the LangChain integration path with test-local mocks so default pytest runs do not depend on network, provider quota, or real `.env` secrets.
 
 **Non-Goals:**
 
@@ -51,11 +51,17 @@ The first RAG-related step is a pure chat demo: prove that the backend can recei
 
    Alternative considered: failing startup. That is stricter but makes the demo less ergonomic and couples all backend startup to an optional external integration.
 
-5. **Use real LLM calls for chat success testing.**
+5. **Use test-local LLM mocks for default chat success testing.**
 
-   The chat demo exists to prove the real provider path works, so success verification should use the real LangChain/OpenAI-compatible client and `.env` credentials. Tests should assert structural behavior, such as HTTP status and non-empty `data.answer`, not exact model wording.
+   The production service should still instantiate the real LangChain/OpenAI-compatible client from runtime configuration. Default tests should patch that client inside the test process, not in application code, so they verify request/response behavior and service wiring without depending on network access, provider quota, or secret-bearing `.env` files.
 
-   Alternative considered: testing only request validation and route wiring. That would be cheaper to run but would not prove the demo actually reaches the configured LLM provider, which is the purpose of this change.
+   Alternative considered: calling a real configured provider in default pytest. That proves more end-to-end behavior, but it makes the normal test suite depend on external availability, cost, latency, and local credentials.
+
+6. **Cache the demo chat model client, not the service object.**
+
+   `ChatService` stays stateless and can be constructed per request. The LangChain `ChatOpenAI` client is cached behind a module-level factory for the demo so repeated chat requests do not recreate the provider wrapper. This is intentionally narrower than a full LLM abstraction; future AI/RAG chain work should extract provider management into a dedicated layer.
+
+   Alternative considered: initializing the LLM during application startup. That would make missing LLM configuration affect unrelated endpoints, which conflicts with this demo's request-time configuration error behavior.
 
 ## Risks / Trade-offs
 
@@ -63,8 +69,9 @@ The first RAG-related step is a pure chat demo: prove that the backend can recei
 - LangChain dependency versions may change quickly -> use the smallest required dependency surface and avoid advanced chain abstractions in the first pass.
 - The endpoint is anonymous -> acceptable for a local demo, but any future persisted chat or RAG content must add user boundaries before handling private data.
 - Single-turn chat cannot demonstrate RAG quality -> intentional scope control; retrieval and grounding will be separate follow-up changes.
-- Real LLM tests require valid credentials and network access -> document `.env` requirements and keep missing-key behavior explicit.
+- Production LLM calls require valid credentials and network access -> keep missing-key behavior explicit, but avoid making default tests depend on real credentials.
 - External provider failures can vary widely -> normalize missing key to 503 and upstream call failures to 502 with concise application errors that do not expose secrets.
+- Error responses should use the shared `APIResponse` envelope with non-zero `code`, a concise `message`, and `data: null`.
 
 ## Migration Plan
 

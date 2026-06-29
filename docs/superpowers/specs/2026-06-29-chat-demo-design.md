@@ -16,7 +16,7 @@ In scope:
 - LangChain OpenAI-compatible chat call through `langchain-openai`.
 - Runtime provider configuration from `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, and optional `OPENAI_MODEL` in `backend/.env` or the process environment.
 - Clear endpoint errors for missing API key and upstream provider failure.
-- Tests that use the real configured OpenAI-compatible LLM for the successful chat path.
+- Tests that use a test-local mock of the LangChain chat client for the successful chat path.
 
 Out of scope:
 
@@ -86,7 +86,7 @@ POST /api/v1/chat
   -> APIResponse[{ answer }]
 ```
 
-The versioned API router includes the chat router at `/chat` and exposes the exact no-trailing-slash path `POST /api/v1/chat`. The route handler validates blank messages before calling the service. The service reads OpenAI-compatible settings at call time so application startup and health checks still work without LLM credentials.
+The versioned API router includes the chat router at `/chat` and exposes the exact no-trailing-slash path `POST /api/v1/chat`. The route handler validates blank messages before calling the service. The service reads OpenAI-compatible settings at call time so application startup and health checks still work without LLM credentials. The demo caches the `ChatOpenAI` client behind a module-level factory so repeated requests do not recreate the provider wrapper; full LLM/provider abstraction is deferred to later AI chain work.
 
 ## Configuration
 
@@ -105,12 +105,12 @@ No `KE_ENGINE_` mapping is added for this first demo. The existing `Settings` ob
 Tests should cover:
 
 - The chat route is mounted at `POST /api/v1/chat`.
-- A non-empty message returns the expected response envelope through a real OpenAI-compatible LLM call configured from `backend/.env`.
+- A non-empty message returns the expected response envelope through the LangChain integration path with a test-local mock client.
 - Blank messages return HTTP 400 and do not call the provider.
 - Missing `OPENAI_API_KEY` returns HTTP 503 from the endpoint, while app import and health checks still work.
 - Invalid provider configuration returns HTTP 502 without leaking secret values.
 
-Success-path tests require valid real LLM configuration. They must assert response structure and non-empty `data.answer`, not exact model wording.
+Success-path tests must not require network access, provider quota, or secret-bearing `.env` files. They patch the LangChain chat client in test code and assert response structure plus non-empty `data.answer`, not exact model wording from a real provider.
 
 ## OpenSpec
 

@@ -14,3 +14,6 @@ class APIResponse(BaseModel, Generic[T]):
 def success_response(data: T | None = None, message: str = "success") -> APIResponse[T]:
     return APIResponse(data=data, message=message)
 
+
+def error_response(message: str, code: int) -> APIResponse[None]:
+    return APIResponse(code=code, message=message, data=None)

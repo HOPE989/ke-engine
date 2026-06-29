@@ -10,7 +10,7 @@ This change keeps the first step deliberately small: an anonymous, single-turn c
 - Accept a single user message and return the model answer through the existing `APIResponse` envelope.
 - Use LangChain's OpenAI-compatible chat integration so `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, and optional `OPENAI_MODEL` configure the provider.
 - Return a clear runtime error from the chat endpoint when `OPENAI_API_KEY` is missing instead of failing application startup.
-- Add focused tests for route mounting, request validation, missing configuration, and successful behavior through a real OpenAI-compatible LLM call using `.env` configuration.
+- Add focused tests for route mounting, request validation, missing configuration, provider failure handling, and successful behavior through a test-local mock of the LangChain chat client.
 - Do not add authentication, multi-turn memory, streaming responses, database persistence, RAG retrieval, embeddings, vector storage, or document ingestion in this change.
 
 ## Capabilities
