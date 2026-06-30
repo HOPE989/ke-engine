@@ -8,7 +8,7 @@ RAG ingestion needs a first persistent entry point that accepts user documents, 
 - Add a persisted `knowledge_document` table and domain model with explicit lifecycle states from `INIT` through `CONVERTED`.
 - Store original and converted files in MinIO using the official Python SDK through a thin storage adapter.
 - Convert PDF files synchronously with MinerU and save the converted Markdown plus extracted images to MinIO.
-- Detect supported file types with Magika and map them to the document processor factory.
+- Detect supported file types with Magika and route them through the document processing workflow.
 - Support `.md`, `.markdown`, and `.txt` as plain text inputs that complete conversion by pointing `converted_doc_url` to the original file URL.
 - Reject unsupported file types with HTTP 415.
 - Normalize upload, storage, conversion, persistence, and state-conflict failures through stable `APIResponse` error contracts.

@@ -8,5 +8,7 @@ router = APIRouter()
 # 仅占位，开发暂不考虑该模块
 @router.get("/", response_model=APIResponse[list[UserRead]])
 async def list_users() -> APIResponse[list[UserRead]]:
+    """返回用户模块占位列表。"""
+
     return success_response([])
 

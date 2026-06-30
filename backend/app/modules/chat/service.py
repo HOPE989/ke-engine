@@ -11,6 +11,8 @@ _DEFAULT_MODEL = "gpt-4o-mini"
 
 @lru_cache(maxsize=1)
 def get_chat_model() -> ChatOpenAI:
+    """创建并缓存项目级聊天模型客户端。"""
+
     settings = get_settings()
     api_key = _clean_value(settings.openai_api_key)
     if api_key is None:
@@ -25,6 +27,7 @@ def get_chat_model() -> ChatOpenAI:
         "api_key": api_key,
         "model": model,
     }
+    # base_url 为空时交给 LangChain/OpenAI SDK 使用默认服务地址。
     if base_url is not None:
         kwargs["base_url"] = base_url
 
@@ -32,25 +35,25 @@ def get_chat_model() -> ChatOpenAI:
 
 
 def _clean_value(value: str | None) -> str | None:
+    """把空白配置值统一视为未配置。"""
+
     if value is None:
         return None
     cleaned = value.strip()
     return cleaned or None
 
 
-class ChatService:
-    async def chat(self, message: str) -> str:
-        try:
-            response = await get_chat_model().ainvoke(message)
-        except AppException:
-            raise
-        except Exception as exc:
-            raise AppException(
-                "chat provider request failed",
-                status_code=status.HTTP_502_BAD_GATEWAY,
-            ) from exc
+async def chat(message: str) -> str:
+    """调用聊天模型并返回文本答案。"""
 
-        return str(response.content)
+    try:
+        response = await get_chat_model().ainvoke(message)
+    except AppException:
+        raise
+    except Exception as exc:
+        raise AppException(
+            "chat provider request failed",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+        ) from exc
 
-    def _create_chat_model(self) -> ChatOpenAI:
-        return get_chat_model()
+    return str(response.content)
