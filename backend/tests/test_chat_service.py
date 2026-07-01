@@ -4,11 +4,10 @@ from fastapi import status
 from app.core import config
 from app.core.exceptions import AppException
 from app.modules.chat import service as chat_service_module
-from app.modules.chat.service import ChatService
 
 
 @pytest.mark.asyncio
-async def test_chat_service_rejects_missing_openai_api_key(tmp_path, monkeypatch):
+async def test_chat_function_rejects_missing_openai_api_key(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DEFAULT_ENV_FILE", tmp_path / ".env")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
@@ -17,14 +16,14 @@ async def test_chat_service_rejects_missing_openai_api_key(tmp_path, monkeypatch
     config.get_settings.cache_clear()
 
     with pytest.raises(AppException) as exc_info:
-        await ChatService().chat("hello")
+        await chat_service_module.chat("hello")
 
     assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert "OPENAI_API_KEY" in exc_info.value.message
 
 
 @pytest.mark.asyncio
-async def test_chat_service_rejects_blank_openai_api_key(tmp_path, monkeypatch):
+async def test_chat_function_rejects_blank_openai_api_key(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text("OPENAI_API_KEY=   \n", encoding="utf-8")
     monkeypatch.setattr(config, "DEFAULT_ENV_FILE", tmp_path / ".env")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -34,13 +33,13 @@ async def test_chat_service_rejects_blank_openai_api_key(tmp_path, monkeypatch):
     config.get_settings.cache_clear()
 
     with pytest.raises(AppException) as exc_info:
-        await ChatService().chat("hello")
+        await chat_service_module.chat("hello")
 
     assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert "OPENAI_API_KEY" in exc_info.value.message
 
 
-def test_chat_service_defaults_blank_model_name(tmp_path, monkeypatch):
+def test_chat_model_getter_defaults_blank_model_name(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text(
         "OPENAI_API_KEY=test-key\nOPENAI_MODEL=   \n",
         encoding="utf-8",
@@ -52,13 +51,13 @@ def test_chat_service_defaults_blank_model_name(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     config.get_settings.cache_clear()
 
-    model = ChatService()._create_chat_model()
+    model = chat_service_module.get_chat_model()
 
     assert model.model_name == "gpt-4o-mini"
 
 
 @pytest.mark.asyncio
-async def test_chat_service_returns_mocked_llm_answer(tmp_path, monkeypatch):
+async def test_chat_function_returns_mocked_llm_answer(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
     monkeypatch.setattr(config, "DEFAULT_ENV_FILE", tmp_path / ".env")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -77,13 +76,13 @@ async def test_chat_service_returns_mocked_llm_answer(tmp_path, monkeypatch):
 
     monkeypatch.setattr(chat_service_module, "ChatOpenAI", FakeChatOpenAI)
 
-    answer = await ChatService().chat("Reply with one short sentence.")
+    answer = await chat_service_module.chat("Reply with one short sentence.")
 
     assert answer == "mocked answer"
 
 
 @pytest.mark.asyncio
-async def test_chat_service_reuses_chat_model_between_calls(tmp_path, monkeypatch):
+async def test_chat_function_reuses_chat_model_between_calls(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
     monkeypatch.setattr(config, "DEFAULT_ENV_FILE", tmp_path / ".env")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -101,10 +100,9 @@ async def test_chat_service_reuses_chat_model_between_calls(tmp_path, monkeypatc
             return type("FakeMessage", (), {"content": f"answer: {message}"})()
 
     monkeypatch.setattr(chat_service_module, "ChatOpenAI", FakeChatOpenAI)
-    service = ChatService()
 
-    first_answer = await service.chat("first")
-    second_answer = await service.chat("second")
+    first_answer = await chat_service_module.chat("first")
+    second_answer = await chat_service_module.chat("second")
 
     assert first_answer == "answer: first"
     assert second_answer == "answer: second"
@@ -112,7 +110,7 @@ async def test_chat_service_reuses_chat_model_between_calls(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_chat_service_provider_failure_raises_app_exception_without_secret(
+async def test_chat_function_provider_failure_raises_app_exception_without_secret(
     tmp_path,
     monkeypatch,
 ):
@@ -134,7 +132,7 @@ async def test_chat_service_provider_failure_raises_app_exception_without_secret
     config.get_settings.cache_clear()
 
     with pytest.raises(AppException) as exc_info:
-        await ChatService().chat("hello")
+        await chat_service_module.chat("hello")
 
     assert exc_info.value.status_code == status.HTTP_502_BAD_GATEWAY
     assert "chat provider request failed" in exc_info.value.message

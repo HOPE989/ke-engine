@@ -17,3 +17,25 @@ def test_project_is_split_into_backend_and_frontend():
     assert (root / "backend" / "tests").is_dir()
     assert (root / "frontend" / "README.md").is_file()
 
+
+def test_placeholder_modules_do_not_carry_unused_service_repository_model_scaffolding():
+    root = _repo_root()
+    forbidden_files = [
+        root / "backend" / "app" / "modules" / "auth" / "schemas.py",
+        root / "backend" / "app" / "modules" / "auth" / "security.py",
+        root / "backend" / "app" / "modules" / "auth" / "service.py",
+        root / "backend" / "app" / "modules" / "users" / "exceptions.py",
+        root / "backend" / "app" / "modules" / "users" / "models.py",
+        root / "backend" / "app" / "modules" / "users" / "repository.py",
+        root / "backend" / "app" / "modules" / "users" / "service.py",
+        root / "backend" / "app" / "modules" / "orders" / "models.py",
+        root / "backend" / "app" / "modules" / "orders" / "repository.py",
+        root / "backend" / "app" / "modules" / "orders" / "service.py",
+    ]
+
+    existing_forbidden_files = [
+        str(path.relative_to(root)) for path in forbidden_files if path.exists()
+    ]
+
+    assert existing_forbidden_files == []
+
