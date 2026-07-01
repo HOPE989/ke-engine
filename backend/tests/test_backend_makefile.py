@@ -11,3 +11,5 @@ def test_root_makefile_exposes_backend_dev_targets():
     assert "dev-infra:" in content
     assert "$(UV) run uvicorn app.main:app --reload" in content
     assert "$(UV) run celery -A $(CELERY_APP) worker -l" in content
+    assert "CELERY_POOL ?= solo" in content
+    assert "-P $(CELERY_POOL)" in content

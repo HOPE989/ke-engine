@@ -6,6 +6,11 @@ API_PORT ?= 8000
 
 CELERY_APP ?= app.infrastructure.celery:celery_app
 CELERY_LOG_LEVEL ?= info
+ifeq ($(OS),Windows_NT)
+CELERY_POOL ?= solo
+else
+CELERY_POOL ?= prefork
+endif
 
 .DEFAULT_GOAL := help
 
@@ -34,7 +39,7 @@ dev-api:
 	cd $(BACKEND_DIR) && $(UV) run uvicorn app.main:app --reload --host $(API_HOST) --port $(API_PORT)
 
 dev-worker:
-	cd $(BACKEND_DIR) && $(UV) run celery -A $(CELERY_APP) worker -l $(CELERY_LOG_LEVEL)
+	cd $(BACKEND_DIR) && $(UV) run celery -A $(CELERY_APP) worker -l $(CELERY_LOG_LEVEL) -P $(CELERY_POOL)
 
 dev:
 	$(MAKE) -j 2 dev-api dev-worker
