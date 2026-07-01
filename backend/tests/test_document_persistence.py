@@ -5,12 +5,13 @@ from sqlalchemy.dialects import postgresql
 
 
 class FakeAsyncSession:
-    def __init__(self, *, rowcounts=None):
+    def __init__(self, *, rowcounts=None, scalar_result=None):
         self.added = []
         self.commits = 0
         self.refreshes = []
         self.executed = []
         self._rowcounts = list(rowcounts or [1])
+        self._scalar_result = scalar_result
 
     def add(self, instance):
         self.added.append(instance)
@@ -24,6 +25,11 @@ class FakeAsyncSession:
 
     async def execute(self, statement):
         self.executed.append(statement)
+        if self._scalar_result is not None:
+            return SimpleNamespace(
+                rowcount=self._rowcounts.pop(0),
+                scalar_one_or_none=lambda: self._scalar_result,
+            )
         return SimpleNamespace(rowcount=self._rowcounts.pop(0))
 
 
@@ -39,12 +45,16 @@ class FakeSessionContext:
 
 
 class FakeSessionFactory:
-    def __init__(self, *, rowcounts=None):
+    def __init__(self, *, rowcounts=None, scalar_result=None):
         self.rowcounts = rowcounts
+        self.scalar_result = scalar_result
         self.sessions = []
 
     def __call__(self):
-        session = FakeAsyncSession(rowcounts=self.rowcounts)
+        session = FakeAsyncSession(
+            rowcounts=self.rowcounts,
+            scalar_result=self.scalar_result,
+        )
         self.sessions.append(session)
         return FakeSessionContext(session)
 
@@ -75,27 +85,45 @@ def _document_modules():
 
 
 @pytest.mark.asyncio
-async def test_create_init_document_commits_and_refreshes_generated_doc_id():
+async def test_create_init_document_persists_provided_doc_id_and_file_type():
     repository, _, DocumentStatus, KnowledgeDocument = _document_modules()
     session_factory = FakeSessionFactory()
     document_repository = repository.DocumentRepository(session_factory)
 
     document = await document_repository.create_init_document(
+        doc_id=9_007_199_254_740_993,
         doc_title="guide.md",
         upload_user="alice",
         accessible_by="team-a",
+        file_type="plain_text",
     )
 
     session = session_factory.sessions[0]
     assert isinstance(document, KnowledgeDocument)
-    assert document.doc_id == 42
+    assert document.doc_id == 9_007_199_254_740_993
     assert document.doc_title == "guide.md"
     assert document.upload_user == "alice"
     assert document.accessible_by == "team-a"
+    assert document.file_type == "plain_text"
     assert document.status == DocumentStatus.INIT.value
     assert session.added == [document]
     assert session.commits == 1
-    assert session.refreshes == [document]
+    assert session.refreshes == []
+
+
+@pytest.mark.asyncio
+async def test_get_document_selects_by_doc_id():
+    repository, _, _, _ = _document_modules()
+    document = SimpleNamespace(doc_id=42)
+    session_factory = FakeSessionFactory(scalar_result=document)
+    document_repository = repository.DocumentRepository(session_factory)
+
+    result = await document_repository.get_document(doc_id=42)
+
+    session = session_factory.sessions[0]
+    statement = session.executed[0]
+    assert "WHERE knowledge_document.doc_id = 42" in _compiled_sql(statement)
+    assert result is document
 
 
 @pytest.mark.asyncio

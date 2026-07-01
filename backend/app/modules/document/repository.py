@@ -1,6 +1,6 @@
 """knowledge_document 的持久化 repository。"""
 
-from sqlalchemy import func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.document.errors import DocumentStateConflict
@@ -51,24 +51,35 @@ class DocumentRepository:
     async def create_init_document(
         self,
         *,
+        doc_id: int,
         doc_title: str,
         upload_user: str,
         accessible_by: str,
+        file_type: str,
     ) -> KnowledgeDocument:
         """创建并提交 INIT 状态的文档行，返回带 doc_id 的模型。"""
 
-        # INIT 行必须先落库，后续 MinIO 对象路径依赖数据库生成的 doc_id。
         document = KnowledgeDocument(
+            doc_id=doc_id,
             doc_title=doc_title,
             upload_user=upload_user,
             accessible_by=accessible_by,
+            file_type=file_type,
             status=DocumentStatus.INIT.value,
         )
         async with self._session_factory() as session:
             session.add(document)
             await session.commit()
-            await session.refresh(document)
         return document
+
+    async def get_document(self, doc_id: int) -> KnowledgeDocument | None:
+        """按 doc_id 读取文档元数据，找不到时返回 None。"""
+
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(KnowledgeDocument).where(KnowledgeDocument.doc_id == doc_id)
+            )
+            return result.scalar_one_or_none()
 
     async def _update_with_expected_status(
         self,

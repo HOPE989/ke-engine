@@ -34,6 +34,21 @@ def public_object_url(*, public_base_url: str, bucket: str, object_key: str) -> 
     return f"{public_base_url.rstrip('/')}/{bucket}/{object_key}"
 
 
+def _read_object(client: Any, bucket: str, object_key: str) -> bytes:
+    """读取 MinIO 对象内容，并尽力释放底层连接。"""
+
+    response = client.get_object(bucket, object_key)
+    try:
+        return response.read()
+    finally:
+        close = getattr(response, "close", None)
+        if close is not None:
+            close()
+        release_conn = getattr(response, "release_conn", None)
+        if release_conn is not None:
+            release_conn()
+
+
 @dataclass(frozen=True, slots=True)
 class DocumentObjectStorage:
     """围绕同步 MinIO SDK 的异步文档对象存储适配器。"""
@@ -63,4 +78,14 @@ class DocumentObjectStorage:
             public_base_url=self.public_base_url,
             bucket=self.bucket,
             object_key=object_key,
+        )
+
+    async def download_bytes(self, *, object_key: str) -> bytes:
+        """下载对象字节内容。"""
+
+        return await run_in_threadpool(
+            _read_object,
+            self.client,
+            self.bucket,
+            object_key,
         )

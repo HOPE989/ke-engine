@@ -62,7 +62,7 @@ def test_knowledge_document_migration_defines_exact_columns(monkeypatch):
 
     assert isinstance(columns["doc_id"].type, sa.BigInteger)
     assert columns["doc_id"].primary_key is True
-    assert columns["doc_id"].identity is not None
+    assert columns["doc_id"].identity is None
 
     assert isinstance(columns["doc_title"].type, sa.String)
     assert columns["doc_title"].type.length == 1024
@@ -75,6 +75,10 @@ def test_knowledge_document_migration_defines_exact_columns(monkeypatch):
     assert isinstance(columns["doc_url"].type, sa.String)
     assert columns["doc_url"].type.length == 2048
     assert columns["doc_url"].nullable is True
+
+    assert isinstance(columns["file_type"].type, sa.String)
+    assert columns["file_type"].type.length == 32
+    assert columns["file_type"].nullable is False
 
     assert isinstance(columns["converted_doc_url"].type, sa.String)
     assert columns["converted_doc_url"].type.length == 2048

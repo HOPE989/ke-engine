@@ -37,13 +37,27 @@ class ValidatedDocumentUpload:
 class DocumentMetadata(BaseModel):
     """文档上传成功后返回给客户端的稳定元数据。"""
 
-    doc_id: int
+    doc_id: str
     doc_title: str
     upload_user: str
     accessible_by: str
     doc_url: str | None
     converted_doc_url: str | None
     status: str
+
+
+def document_metadata_from_record(record) -> DocumentMetadata:
+    """把持久化记录转换为 API 元数据，避免 JSON 大整数精度风险。"""
+
+    return DocumentMetadata(
+        doc_id=str(record.doc_id),
+        doc_title=record.doc_title,
+        upload_user=record.upload_user,
+        accessible_by=record.accessible_by,
+        doc_url=record.doc_url,
+        converted_doc_url=record.converted_doc_url,
+        status=record.status,
+    )
 
 
 def safe_upload_basename(filename: str | None) -> str:

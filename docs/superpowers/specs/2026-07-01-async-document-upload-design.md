@@ -2,55 +2,57 @@
 
 ## 目标
 
-将文档上传链路从“HTTP 请求内同步解析到可用结果”改为“HTTP 请求只完成接收与原文持久化，后续解析、切分、入库由后台任务推进”。
+将文档上传链路从“HTTP 请求内同步解析到可用结果”改为“HTTP 请求只完成接收与原文持久化，后续解析由后台任务自动推进到 `CONVERTED`”。
 
 这次改造同时把 `doc_id` 从数据库自增 ID 改为应用侧 Snowflake 分布式 ID，但字段名仍保持 `doc_id`。
+
+本设计对齐 `know-engine` 的产品语义：上传后的自动解析完成态是 `CONVERTED`；切分是后续独立大需求，不在本 spec 中实现。
 
 ## 范围
 
 本次设计包含：
 
 - `knowledge_document.doc_id` 改为 Snowflake 生成的 `BIGINT`，字段名不变。
-- `POST /api/v1/document/upload` 统一异步化，成功接收后返回 `202 Accepted`。
+- `POST /api/v1/document/upload` 异步化，成功接收原文后返回 `202 Accepted`。
 - 上传请求只推进到 `UPLOADED`，不在请求内调用 MinerU、轮询、解 ZIP、上传转换产物。
-- 使用 Celery + Redis 执行解析、切分、向量化/入库等后台阶段。
-- 使用定时任务基于 `knowledge_document.status + updated_at` 做补偿，不新增 job 表。
-- 使用 `python-redis-lock` 提供带自动续期的 Redis 分布式锁，满足长时间解析任务的锁续期需求。
+- 使用 Celery + Redis 执行后台解析任务，将文档自动推进到 `CONVERTED`。
+- 使用 `python-redis-lock` 提供带自动续期的 Redis 分布式锁，保护同一 `doc_id` 的解析任务不并发执行。
 - 继续使用数据库 expected-state update 保护状态机推进。
+- 提供状态查询接口，让客户端查看 `UPLOADED`、`CONVERTING`、`CONVERTED`。
 
 不包含：
 
 - 认证、授权。
-- 文档 chunk、embedding、向量库写入的具体实现细节。
+- 文档切分、chunk 持久化、embedding、向量库写入。
+- `CHUNKED`、`VECTOR_STORED`、`STORED` 等切分/入库状态。
 - 独立 job/outbox 表。
+- 定时补偿任务。
+- `FAILED` 状态、失败详情字段、自动重试或手动 retry 接口。
+- 上传请求分布式锁。
+- 多版本。
 - 把 Python worker 改为 Java worker 或引入 Redisson sidecar。
 
 ## 业务状态机
 
-`knowledge_document.status` 只表达业务处理阶段，不表达队列技术状态。
+`knowledge_document.status` 只表达文档上传与解析阶段，不表达队列技术状态。
 
-状态机为：
+本 spec 的状态机为：
 
 ```text
 INIT
   -> UPLOADED
   -> CONVERTING
   -> CONVERTED
-  -> CHUNKED
-  -> VECTOR_STORED / STORED
 ```
 
 状态含义：
 
 - `INIT`：文档元数据已创建，原始文件尚未确认上传完成。
-- `UPLOADED`：原始文件已上传到 MinIO，可以进入后台解析。
-- `CONVERTING`：解析任务已抢占该文档，正在执行 MinerU 或其他格式转换。
-- `CONVERTED`：已产出标准 Markdown/文本，`converted_doc_url` 可用。
-- `CHUNKED`：已完成文档切分。
-- `VECTOR_STORED`：已完成向量化并写入向量存储。
-- `STORED`：已完成非向量化或最终存储流程。
+- `UPLOADED`：原始文件已上传到 MinIO，解析任务尚未完成。该状态也可能表示 Celery 投递失败或解析失败后的残留状态，首版不自动处理。
+- `CONVERTING`：后台解析任务已抢占该文档，正在执行 MinerU 或其他格式转换。
+- `CONVERTED`：已产出标准 Markdown/文本，`converted_doc_url` 可用。后续切分需求以该状态作为前置条件，但不在本 spec 中实现。
 
-不新增 `QUEUED`、`PROCESSING`、`FAILED` 这类队列态到 `knowledge_document.status`。
+不新增 `QUEUED`、`PROCESSING`、`FAILED` 这类队列态或失败态到 `knowledge_document.status`。
 
 ## `doc_id` 生成
 
@@ -75,7 +77,6 @@ Snowflake 配置：
 
 ```text
 SNOWFLAKE_WORKER_ID=1
-SNOWFLAKE_EPOCH_MS=1767225600000
 ```
 
 推荐位分配：
@@ -88,6 +89,8 @@ SNOWFLAKE_EPOCH_MS=1767225600000
 ```
 
 所有会生成 `doc_id` 的进程必须配置唯一 `SNOWFLAKE_WORKER_ID`。首版只要求 FastAPI API 进程生成文档 ID，后台 worker 只消费已有 `doc_id`。
+
+API JSON 响应中的 `doc_id` 建议序列化为字符串，避免 JavaScript `Number` 精度丢失；数据库和 Python 内部仍按整数处理。
 
 ## 上传流程
 
@@ -102,10 +105,12 @@ POST /document/upload
   -> 生成 Snowflake doc_id
   -> 创建 knowledge_document(status=INIT)
   -> 上传原始文件到 MinIO
-  -> 标记 status=UPLOADED，写入 doc_url
-  -> 尝试投递 convert task(doc_id)
+  -> 标记 status=UPLOADED，写入 doc_url 和 file_type
+  -> 尝试投递 convert_document(doc_id)
   -> 返回 202，data.status=UPLOADED
 ```
+
+上传请求不拿 Redis 分布式锁。每次上传都会生成新的 `doc_id`，对象路径也是 `documents/{doc_id}/...`，不存在多个上传请求争抢同一文档状态的问题。上传阶段的正确性依赖 Snowflake ID 唯一性、数据库主键约束和 `INIT -> UPLOADED` expected-state update。
 
 响应示例：
 
@@ -114,7 +119,7 @@ POST /document/upload
   "code": 0,
   "message": "success",
   "data": {
-    "doc_id": 739482091234567168,
+    "doc_id": "739482091234567168",
     "doc_title": "guide.pdf",
     "upload_user": "alice",
     "accessible_by": "team-a",
@@ -125,11 +130,11 @@ POST /document/upload
 }
 ```
 
-如果 Celery 投递失败，只要原文已上传并且状态已落为 `UPLOADED`，上传接口仍可返回 `202`。后续由定时补偿扫描 `UPLOADED` 文档重新投递解析任务。
+如果 Celery 投递失败，只要原文已上传并且状态已落为 `UPLOADED`，上传接口仍返回 `202`。首版不做补偿、不做自动重试、不提供 retry 接口；该文档会保持 `UPLOADED`，由状态查询如实展示。
 
-## 后台任务
+## 后台解析任务
 
-后台任务只负责推进业务状态机，不创造独立业务事实。
+后台解析任务只负责推进上传后的自动解析状态，不创造独立业务事实。
 
 转换任务：
 
@@ -140,58 +145,15 @@ convert_document(doc_id)
      WHERE doc_id=:doc_id AND status='UPLOADED'
   -> 影响行数为 0：退出
   -> 读取 MinIO 原文
-  -> 调用 MinerU 或其他解析器
-  -> 上传 converted Markdown/assets
+  -> 根据 file_type 处理：
+       PDF: 调用 MinerU，解 ZIP，上传 Markdown/assets
+       Markdown/TXT: 直接发布为 converted 文档
   -> UPDATE status='CONVERTED', converted_doc_url=:url
      WHERE doc_id=:doc_id AND status='CONVERTING'
   -> 释放锁
 ```
 
-切分任务：
-
-```text
-chunk_document(doc_id)
-  -> 获取 lock:document:{doc_id}:chunk
-  -> UPDATE status='CHUNKED'
-     WHERE doc_id=:doc_id AND status='CONVERTED'
-  -> 执行切分并持久化切分结果
-  -> 释放锁
-```
-
-存储/向量化任务：
-
-```text
-store_document(doc_id)
-  -> 获取 lock:document:{doc_id}:store
-  -> 从 CHUNKED 抢占
-  -> 执行向量化/入库
-  -> UPDATE status='VECTOR_STORED' 或 status='STORED'
-  -> 释放锁
-```
-
-首版可以只实现 upload 到 convert 的异步解耦，但状态机和补偿策略必须给后续 `CHUNKED`、`VECTOR_STORED`、`STORED` 留出一致路径。
-
-## 定时补偿
-
-不新增 job 表。补偿任务以 `knowledge_document` 为唯一业务事实来源。
-
-定时任务扫描：
-
-```text
-status='UPLOADED'   and updated_at < now - upload_grace_seconds
-status='CONVERTING' and updated_at < now - converting_stale_seconds
-status='CONVERTED'  and updated_at < now - converted_grace_seconds
-status='CHUNKED'    and updated_at < now - chunked_grace_seconds
-```
-
-补偿行为：
-
-- `UPLOADED` 超时：补投 `convert_document(doc_id)`。
-- `CONVERTING` 超时：补投 `convert_document(doc_id)`，任务内通过锁和 expected-state 判断是否可恢复。
-- `CONVERTED` 超时：补投 `chunk_document(doc_id)`。
-- `CHUNKED` 超时：补投 `store_document(doc_id)`。
-
-补偿任务不直接绕过 worker 业务函数。它只负责发现卡住状态并补投对应 Celery task。
+首版不实现 `chunk_document`、`store_document` 或任何向量化任务。
 
 ## 分布式锁
 
@@ -213,7 +175,7 @@ python-redis-lock
 ```python
 redis_lock.Lock(
     redis_client,
-    name=f"lock:document:{doc_id}:convert",
+    name=f"document:{doc_id}:convert",
     expire=60,
     auto_renewal=True,
 )
@@ -223,17 +185,17 @@ redis_lock.Lock(
 
 ```text
 lock:document:{doc_id}:convert
-lock:document:{doc_id}:chunk
-lock:document:{doc_id}:store
 ```
 
-锁只防止同一 `doc_id` 同一阶段被异步任务和定时补偿任务并发执行。最终正确性仍由数据库 expected-state update 保证。
+`python-redis-lock` 会给传入的 `name` 增加 `lock:` 前缀，因此代码传入 `document:{doc_id}:convert`，实际 Redis key 为 `lock:document:{doc_id}:convert`。
+
+锁只防止同一 `doc_id` 的解析任务被重复投递、Celery 重试或多 worker 并发消费时同时执行。最终正确性仍由数据库 expected-state update 保证。
 
 ## 并发控制
 
-每个阶段都同时使用 Redis lock 和数据库 expected-state update。
+后台解析阶段同时使用 Redis lock 和数据库 expected-state update。
 
-示例：
+抢占解析：
 
 ```sql
 UPDATE knowledge_document
@@ -242,25 +204,41 @@ WHERE doc_id = :doc_id
   AND status = 'UPLOADED'
 ```
 
+完成解析：
+
+```sql
+UPDATE knowledge_document
+SET status = 'CONVERTED',
+    converted_doc_url = :converted_doc_url
+WHERE doc_id = :doc_id
+  AND status = 'CONVERTING'
+```
+
 处理规则：
 
-- 抢不到 Redis 锁：说明同阶段任务正在运行，当前任务退出。
+- 抢不到 Redis 锁：说明同一文档解析任务正在运行，当前任务退出。
 - 抢到锁但 expected-state update 影响行数为 0：说明状态已被其他任务推进或不满足前置条件，当前任务退出。
 - Redis 锁过期或故障边界下出现重复执行：数据库 expected-state update 仍然阻止错误状态推进。
 
-## 失败与重试
+## 失败语义
 
 上传请求内失败：
 
+- 文件类型不支持或检测失败：维持现有错误契约，并且不创建文档行。
+- 初始持久化失败：返回通用 `500`。
 - 原文上传失败：返回 `502 document storage failed`，文档保持 `INIT`。
-- 初始持久化失败：返回 `500 document persistence failed`。
-- 文件类型不支持或检测失败：维持现有错误契约。
+
+上传请求内非失败：
+
+- Celery 投递失败：上传接口仍返回 `202`，文档保持 `UPLOADED`。首版不补偿。
 
 后台解析失败：
 
-- 可重试失败可以将状态从 `CONVERTING` 回退到 `UPLOADED`，由定时补偿再次投递。
-- worker 崩溃可能让状态停留在 `CONVERTING`，定时补偿会扫描超时记录并补投转换任务。
-- 首版不新增 `FAILED` 业务状态；失败详情如果需要，可后续增加独立错误字段，不改变主状态机。
+- 解析逻辑抛出可捕获异常：尝试将状态从 `CONVERTING` 回退到 `UPLOADED`。
+- worker 崩溃、进程被 kill 或机器重启：文档可能停留在 `CONVERTING`。首版不补偿。
+- 首版不新增 `FAILED` 业务状态，不记录 retry count，不记录 last error，不提供 retry 接口。
+
+因此首版可能长期存在 `UPLOADED` 或 `CONVERTING` 文档。状态查询接口只负责如实展示，不负责恢复。
 
 ## API 契约
 
@@ -286,7 +264,15 @@ GET /api/v1/document/{doc_id}
 返回 `DocumentMetadata`，客户端通过 `status` 判断当前阶段：
 
 ```text
-UPLOADED / CONVERTING / CONVERTED / CHUNKED / VECTOR_STORED / STORED
+UPLOADED / CONVERTING / CONVERTED
+```
+
+状态展示建议：
+
+```text
+UPLOADED    原文已保存，解析未完成或解析失败残留
+CONVERTING  正在解析
+CONVERTED   解析完成，可供后续切分大需求使用
 ```
 
 ## 实现边界
@@ -301,48 +287,55 @@ backend/app/infrastructure/celery.py
   Celery app construction
 
 backend/app/infrastructure/redis_lock.py
-  python-redis-lock 封装，提供 document stage lock
+  python-redis-lock 封装，提供 document convert lock
 
 backend/app/modules/document/workflow.py
   request-bound upload acceptance workflow
 
 backend/app/modules/document/tasks.py
-  Celery task wrappers and scheduled compensation tasks
+  Celery task wrappers
 
 backend/app/modules/document/processing.py
-  convert/chunk/store worker-side workflows
+  convert worker-side workflow
 
 backend/app/modules/document/repository.py
-  expected-state lifecycle updates and stale-status scans
+  expected-state lifecycle updates and document lookup
 ```
 
 `app.infrastructure.mineru` 保持 MinerU provider 封装。官方 MinerU 的 `_poll_full_zip_url` 继续存在，但只在 worker 内执行，不再阻塞 HTTP 请求。
+
+`DocumentObjectStorage` 需要支持 worker 从 MinIO 读取原文；现有上传能力之外，需要增加按 object key 下载 bytes 或 stream 的能力。
 
 ## 迁移影响
 
 因为当前功能未上线，可以直接调整初始 migration：
 
 - `knowledge_document.doc_id` 从 `BIGINT IDENTITY` 改为普通 `BIGINT PRIMARY KEY`。
-- 状态约束扩展为：
+- 状态约束限定为：
 
 ```text
-INIT, UPLOADED, CONVERTING, CONVERTED, CHUNKED, VECTOR_STORED, STORED
+INIT, UPLOADED, CONVERTING, CONVERTED
 ```
 
-- 可增加 `file_type` 字段，避免 worker 重新运行 Magika。
+- 增加 `file_type` 字段，避免 worker 重新运行 Magika。
 - 不创建 `document_processing_job` 表。
+- 不为切分、向量化增加表结构或状态。
 
 ## 测试策略
 
 需要覆盖：
 
 - Snowflake ID 生成、worker_id 校验、时钟回拨处理。
+- `knowledge_document.doc_id` 不再使用数据库 identity。
 - `POST /document/upload` 成功返回 `202` 和 `UPLOADED`。
+- API JSON 中 `doc_id` 以字符串返回。
 - 上传请求不调用 MinerU。
-- 原文上传成功后即使 Celery 投递失败，也能通过定时补偿恢复。
+- 上传请求不获取 Redis 分布式锁。
+- 原文上传成功后即使 Celery 投递失败，接口仍返回 `202`，文档保持 `UPLOADED`。
 - `convert_document` 使用 `python-redis-lock` 的 `auto_renewal=True`。
-- 同一 `doc_id` 同一阶段抢不到锁时任务退出。
+- 同一 `doc_id` 抢不到 convert 锁时任务退出。
 - expected-state update 防止重复状态推进。
-- 定时补偿扫描 `UPLOADED`、`CONVERTING`、`CONVERTED`、`CHUNKED` 并补投对应任务。
 - PDF worker 成功推进 `UPLOADED -> CONVERTING -> CONVERTED`。
-- 后续 chunk/store worker 按状态机推进到 `CHUNKED`、`VECTOR_STORED` 或 `STORED`。
+- Markdown/TXT worker 成功推进 `UPLOADED -> CONVERTING -> CONVERTED`。
+- 解析失败时尝试 `CONVERTING -> UPLOADED`。
+- `GET /document/{doc_id}` 返回 `UPLOADED`、`CONVERTING`、`CONVERTED` 状态。

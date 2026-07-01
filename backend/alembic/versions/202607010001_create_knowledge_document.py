@@ -18,10 +18,11 @@ def upgrade() -> None:
 
     op.create_table(
         "knowledge_document",
-        sa.Column("doc_id", sa.BigInteger(), sa.Identity(), primary_key=True, nullable=False),
+        sa.Column("doc_id", sa.BigInteger(), primary_key=True, nullable=False),
         sa.Column("doc_title", sa.String(length=1024), nullable=False),
         sa.Column("upload_user", sa.String(length=255), nullable=False),
         sa.Column("doc_url", sa.String(length=2048), nullable=True),
+        sa.Column("file_type", sa.String(length=32), nullable=False),
         sa.Column("converted_doc_url", sa.String(length=2048), nullable=True),
         sa.Column("status", sa.String(length=32), nullable=False, server_default=sa.text("'INIT'")),
         sa.Column("accessible_by", sa.String(length=1024), nullable=False),

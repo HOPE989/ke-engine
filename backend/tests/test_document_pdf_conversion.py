@@ -9,7 +9,6 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core import config
 from app.main import create_app
-from app.modules.document import router as document_router
 from app.modules.document import workflow
 from app.modules.document.file_types import DocumentFileType
 from app.modules.document.models import DocumentStatus
@@ -65,6 +64,24 @@ class FakeStorage:
         return f"https://files.example.com/documents/{object_key}"
 
 
+class FakeIdGenerator:
+    def __init__(self, doc_id=9_007_199_254_740_993):
+        self.doc_id = doc_id
+        self.calls = 0
+
+    def next_id(self):
+        self.calls += 1
+        return self.doc_id
+
+
+class FakeConversionDispatcher:
+    def __init__(self):
+        self.doc_ids = []
+
+    def dispatch(self, doc_id):
+        self.doc_ids.append(doc_id)
+
+
 @pytest.fixture
 async def configured_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncClient, object]]:
     env_file = tmp_path / ".env"
@@ -90,37 +107,30 @@ def force_pdf_detection(monkeypatch):
 
 
 def fake_repository(events):
-    async def create_init_document(*, doc_title, upload_user, accessible_by):
-        events.append({"action": "create_init", "doc_title": doc_title})
+    async def create_init_document(*, doc_id, doc_title, upload_user, accessible_by, file_type):
+        events.append(
+            {
+                "action": "create_init",
+                "doc_id": doc_id,
+                "doc_title": doc_title,
+                "file_type": file_type,
+            }
+        )
         return SimpleNamespace(
-            doc_id=42,
+            doc_id=doc_id,
             doc_title=doc_title,
             upload_user=upload_user,
             accessible_by=accessible_by,
+            file_type=file_type,
             status=DocumentStatus.INIT.value,
         )
 
     async def mark_uploaded(*, doc_id, doc_url):
         events.append({"action": "mark_uploaded", "doc_id": doc_id, "doc_url": doc_url})
 
-    async def start_converting(*, doc_id):
-        events.append({"action": "start_converting", "doc_id": doc_id})
-
-    async def mark_converted(*, doc_id, converted_doc_url, expected_status):
-        events.append(
-            {
-                "action": "mark_converted",
-                "doc_id": doc_id,
-                "converted_doc_url": converted_doc_url,
-                "expected_status": expected_status,
-            }
-        )
-
     return SimpleNamespace(
         create_init_document=create_init_document,
         mark_uploaded=mark_uploaded,
-        start_converting=start_converting,
-        mark_converted=mark_converted,
     )
 
 
@@ -128,16 +138,18 @@ def patch_router_dependencies(
     app,
     monkeypatch,
     storage,
-    mineru_client,
     *,
     repository,
+    id_generator,
+    conversion_dispatcher,
     file_detector=None,
 ):
     app.state.document_runtime = SimpleNamespace(
         repository=repository,
         storage=storage,
         file_detector=file_detector or object(),
-        mineru_client=mineru_client,
+        id_generator=id_generator,
+        conversion_dispatcher=conversion_dispatcher,
     )
 
 
@@ -204,7 +216,7 @@ def test_multiple_markdown_selection_prefers_pdf_conventions():
 
 
 @pytest.mark.asyncio
-async def test_pdf_upload_api_persists_uploads_converts_and_returns_metadata(
+async def test_pdf_upload_api_persists_upload_and_dispatches_conversion(
     configured_client,
     monkeypatch,
 ):
@@ -213,20 +225,15 @@ async def test_pdf_upload_api_persists_uploads_converts_and_returns_metadata(
     events = []
     repository = fake_repository(events)
     storage = FakeStorage()
-    mineru_client = FakeMinerUClient(
-        make_zip(
-            {
-                "guide.md": "# Guide\n\n![](images/page-1.png)\n",
-                "images/page-1.png": b"image-bytes",
-            }
-        )
-    )
+    id_generator = FakeIdGenerator()
+    dispatcher = FakeConversionDispatcher()
     patch_router_dependencies(
         app,
         monkeypatch,
         storage,
-        mineru_client,
         repository=repository,
+        id_generator=id_generator,
+        conversion_dispatcher=dispatcher,
     )
 
     response = await client.post(
@@ -235,28 +242,34 @@ async def test_pdf_upload_api_persists_uploads_converts_and_returns_metadata(
         files={"file": ("guide.pdf", b"%PDF-1.7", "application/pdf")},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert response.json()["data"] == {
-        "doc_id": 42,
+        "doc_id": "9007199254740993",
         "doc_title": "guide.pdf",
         "upload_user": "alice",
         "accessible_by": "team-a",
-        "doc_url": "https://files.example.com/documents/documents/42/original/guide.pdf",
-        "converted_doc_url": "https://files.example.com/documents/documents/42/converted/document.md",
-        "status": "CONVERTED",
+        "doc_url": (
+            "https://files.example.com/documents/"
+            "documents/9007199254740993/original/guide.pdf"
+        ),
+        "converted_doc_url": None,
+        "status": "UPLOADED",
     }
     assert events == [
-        {"action": "create_init", "doc_title": "guide.pdf"},
+        {
+            "action": "create_init",
+            "doc_id": 9_007_199_254_740_993,
+            "doc_title": "guide.pdf",
+            "file_type": DocumentFileType.PDF,
+        },
         {
             "action": "mark_uploaded",
-            "doc_id": 42,
-            "doc_url": "https://files.example.com/documents/documents/42/original/guide.pdf",
-        },
-        {"action": "start_converting", "doc_id": 42},
-        {
-            "action": "mark_converted",
-            "doc_id": 42,
-            "converted_doc_url": "https://files.example.com/documents/documents/42/converted/document.md",
-            "expected_status": DocumentStatus.CONVERTING,
+            "doc_id": 9_007_199_254_740_993,
+            "doc_url": (
+                "https://files.example.com/documents/"
+                "documents/9007199254740993/original/guide.pdf"
+            ),
         },
     ]
+    assert id_generator.calls == 1
+    assert dispatcher.doc_ids == [9_007_199_254_740_993]

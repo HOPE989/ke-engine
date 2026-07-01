@@ -16,9 +16,7 @@ from app.common.response import APIResponse, success_response
 from app.core.config import Settings
 from app.core.exceptions import AppException
 from app.modules.document.errors import (
-    DocumentConversionFailed,
     DocumentStateConflict,
-    DocumentStateRollbackFailed,
     DocumentStorageFailed,
 )
 from app.modules.document.runtime import DocumentRuntime
@@ -26,6 +24,7 @@ from app.modules.document.schemas import (
     DocumentFileTooLarge,
     DocumentMetadata,
     InvalidDocumentUpload,
+    document_metadata_from_record,
     validate_document_upload,
 )
 from app.modules.document.workflow import upload_document
@@ -33,7 +32,11 @@ from app.modules.document.workflow import upload_document
 router = APIRouter()
 
 
-@router.post("/upload", response_model=APIResponse[DocumentMetadata])
+@router.post(
+    "/upload",
+    response_model=APIResponse[DocumentMetadata],
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def upload_document_endpoint(
     file: Annotated[UploadFile, File()],
     upload_user: Annotated[str, Form()],
@@ -63,15 +66,25 @@ async def upload_document_endpoint(
             document_repository=document_runtime.repository,
             storage=document_runtime.storage,
             file_detector=document_runtime.file_detector,
-            mineru_client=document_runtime.mineru_client,
+            id_generator=document_runtime.id_generator,
+            conversion_dispatcher=document_runtime.conversion_dispatcher,
         )
     except DocumentStorageFailed as exc:
         raise AppException("document storage failed", status.HTTP_502_BAD_GATEWAY) from exc
     except DocumentStateConflict as exc:
         raise AppException("document state conflict", status.HTTP_409_CONFLICT) from exc
-    except DocumentStateRollbackFailed as exc:
-        raise AppException("document state rollback failed", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
-    except DocumentConversionFailed as exc:
-        raise AppException("document conversion failed", status.HTTP_502_BAD_GATEWAY) from exc
 
     return success_response(metadata)
+
+
+@router.get("/{doc_id}", response_model=APIResponse[DocumentMetadata])
+async def get_document_endpoint(
+    doc_id: int,
+    document_runtime: Annotated[DocumentRuntime, Depends(get_document_runtime)],
+) -> APIResponse[DocumentMetadata]:
+    """查询文档当前元数据。"""
+
+    document = await document_runtime.repository.get_document(doc_id=doc_id)
+    if document is None:
+        raise AppException("document not found", status.HTTP_404_NOT_FOUND)
+    return success_response(document_metadata_from_record(document))

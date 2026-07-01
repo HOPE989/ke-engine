@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, Identity, String, func
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -29,10 +29,11 @@ class KnowledgeDocument(Base):
         ),
     )
 
-    doc_id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    doc_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     doc_title: Mapped[str] = mapped_column(String(1024), nullable=False)
     upload_user: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     doc_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    file_type: Mapped[str] = mapped_column(String(32), nullable=False)
     converted_doc_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     status: Mapped[str] = mapped_column(
         String(32),

@@ -6,7 +6,6 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core import config
 from app.main import create_app
-from app.modules.document import router as document_router
 from app.modules.document import workflow
 from app.modules.document.file_types import DocumentFileType
 from app.modules.document.models import DocumentStatus
@@ -51,6 +50,27 @@ class ExplodingMinerUClient:
         raise AssertionError("plain text upload must not call MinerU")
 
 
+class FakeIdGenerator:
+    def __init__(self, doc_id=9_007_199_254_740_993):
+        self.doc_id = doc_id
+        self.calls = 0
+
+    def next_id(self):
+        self.calls += 1
+        return self.doc_id
+
+
+class FakeConversionDispatcher:
+    def __init__(self, *, failure=None):
+        self.failure = failure
+        self.doc_ids = []
+
+    def dispatch(self, doc_id):
+        self.doc_ids.append(doc_id)
+        if self.failure is not None:
+            raise self.failure
+
+
 @pytest.fixture
 async def configured_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncClient, object]]:
     env_file = tmp_path / ".env"
@@ -89,20 +109,23 @@ def _force_plain_text_detection(monkeypatch, detections):
 
 
 def _fake_repository(events):
-    async def create_init_document(*, doc_title, upload_user, accessible_by):
+    async def create_init_document(*, doc_id, doc_title, upload_user, accessible_by, file_type):
         events.append(
             {
                 "action": "create_init",
+                "doc_id": doc_id,
                 "doc_title": doc_title,
                 "upload_user": upload_user,
                 "accessible_by": accessible_by,
+                "file_type": file_type,
             }
         )
         return SimpleNamespace(
-            doc_id=42,
+            doc_id=doc_id,
             doc_title=doc_title,
             upload_user=upload_user,
             accessible_by=accessible_by,
+            file_type=file_type,
             status=DocumentStatus.INIT.value,
             doc_url=None,
             converted_doc_url=None,
@@ -111,20 +134,9 @@ def _fake_repository(events):
     async def mark_uploaded(*, doc_id, doc_url):
         events.append({"action": "mark_uploaded", "doc_id": doc_id, "doc_url": doc_url})
 
-    async def mark_converted(*, doc_id, converted_doc_url, expected_status):
-        events.append(
-            {
-                "action": "mark_converted",
-                "doc_id": doc_id,
-                "converted_doc_url": converted_doc_url,
-                "expected_status": expected_status,
-            }
-        )
-
     return SimpleNamespace(
         create_init_document=create_init_document,
         mark_uploaded=mark_uploaded,
-        mark_converted=mark_converted,
     )
 
 
@@ -132,21 +144,23 @@ def _patch_router_dependencies(
     app,
     monkeypatch,
     storage,
-    mineru_client,
     *,
     repository,
+    id_generator,
+    conversion_dispatcher,
     file_detector=None,
 ):
     app.state.document_runtime = SimpleNamespace(
         repository=repository,
         storage=storage,
         file_detector=file_detector or object(),
-        mineru_client=mineru_client,
+        id_generator=id_generator,
+        conversion_dispatcher=conversion_dispatcher,
     )
 
 
 @pytest.mark.asyncio
-async def test_markdown_upload_completes_plain_text_conversion(
+async def test_markdown_upload_returns_uploaded_and_dispatches_conversion(
     configured_client,
     monkeypatch,
 ):
@@ -154,14 +168,17 @@ async def test_markdown_upload_completes_plain_text_conversion(
     storage = FakeStorage()
     detections = []
     events = []
+    id_generator = FakeIdGenerator()
+    dispatcher = FakeConversionDispatcher()
     _force_plain_text_detection(monkeypatch, detections)
     repository = _fake_repository(events)
     _patch_router_dependencies(
         app,
         monkeypatch,
         storage,
-        ExplodingMinerUClient(),
         repository=repository,
+        id_generator=id_generator,
+        conversion_dispatcher=dispatcher,
     )
 
     response = await client.post(
@@ -170,23 +187,26 @@ async def test_markdown_upload_completes_plain_text_conversion(
         files={"file": ("guide.md", b"# Guide", "text/markdown")},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     payload = response.json()
     assert payload["code"] == 0
     assert payload["data"] == {
-        "doc_id": 42,
+        "doc_id": "9007199254740993",
         "doc_title": "guide.md",
         "upload_user": "alice",
         "accessible_by": "team-a",
-        "doc_url": "https://files.example.com/documents/documents/42/original/guide.md",
-        "converted_doc_url": "https://files.example.com/documents/documents/42/original/guide.md",
-        "status": "CONVERTED",
+        "doc_url": (
+            "https://files.example.com/documents/"
+            "documents/9007199254740993/original/guide.md"
+        ),
+        "converted_doc_url": None,
+        "status": "UPLOADED",
     }
     assert detections[0]["filename"] == "guide.md"
     assert detections[0]["upload_content_type"] == "text/markdown"
     assert storage.uploads == [
         {
-            "object_key": "documents/42/original/guide.md",
+            "object_key": "documents/9007199254740993/original/guide.md",
             "content": b"# Guide",
             "content_type": "application/octet-stream",
         }
@@ -194,22 +214,59 @@ async def test_markdown_upload_completes_plain_text_conversion(
     assert events == [
         {
             "action": "create_init",
+            "doc_id": 9_007_199_254_740_993,
             "doc_title": "guide.md",
             "upload_user": "alice",
             "accessible_by": "team-a",
+            "file_type": DocumentFileType.PLAIN_TEXT,
         },
         {
             "action": "mark_uploaded",
-            "doc_id": 42,
-            "doc_url": "https://files.example.com/documents/documents/42/original/guide.md",
-        },
-        {
-            "action": "mark_converted",
-            "doc_id": 42,
-            "converted_doc_url": "https://files.example.com/documents/documents/42/original/guide.md",
-            "expected_status": DocumentStatus.UPLOADED,
+            "doc_id": 9_007_199_254_740_993,
+            "doc_url": (
+                "https://files.example.com/documents/"
+                "documents/9007199254740993/original/guide.md"
+            ),
         },
     ]
+    assert id_generator.calls == 1
+    assert dispatcher.doc_ids == [9_007_199_254_740_993]
+
+
+@pytest.mark.asyncio
+async def test_conversion_dispatch_failure_still_returns_uploaded(
+    configured_client,
+    monkeypatch,
+):
+    client, app = configured_client
+    storage = FakeStorage()
+    detections = []
+    events = []
+    id_generator = FakeIdGenerator(doc_id=43)
+    dispatcher = FakeConversionDispatcher(failure=RuntimeError("redis secret-key failed"))
+    _force_plain_text_detection(monkeypatch, detections)
+    repository = _fake_repository(events)
+    _patch_router_dependencies(
+        app,
+        monkeypatch,
+        storage,
+        repository=repository,
+        id_generator=id_generator,
+        conversion_dispatcher=dispatcher,
+    )
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={"upload_user": "alice", "accessible_by": "team-a"},
+        files={"file": ("guide.md", b"# Guide", "text/markdown")},
+    )
+
+    assert response.status_code == 202
+    assert "secret-key" not in response.text
+    assert response.json()["data"]["status"] == DocumentStatus.UPLOADED.value
+    assert response.json()["data"]["converted_doc_url"] is None
+    assert dispatcher.doc_ids == [43]
+    assert [event["action"] for event in events] == ["create_init", "mark_uploaded"]
 
 
 @pytest.mark.asyncio
@@ -221,14 +278,17 @@ async def test_original_upload_failure_keeps_init_and_skips_conversion(
     storage = FakeStorage(upload_failure=RuntimeError("minio secret-key failed"))
     detections = []
     events = []
+    id_generator = FakeIdGenerator(doc_id=44)
+    dispatcher = FakeConversionDispatcher()
     _force_plain_text_detection(monkeypatch, detections)
     repository = _fake_repository(events)
     _patch_router_dependencies(
         app,
         monkeypatch,
         storage,
-        ExplodingMinerUClient(),
         repository=repository,
+        id_generator=id_generator,
+        conversion_dispatcher=dispatcher,
     )
 
     response = await client.post(
@@ -244,8 +304,11 @@ async def test_original_upload_failure_keeps_init_and_skips_conversion(
     assert events == [
         {
             "action": "create_init",
+            "doc_id": 44,
             "doc_title": "guide.md",
             "upload_user": "alice",
             "accessible_by": "team-a",
+            "file_type": DocumentFileType.PLAIN_TEXT,
         }
     ]
+    assert dispatcher.doc_ids == []

@@ -11,4 +11,5 @@ class DocumentRuntime:
     repository: Any
     storage: Any
     file_detector: Any
-    mineru_client: Any
+    id_generator: Any
+    conversion_dispatcher: Any

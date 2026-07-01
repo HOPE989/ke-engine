@@ -95,6 +95,31 @@ class Settings(BaseSettings):
         validation_alias="MINERU_TIMEOUT_SECONDS",
         description="startup-only: MinerU client is cached on app.state after first use.",
     )
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        validation_alias="REDIS_URL",
+        description="startup-only: Redis client is created for document conversion locks.",
+    )
+    celery_broker_url: str = Field(
+        default="redis://localhost:6379/0",
+        validation_alias="CELERY_BROKER_URL",
+        description="startup-only: Celery broker is configured during process startup.",
+    )
+    celery_result_backend: str = Field(
+        default="redis://localhost:6379/1",
+        validation_alias="CELERY_RESULT_BACKEND",
+        description="startup-only: Celery result backend is configured during process startup.",
+    )
+    document_convert_lock_expire_seconds: int = Field(
+        default=120,
+        validation_alias="DOCUMENT_CONVERT_LOCK_EXPIRE_SECONDS",
+        description="startup-only: document conversion Redis lock expiry is fixed for workers.",
+    )
+    snowflake_worker_id: int = Field(
+        default=1,
+        validation_alias="SNOWFLAKE_WORKER_ID",
+        description="startup-only: Snowflake worker id is fixed for generated document ids.",
+    )
     password_hash_iterations: int = 260_000
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openai_base_url: str | None = Field(default=None, validation_alias="OPENAI_BASE_URL")
@@ -121,6 +146,11 @@ STARTUP_ONLY_SETTINGS = {
     "mineru_poll_interval_seconds",
     "mineru_poll_timeout_seconds",
     "mineru_timeout_seconds",
+    "redis_url",
+    "celery_broker_url",
+    "celery_result_backend",
+    "document_convert_lock_expire_seconds",
+    "snowflake_worker_id",
 }
 REQUEST_TIME_SETTINGS = {"max_upload_size_mb"}
 

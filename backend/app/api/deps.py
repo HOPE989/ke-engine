@@ -39,17 +39,15 @@ async def document_runtime(
 
     from app.db.session import close_engine, get_session_factory, init_engine
     from app.infrastructure.magika import get_magika_client
-    from app.infrastructure.mineru import create_mineru_client
     from app.infrastructure.minio import ensure_minio_bucket, get_minio_client
+    from app.infrastructure.snowflake import SnowflakeIdGenerator
     from app.modules.document.repository import DocumentRepository
     from app.modules.document.storage import DocumentObjectStorage
+    from app.modules.document.tasks import CeleryDocumentConversionDispatcher
 
     async with AsyncExitStack() as stack:
         await init_engine(settings.database_url)
         stack.push_async_callback(close_engine)
-
-        mineru_client = create_mineru_client(settings)
-        stack.push_async_callback(mineru_client.aclose)
 
         minio_client = get_minio_client()
         await ensure_minio_bucket(minio_client, settings.minio_bucket)
@@ -64,7 +62,8 @@ async def document_runtime(
             repository=DocumentRepository(get_session_factory()),
             storage=storage,
             file_detector=get_magika_client(),
-            mineru_client=mineru_client,
+            id_generator=SnowflakeIdGenerator(worker_id=settings.snowflake_worker_id),
+            conversion_dispatcher=CeleryDocumentConversionDispatcher(),
         )
         stack.callback(_discard_app_state_attr, application, "document_runtime")
 

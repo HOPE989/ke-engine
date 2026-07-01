@@ -1,15 +1,15 @@
 """文档上传与转换的应用工作流编排。"""
 
+import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
 from app.modules.document.errors import (
     DocumentConversionFailed,
-    DocumentStateRollbackFailed,
     DocumentStorageFailed,
 )
-from app.modules.document.file_types import DocumentFileType, detect_document_file_type
+from app.modules.document.file_types import detect_document_file_type
 from app.modules.document.markdown import (
     IMAGE_SUFFIXES,
     MARKDOWN_SUFFIXES,
@@ -26,6 +26,8 @@ from app.modules.document.storage import (
     converted_markdown_object_key,
     original_object_key,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def convert_pdf_document(
@@ -93,7 +95,8 @@ async def upload_document(
     document_repository: Any,
     storage: Any,
     file_detector: Any,
-    mineru_client: Any,
+    id_generator: Any,
+    conversion_dispatcher: Any,
 ) -> Any:
     """处理单次文档上传，返回可持久消费的文档元数据。"""
 
@@ -104,11 +107,14 @@ async def upload_document(
         upload_content_type=upload.content_type,
         magika_client=file_detector,
     )
-    # 2. 创建 INIT 行，拿到 doc_id 后才能生成对象存储 key。
+    # 2. 先生成 doc_id，再创建 INIT 行；对象存储 key 依赖这个稳定 ID。
+    doc_id = id_generator.next_id()
     document = await document_repository.create_init_document(
+        doc_id=doc_id,
         doc_title=upload.doc_title,
         upload_user=upload.upload_user,
         accessible_by=upload.accessible_by,
+        file_type=file_type,
     )
 
     object_key = original_object_key(
@@ -128,51 +134,17 @@ async def upload_document(
     # 4. 原文上传成功后推进生命周期并保存稳定 URL。
     await document_repository.mark_uploaded(doc_id=document.doc_id, doc_url=doc_url)
 
-    # 5. 纯文本无需 MinerU 转换，直接发布为 CONVERTED。
-    if file_type == DocumentFileType.PLAIN_TEXT:
-        await document_repository.mark_converted(
-            doc_id=document.doc_id,
-            converted_doc_url=doc_url,
-            expected_status=DocumentStatus.UPLOADED,
-        )
-        return DocumentMetadata(
-            doc_id=document.doc_id,
-            doc_title=upload.doc_title,
-            upload_user=upload.upload_user,
-            accessible_by=upload.accessible_by,
-            doc_url=doc_url,
-            converted_doc_url=doc_url,
-            status=DocumentStatus.CONVERTED.value,
-        )
-
-    # 6. PDF 先进入 CONVERTING，再调用 MinerU 同步转换。
-    await document_repository.start_converting(doc_id=document.doc_id)
     try:
-        converted_doc_url = await convert_pdf_document(
-            doc_id=document.doc_id,
-            upload=upload,
-            storage=storage,
-            mineru_client=mineru_client,
-        )
-    except DocumentConversionFailed:
-        try:
-            # 转换失败后回滚到 UPLOADED，保留已上传原文 URL。
-            await document_repository.rollback_to_uploaded(doc_id=document.doc_id)
-        except Exception as exc:
-            raise DocumentStateRollbackFailed() from exc
-        raise
-    # 7. 只有全部转换产物上传成功后，才发布 converted_doc_url。
-    await document_repository.mark_converted(
-        doc_id=document.doc_id,
-        converted_doc_url=converted_doc_url,
-        expected_status=DocumentStatus.CONVERTING,
-    )
+        conversion_dispatcher.dispatch(document.doc_id)
+    except Exception:
+        logger.exception("failed to dispatch document conversion task", extra={"doc_id": document.doc_id})
+
     return DocumentMetadata(
-        doc_id=document.doc_id,
+        doc_id=str(document.doc_id),
         doc_title=upload.doc_title,
         upload_user=upload.upload_user,
         accessible_by=upload.accessible_by,
         doc_url=doc_url,
-        converted_doc_url=converted_doc_url,
-        status=DocumentStatus.CONVERTED.value,
+        converted_doc_url=None,
+        status=DocumentStatus.UPLOADED.value,
     )

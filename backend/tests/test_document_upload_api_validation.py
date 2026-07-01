@@ -41,7 +41,8 @@ def patch_router_dependencies(app, document_router, monkeypatch):
         repository=object(),
         storage=object(),
         file_detector=object(),
-        mineru_client=object(),
+        id_generator=object(),
+        conversion_dispatcher=object(),
     )
 
 
@@ -99,7 +100,7 @@ async def client_with_capturing_workflow(
             upload = kwargs["upload"]
             captured["upload"] = upload
             return DocumentMetadata(
-                doc_id=42,
+                doc_id="42",
                 doc_title=upload.doc_title,
                 upload_user=upload.upload_user,
                 accessible_by=upload.accessible_by,
@@ -262,7 +263,7 @@ async def test_path_like_filename_is_normalized_before_workflow(
         files={"file": ("..\\secret/../guide.md", b"# hi", "text/markdown")},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     upload = captured["upload"]
     assert upload.doc_title == "guide.md"
     assert upload.safe_filename == "guide.md"
