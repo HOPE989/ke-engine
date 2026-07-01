@@ -57,6 +57,7 @@ def test_magika_pdf_detection_is_accepted(result):
     detected = detect_document_file_type(
         filename="guide.pdf",
         content=b"%PDF-1.7",
+        upload_content_type="application/octet-stream",
         magika_client=magika_client,
     )
 
@@ -70,8 +71,27 @@ def test_magika_markdown_detection_is_accepted_as_plain_text():
     detected = detect_document_file_type(
         filename="guide",
         content=b"# Guide",
+        upload_content_type="application/octet-stream",
         magika_client=FakeMagikaClient(
             result=FakeMagikaResult(ct_label="markdown", mime_type="text/markdown")
+        ),
+    )
+
+    assert detected == DocumentFileType.PLAIN_TEXT
+
+
+def test_upload_mime_markdown_is_accepted_even_when_magika_misclassifies():
+    detect_document_file_type, DocumentFileType, _, _ = _file_type_modules()
+
+    detected = detect_document_file_type(
+        filename="营业额.md",
+        content=(
+            "2026年5月21号的营业额是110k元。\n"
+            "C:\\Program Files\\WindowsApps\\OpenAI.Codex_*\\app\\Codex.exe\n"
+        ).encode(),
+        upload_content_type="text/markdown",
+        magika_client=FakeMagikaClient(
+            result=FakeMagikaResult(ct_label="powershell", mime_type="application/x-powershell")
         ),
     )
 
@@ -85,6 +105,7 @@ def test_generic_text_with_supported_extension_is_accepted(filename):
     detected = detect_document_file_type(
         filename=filename,
         content=b"plain text",
+        upload_content_type="application/octet-stream",
         magika_client=FakeMagikaClient(
             result=FakeMagikaResult(ct_label="txt", mime_type="text/plain")
         ),
@@ -100,6 +121,7 @@ def test_unsupported_file_type_is_rejected():
         detect_document_file_type(
             filename="image.png",
             content=b"\x89PNG",
+            upload_content_type="image/png",
             magika_client=FakeMagikaClient(
                 result=FakeMagikaResult(ct_label="png", mime_type="image/png")
             ),
@@ -113,5 +135,6 @@ def test_magika_runtime_failure_is_normalized():
         detect_document_file_type(
             filename="guide.pdf",
             content=b"%PDF-1.7",
+            upload_content_type="application/octet-stream",
             magika_client=FakeMagikaClient(failure=RuntimeError("model failed")),
         )

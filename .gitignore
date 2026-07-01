@@ -8,6 +8,12 @@ __pycache__/
 build/
 dist/
 
+# Node and Next.js outputs
+node_modules/
+.next/
+out/
+frontend/package-lock.json
+
 # Virtual environments
 .venv/
 venv/

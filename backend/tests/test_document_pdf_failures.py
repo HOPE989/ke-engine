@@ -39,35 +39,23 @@ def make_zip(entries: dict[str, bytes | str]) -> bytes:
     return buffer.getvalue()
 
 
-class FakeMinerUResponse:
-    def __init__(self, content: bytes):
-        self.content = content
-
-    def raise_for_status(self):
-        return None
-
-
 class FakeMinerUClient:
     def __init__(self, *, zip_bytes=b"", failure=None):
         self.zip_bytes = zip_bytes
         self.failure = failure
         self.calls = []
 
-    async def post(self, path, *, files, data):
-        self.calls.append({"path": path, "files": files, "data": data})
+    async def request_zip(self, *, filename, content):
+        self.calls.append({"filename": filename, "content": content})
         if self.failure is not None:
             raise self.failure
-        return FakeMinerUResponse(self.zip_bytes)
+        return self.zip_bytes
 
 
 class FakeStorage:
     def __init__(self, *, fail_on_object_key=None):
         self.fail_on_object_key = fail_on_object_key
-        self.ensure_bucket_calls = 0
         self.uploads = []
-
-    async def ensure_bucket(self):
-        self.ensure_bucket_calls += 1
 
     async def upload_bytes(self, *, object_key, content, content_type):
         if object_key == self.fail_on_object_key:
@@ -100,7 +88,7 @@ async def configured_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncC
 
 
 def force_pdf_detection(monkeypatch):
-    def fake_detect_document_file_type(*, filename, content, magika_client):
+    def fake_detect_document_file_type(*, filename, content, upload_content_type, magika_client):
         return DocumentFileType.PDF
 
     monkeypatch.setattr(workflow, "detect_document_file_type", fake_detect_document_file_type)
@@ -162,14 +150,12 @@ def patch_router_dependencies(
     repository,
     file_detector=None,
 ):
-    app.state.document_repository = repository
-    app.state.document_storage = storage
-    app.state.document_file_detector = file_detector or object()
-
-    async def fake_get_mineru_client(request):
-        return mineru_client
-
-    monkeypatch.setattr(document_router, "get_mineru_client", fake_get_mineru_client)
+    app.state.document_runtime = SimpleNamespace(
+        repository=repository,
+        storage=storage,
+        file_detector=file_detector or object(),
+        mineru_client=mineru_client,
+    )
 
 
 async def post_pdf(client):

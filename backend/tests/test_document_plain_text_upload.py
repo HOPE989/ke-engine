@@ -31,11 +31,7 @@ DOCUMENT_ENV = "\n".join(
 class FakeStorage:
     def __init__(self, *, upload_failure=None):
         self.upload_failure = upload_failure
-        self.ensure_bucket_calls = 0
         self.uploads = []
-
-    async def ensure_bucket(self):
-        self.ensure_bucket_calls += 1
 
     async def upload_bytes(self, *, object_key, content, content_type):
         if self.upload_failure is not None:
@@ -73,11 +69,12 @@ async def configured_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncC
 
 
 def _force_plain_text_detection(monkeypatch, detections):
-    def fake_detect_document_file_type(*, filename, content, magika_client):
+    def fake_detect_document_file_type(*, filename, content, upload_content_type, magika_client):
         detections.append(
             {
                 "filename": filename,
                 "content": content,
+                "upload_content_type": upload_content_type,
                 "magika_client": magika_client,
             }
         )
@@ -140,14 +137,12 @@ def _patch_router_dependencies(
     repository,
     file_detector=None,
 ):
-    app.state.document_repository = repository
-    app.state.document_storage = storage
-    app.state.document_file_detector = file_detector or object()
-
-    async def fake_get_mineru_client(request):
-        return mineru_client
-
-    monkeypatch.setattr(document_router, "get_mineru_client", fake_get_mineru_client)
+    app.state.document_runtime = SimpleNamespace(
+        repository=repository,
+        storage=storage,
+        file_detector=file_detector or object(),
+        mineru_client=mineru_client,
+    )
 
 
 @pytest.mark.asyncio
@@ -188,7 +183,7 @@ async def test_markdown_upload_completes_plain_text_conversion(
         "status": "CONVERTED",
     }
     assert detections[0]["filename"] == "guide.md"
-    assert storage.ensure_bucket_calls == 1
+    assert detections[0]["upload_content_type"] == "text/markdown"
     assert storage.uploads == [
         {
             "object_key": "documents/42/original/guide.md",
@@ -246,7 +241,6 @@ async def test_original_upload_failure_keeps_init_and_skips_conversion(
     payload = response.json()
     assert payload == {"code": 502, "message": "document storage failed", "data": None}
     assert "secret-key" not in response.text
-    assert storage.ensure_bucket_calls == 1
     assert events == [
         {
             "action": "create_init",

@@ -29,6 +29,7 @@ class ValidatedDocumentUpload:
     safe_filename: str
     upload_user: str
     accessible_by: str
+    content_type: str
     content: bytes
     size_bytes: int
 
@@ -94,6 +95,7 @@ async def validate_document_upload(
         safe_filename=safe_filename,
         upload_user=normalized_user,
         accessible_by=normalized_scope,
+        content_type=(file.content_type or "").strip().lower(),
         content=content,
         size_bytes=len(content),
     )

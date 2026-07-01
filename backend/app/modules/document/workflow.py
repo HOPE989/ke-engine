@@ -13,12 +13,12 @@ from app.modules.document.file_types import DocumentFileType, detect_document_fi
 from app.modules.document.markdown import (
     IMAGE_SUFFIXES,
     MARKDOWN_SUFFIXES,
+    backfill_markdown_image_descriptions,
     extract_mineru_zip,
     image_content_type,
     rewrite_markdown_image_links,
     select_markdown_path,
 )
-from app.modules.document.mineru import request_mineru_zip
 from app.modules.document.models import DocumentStatus
 from app.modules.document.schemas import DocumentMetadata
 from app.modules.document.storage import (
@@ -39,8 +39,7 @@ async def convert_pdf_document(
 
     try:
         # 1. 请求 MinerU 产出 ZIP，后续所有解析都基于这个归档。
-        zip_bytes = await request_mineru_zip(
-            client=mineru_client,
+        zip_bytes = await mineru_client.request_zip(
             filename=upload.safe_filename,
             content=upload.content,
         )
@@ -75,6 +74,8 @@ async def convert_pdf_document(
             # 4. 重写 Markdown 图片链接后上传最终 Markdown。
             markdown_text = (root / selected_markdown_path).read_text(encoding="utf-8")
             rewritten_markdown = rewrite_markdown_image_links(markdown_text, image_urls)
+            rewritten_markdown = backfill_markdown_image_descriptions(rewritten_markdown)
+
             return await storage.upload_bytes(
                 object_key=converted_markdown_object_key(doc_id=doc_id),
                 content=rewritten_markdown.encode(),
@@ -100,6 +101,7 @@ async def upload_document(
     file_type = detect_document_file_type(
         filename=upload.safe_filename,
         content=upload.content,
+        upload_content_type=upload.content_type,
         magika_client=file_detector,
     )
     # 2. 创建 INIT 行，拿到 doc_id 后才能生成对象存储 key。
@@ -114,8 +116,7 @@ async def upload_document(
         safe_filename=upload.safe_filename,
     )
     try:
-        # 3. 上传原文；外部对象存储调用不包在数据库事务里。
-        await storage.ensure_bucket()
+        # 3. 上传原文；bucket 在应用启动期已完成初始化。
         doc_url = await storage.upload_bytes(
             object_key=object_key,
             content=upload.content,

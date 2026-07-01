@@ -23,19 +23,78 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql+asyncpg://ke_engine:ke_engine@localhost:5432/ke_engine",
         validation_alias="DATABASE_URL",
+        description="startup-only: database engine and session factory are created during lifespan startup.",
     )
-    max_upload_size_mb: int = Field(default=20, validation_alias="MAX_UPLOAD_SIZE_MB")
-    minio_endpoint: str = Field(default="localhost:9000", validation_alias="MINIO_ENDPOINT")
-    minio_access_key: str = Field(default="minioadmin", validation_alias="MINIO_ACCESS_KEY")
-    minio_secret_key: str = Field(default="minioadmin", validation_alias="MINIO_SECRET_KEY")
-    minio_bucket: str = Field(default="documents", validation_alias="MINIO_BUCKET")
+    max_upload_size_mb: int = Field(
+        default=20,
+        validation_alias="MAX_UPLOAD_SIZE_MB",
+        description="request-time: upload validation reads this on each request.",
+    )
+    minio_endpoint: str = Field(
+        default="localhost:9000",
+        validation_alias="MINIO_ENDPOINT",
+        description="startup-only: MinIO client is created during lifespan startup.",
+    )
+    minio_access_key: str = Field(
+        default="minioadmin",
+        validation_alias="MINIO_ACCESS_KEY",
+        description="startup-only: MinIO client is created during lifespan startup.",
+    )
+    minio_secret_key: str = Field(
+        default="minioadmin",
+        validation_alias="MINIO_SECRET_KEY",
+        description="startup-only: MinIO client is created during lifespan startup.",
+    )
+    minio_bucket: str = Field(
+        default="documents",
+        validation_alias="MINIO_BUCKET",
+        description="startup-only: document object storage is created during lifespan startup.",
+    )
     minio_public_base_url: str = Field(
         default="http://localhost:9000",
         validation_alias="MINIO_PUBLIC_BASE_URL",
+        description="startup-only: document object storage is created during lifespan startup.",
     )
-    minio_secure: bool = Field(default=False, validation_alias="MINIO_SECURE")
-    mineru_base_url: str = Field(default="http://localhost:8000", validation_alias="MINERU_BASE_URL")
-    mineru_timeout_seconds: int = Field(default=60, validation_alias="MINERU_TIMEOUT_SECONDS")
+    minio_secure: bool = Field(
+        default=False,
+        validation_alias="MINIO_SECURE",
+        description="startup-only: MinIO client is created during lifespan startup.",
+    )
+    mineru_base_url: str = Field(
+        default="http://localhost:8000",
+        validation_alias="MINERU_BASE_URL",
+        description="startup-only: MinerU client is cached on app.state after first use.",
+    )
+    mineru_provider: str = Field(
+        default="local",
+        validation_alias="MINERU_PROVIDER",
+        description="startup-only: MinerU provider factory selects local or official at application startup.",
+    )
+    mineru_api_key: str | None = Field(
+        default=None,
+        validation_alias="MINERU_API_KEY",
+        description="startup-only: MinerU API authentication is configured during client creation.",
+    )
+    mineru_model_version: str = Field(
+        default="vlm",
+        validation_alias="MINERU_MODEL_VERSION",
+        description="startup-only: official MinerU parsing model is fixed for the process lifetime.",
+    )
+    mineru_poll_interval_seconds: float = Field(
+        default=2,
+        validation_alias="MINERU_POLL_INTERVAL_SECONDS",
+        description="startup-only: official MinerU polling cadence is fixed for the process lifetime.",
+    )
+    mineru_poll_timeout_seconds: float = Field(
+        default=300,
+        validation_alias="MINERU_POLL_TIMEOUT_SECONDS",
+        description="startup-only: official MinerU polling timeout is fixed for the process lifetime.",
+    )
+    mineru_timeout_seconds: int = Field(
+        default=60,
+        validation_alias="MINERU_TIMEOUT_SECONDS",
+        description="startup-only: MinerU client is cached on app.state after first use.",
+    )
     password_hash_iterations: int = 260_000
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openai_base_url: str | None = Field(default=None, validation_alias="OPENAI_BASE_URL")
@@ -47,6 +106,25 @@ class Settings(BaseSettings):
     )
 
 
+STARTUP_ONLY_SETTINGS = {
+    "database_url",
+    "minio_endpoint",
+    "minio_access_key",
+    "minio_secret_key",
+    "minio_bucket",
+    "minio_public_base_url",
+    "minio_secure",
+    "mineru_base_url",
+    "mineru_provider",
+    "mineru_api_key",
+    "mineru_model_version",
+    "mineru_poll_interval_seconds",
+    "mineru_poll_timeout_seconds",
+    "mineru_timeout_seconds",
+}
+REQUEST_TIME_SETTINGS = {"max_upload_size_mb"}
+
+
 def create_settings(env_file: Path | None = None) -> Settings:
     """从显式 env 文件或默认 backend/.env 创建配置。"""
 
@@ -56,5 +134,11 @@ def create_settings(env_file: Path | None = None) -> Settings:
 @lru_cache
 def get_settings() -> Settings:
     """返回进程级缓存配置对象。"""
+
+    return create_settings()
+
+
+def get_request_settings() -> Settings:
+    """返回请求期配置快照，用于允许请求边界字段不重启生效。"""
 
     return create_settings()

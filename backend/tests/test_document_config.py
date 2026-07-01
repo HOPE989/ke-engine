@@ -1,4 +1,5 @@
 import importlib.util
+import inspect
 from pathlib import Path
 
 from app.core import config
@@ -14,6 +15,11 @@ DOCUMENT_ENV_LINES = [
     "MINIO_PUBLIC_BASE_URL=https://files.example.com",
     "MINIO_SECURE=true",
     "MINERU_BASE_URL=https://mineru.example.com",
+    "MINERU_PROVIDER=official",
+    "MINERU_API_KEY=mineru-key",
+    "MINERU_MODEL_VERSION=vlm",
+    "MINERU_POLL_INTERVAL_SECONDS=2",
+    "MINERU_POLL_TIMEOUT_SECONDS=120",
     "MINERU_TIMEOUT_SECONDS=45",
     "OPENAI_API_KEY=openai-key",
     "OPENAI_BASE_URL=https://openai.example.com/v1",
@@ -38,6 +44,11 @@ def test_document_settings_load_from_backend_env_style_names(tmp_path, monkeypat
     assert settings.minio_public_base_url == "https://files.example.com"
     assert settings.minio_secure is True
     assert settings.mineru_base_url == "https://mineru.example.com"
+    assert settings.mineru_provider == "official"
+    assert settings.mineru_api_key == "mineru-key"
+    assert settings.mineru_model_version == "vlm"
+    assert settings.mineru_poll_interval_seconds == 2
+    assert settings.mineru_poll_timeout_seconds == 120
     assert settings.mineru_timeout_seconds == 45
 
 
@@ -54,6 +65,11 @@ def test_env_example_documents_document_upload_configuration_names():
         "MINIO_PUBLIC_BASE_URL",
         "MINIO_SECURE",
         "MINERU_BASE_URL",
+        "MINERU_PROVIDER",
+        "MINERU_API_KEY",
+        "MINERU_MODEL_VERSION",
+        "MINERU_POLL_INTERVAL_SECONDS",
+        "MINERU_POLL_TIMEOUT_SECONDS",
         "MINERU_TIMEOUT_SECONDS",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -65,3 +81,39 @@ def test_env_example_documents_document_upload_configuration_names():
 def test_document_upload_dependencies_are_available():
     for module_name in ["alembic", "minio", "magika", "multipart"]:
         assert importlib.util.find_spec(module_name) is not None
+
+
+def test_settings_document_startup_and_request_time_boundaries():
+    assert config.STARTUP_ONLY_SETTINGS == {
+        "database_url",
+        "minio_endpoint",
+        "minio_access_key",
+        "minio_secret_key",
+        "minio_bucket",
+        "minio_public_base_url",
+        "minio_secure",
+        "mineru_base_url",
+        "mineru_provider",
+        "mineru_api_key",
+        "mineru_model_version",
+        "mineru_poll_interval_seconds",
+        "mineru_poll_timeout_seconds",
+        "mineru_timeout_seconds",
+    }
+    assert config.REQUEST_TIME_SETTINGS == {"max_upload_size_mb"}
+
+    for field_name in config.STARTUP_ONLY_SETTINGS:
+        description = config.Settings.model_fields[field_name].description or ""
+        assert description.startswith("startup-only:")
+
+    for field_name in config.REQUEST_TIME_SETTINGS:
+        description = config.Settings.model_fields[field_name].description or ""
+        assert description.startswith("request-time:")
+
+
+def test_api_get_config_uses_request_time_settings_loader():
+    from app.api import deps
+
+    source = inspect.getsource(deps.get_config)
+
+    assert "get_request_settings()" in source

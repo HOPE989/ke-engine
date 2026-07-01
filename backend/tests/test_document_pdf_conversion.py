@@ -40,31 +40,19 @@ def make_zip(entries: dict[str, bytes | str]) -> bytes:
     return buffer.getvalue()
 
 
-class FakeMinerUResponse:
-    def __init__(self, content: bytes):
-        self.content = content
-
-    def raise_for_status(self):
-        return None
-
-
 class FakeMinerUClient:
     def __init__(self, zip_bytes: bytes):
         self.zip_bytes = zip_bytes
         self.calls = []
 
-    async def post(self, path, *, files, data):
-        self.calls.append({"path": path, "files": files, "data": data})
-        return FakeMinerUResponse(self.zip_bytes)
+    async def request_zip(self, *, filename, content):
+        self.calls.append({"filename": filename, "content": content})
+        return self.zip_bytes
 
 
 class FakeStorage:
     def __init__(self):
-        self.ensure_bucket_calls = 0
         self.uploads = []
-
-    async def ensure_bucket(self):
-        self.ensure_bucket_calls += 1
 
     async def upload_bytes(self, *, object_key, content, content_type):
         self.uploads.append(
@@ -95,7 +83,7 @@ async def configured_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncC
 
 
 def force_pdf_detection(monkeypatch):
-    def fake_detect_document_file_type(*, filename, content, magika_client):
+    def fake_detect_document_file_type(*, filename, content, upload_content_type, magika_client):
         return DocumentFileType.PDF
 
     monkeypatch.setattr(workflow, "detect_document_file_type", fake_detect_document_file_type)
@@ -145,14 +133,12 @@ def patch_router_dependencies(
     repository,
     file_detector=None,
 ):
-    app.state.document_repository = repository
-    app.state.document_storage = storage
-    app.state.document_file_detector = file_detector or object()
-
-    async def fake_get_mineru_client(request):
-        return mineru_client
-
-    monkeypatch.setattr(document_router, "get_mineru_client", fake_get_mineru_client)
+    app.state.document_runtime = SimpleNamespace(
+        repository=repository,
+        storage=storage,
+        file_detector=file_detector or object(),
+        mineru_client=mineru_client,
+    )
 
 
 @pytest.mark.asyncio
@@ -170,6 +156,7 @@ async def test_pdf_conversion_uploads_markdown_and_rewritten_images():
         safe_filename="guide.pdf",
         upload_user="alice",
         accessible_by="team-a",
+        content_type="application/pdf",
         content=b"%PDF-1.7",
         size_bytes=len(b"%PDF-1.7"),
     )
@@ -181,14 +168,7 @@ async def test_pdf_conversion_uploads_markdown_and_rewritten_images():
         mineru_client=mineru_client,
     )
 
-    assert mineru_client.calls[0]["path"] == "/file_parse"
-    assert mineru_client.calls[0]["data"]["output_format"] == "zip"
-    assert mineru_client.calls[0]["data"]["return_images"] is True
-    assert mineru_client.calls[0]["files"]["file"] == (
-        "guide.pdf",
-        b"%PDF-1.7",
-        "application/pdf",
-    )
+    assert mineru_client.calls == [{"filename": "guide.pdf", "content": b"%PDF-1.7"}]
     assert storage.uploads == [
         {
             "object_key": "documents/42/assets/page-1.png",

@@ -35,14 +35,14 @@ def assert_error_response(response, status_code: int, message: str) -> None:
 
 
 def patch_router_dependencies(app, document_router, monkeypatch):
-    app.state.document_repository = object()
-    app.state.document_storage = object()
-    app.state.document_file_detector = object()
+    from types import SimpleNamespace
 
-    async def fake_get_mineru_client(request):
-        return object()
-
-    monkeypatch.setattr(document_router, "get_mineru_client", fake_get_mineru_client)
+    app.state.document_runtime = SimpleNamespace(
+        repository=object(),
+        storage=object(),
+        file_detector=object(),
+        mineru_client=object(),
+    )
 
 
 @pytest.fixture
@@ -65,6 +65,7 @@ async def validation_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncC
             raise AssertionError("invalid requests must not reach document workflow")
 
         monkeypatch.setattr(document_router, "upload_document", fail_if_workflow_is_called)
+        patch_router_dependencies(app, document_router, monkeypatch)
     except (ImportError, AttributeError):
         pass
 
@@ -265,6 +266,7 @@ async def test_path_like_filename_is_normalized_before_workflow(
     upload = captured["upload"]
     assert upload.doc_title == "guide.md"
     assert upload.safe_filename == "guide.md"
+    assert upload.content_type == "text/markdown"
     assert ".." not in upload.safe_filename
     assert "\\" not in upload.safe_filename
     assert "/" not in upload.safe_filename

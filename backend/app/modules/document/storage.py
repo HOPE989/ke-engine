@@ -42,14 +42,6 @@ class DocumentObjectStorage:
     bucket: str
     public_base_url: str
 
-    async def ensure_bucket(self) -> None:
-        """确保目标 bucket 存在。"""
-
-        # MinIO Python SDK 是同步 API，必须放到线程池避免阻塞事件循环。
-        bucket_exists = await run_in_threadpool(self.client.bucket_exists, self.bucket)
-        if not bucket_exists:
-            await run_in_threadpool(self.client.make_bucket, self.bucket)
-
     async def upload_bytes(
         self,
         *,

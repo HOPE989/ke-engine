@@ -35,18 +35,8 @@ def test_document_storage_object_keys_and_public_urls():
 
 
 class FakeMinioClient:
-    def __init__(self, *, bucket_exists=False):
-        self._bucket_exists = bucket_exists
-        self.bucket_exists_calls = []
-        self.make_bucket_calls = []
+    def __init__(self):
         self.put_object_calls = []
-
-    def bucket_exists(self, bucket):
-        self.bucket_exists_calls.append(bucket)
-        return self._bucket_exists
-
-    def make_bucket(self, bucket):
-        self.make_bucket_calls.append(bucket)
 
     def put_object(self, bucket, object_name, data, length, content_type):
         assert isinstance(data, BytesIO)
@@ -61,34 +51,22 @@ class FakeMinioClient:
         )
 
 
-@pytest.mark.asyncio
-async def test_storage_adapter_creates_missing_bucket_through_threadpool(monkeypatch):
+def test_storage_adapter_does_not_own_bucket_lifecycle():
     storage = _storage_module()
-    client = FakeMinioClient(bucket_exists=False)
-    threadpool_calls = []
-
-    async def fake_run_in_threadpool(func, *args, **kwargs):
-        threadpool_calls.append(func.__name__)
-        return func(*args, **kwargs)
-
-    monkeypatch.setattr(storage, "run_in_threadpool", fake_run_in_threadpool)
+    client = FakeMinioClient()
     adapter = storage.DocumentObjectStorage(
         client=client,
         bucket="documents",
         public_base_url="https://files.example.com",
     )
 
-    await adapter.ensure_bucket()
-
-    assert threadpool_calls == ["bucket_exists", "make_bucket"]
-    assert client.bucket_exists_calls == ["documents"]
-    assert client.make_bucket_calls == ["documents"]
+    assert not hasattr(adapter, "ensure_bucket")
 
 
 @pytest.mark.asyncio
 async def test_storage_adapter_uploads_bytes_through_threadpool(monkeypatch):
     storage = _storage_module()
-    client = FakeMinioClient(bucket_exists=True)
+    client = FakeMinioClient()
     threadpool_calls = []
 
     async def fake_run_in_threadpool(func, *args, **kwargs):

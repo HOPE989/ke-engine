@@ -35,6 +35,7 @@ def detect_document_file_type(
     *,
     filename: str,
     content: bytes,
+    upload_content_type: str,
     magika_client: Any,
 ) -> DocumentFileType:
     """检测上传内容的业务文件类型，失败时抛出稳定领域异常。"""
@@ -46,20 +47,39 @@ def detect_document_file_type(
 
     output = getattr(result, "output", result)
     ct_label = _normalized_output_value(output, "ct_label")
-    mime_type = _normalized_output_value(output, "mime_type")
+    detected_mime_type = _normalized_output_value(output, "mime_type")
+    upload_mime_type = str(upload_content_type or "").strip().lower()
+    suffix = PurePath(filename.lower()).suffix
 
-    # 1. PDF 既接受内容标签，也接受 MIME 类型命中。
-    if ct_label == "pdf" or mime_type == "application/pdf":
+    # 1. PDF 既接受上传 MIME，也接受 Magika 内容标签或 MIME 命中。
+    if (
+        upload_mime_type == "application/pdf"
+        or ct_label == "pdf"
+        or detected_mime_type == "application/pdf"
+    ):
         return DocumentFileType.PDF
 
-    # 2. Markdown 被业务上归为 plain text，因为无需 PDF 转换。
-    if ct_label in {"markdown", "md"} or mime_type in {"text/markdown", "text/x-markdown"}:
+    # 2. Markdown MIME 被业务上归为 plain text，因为无需 PDF 转换。
+    if upload_mime_type in {"text/markdown", "text/x-markdown"}:
         return DocumentFileType.PLAIN_TEXT
 
-    # 3. 通用 text 只有在扩展名明确受支持时才放行。
-    suffix = PurePath(filename.lower()).suffix
+    # 3. 通用上传文本 MIME 需要配合明确受支持的扩展名。
     if suffix in SUPPORTED_TEXT_EXTENSIONS and (
-        ct_label in TEXT_LABELS or mime_type in TEXT_MIME_TYPES or mime_type.startswith("text/")
+        upload_mime_type in TEXT_MIME_TYPES or upload_mime_type.startswith("text/")
+    ):
+        return DocumentFileType.PLAIN_TEXT
+
+    # 4. 保留 Magika 明确文本结论的兼容路径。
+    if ct_label in {"markdown", "md"} or detected_mime_type in {
+        "text/markdown",
+        "text/x-markdown",
+    }:
+        return DocumentFileType.PLAIN_TEXT
+
+    if suffix in SUPPORTED_TEXT_EXTENSIONS and (
+        ct_label in TEXT_LABELS
+        or detected_mime_type in TEXT_MIME_TYPES
+        or detected_mime_type.startswith("text/")
     ):
         return DocumentFileType.PLAIN_TEXT
 

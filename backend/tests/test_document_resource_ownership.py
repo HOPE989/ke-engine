@@ -10,7 +10,12 @@ def _document_settings():
         minio_access_key="access-key",
         minio_secret_key="secret-key",
         minio_secure=True,
+        mineru_provider="local",
         mineru_base_url="https://mineru.example.com",
+        mineru_api_key=None,
+        mineru_model_version="vlm",
+        mineru_poll_interval_seconds=2,
+        mineru_poll_timeout_seconds=300,
         mineru_timeout_seconds=30,
     )
 
@@ -74,8 +79,7 @@ def test_magika_client_is_created_by_cached_infrastructure_accessor(monkeypatch)
     assert created_clients == [first]
 
 
-@pytest.mark.asyncio
-async def test_mineru_client_is_reused_from_app_state_and_closed(monkeypatch):
+def test_mineru_client_is_created_from_startup_settings(monkeypatch):
     from app.infrastructure import mineru as mineru_infra
 
     created_clients = []
@@ -90,22 +94,14 @@ async def test_mineru_client_is_reused_from_app_state_and_closed(monkeypatch):
         async def aclose(self):
             self.closed = True
 
-    app = SimpleNamespace(state=SimpleNamespace())
-    first_request = SimpleNamespace(app=app)
-    second_request = SimpleNamespace(app=app)
-    monkeypatch.setattr(mineru_infra, "get_settings", _document_settings)
     monkeypatch.setattr(mineru_infra.httpx, "AsyncClient", FakeAsyncClient)
 
-    first = await mineru_infra.get_mineru_client(first_request)
-    second = await mineru_infra.get_mineru_client(second_request)
-    await mineru_infra.close_mineru_client(app)
+    miner = mineru_infra.create_mineru_client(_document_settings())
 
-    assert first is second
-    assert created_clients == [first]
-    assert first.base_url == "https://mineru.example.com"
-    assert first.timeout == 30
-    assert first.closed is True
-    assert not hasattr(app.state, mineru_infra.MINERU_CLIENT_STATE_KEY)
+    assert isinstance(miner, mineru_infra.LocalMiner)
+    assert created_clients == [miner.http_client]
+    assert miner.http_client.base_url == "https://mineru.example.com"
+    assert miner.http_client.timeout == 30
 
 
 def test_upload_workflow_accepts_preowned_dependencies_without_resource_wrapper():
@@ -131,6 +127,9 @@ def test_upload_workflow_accepts_preowned_dependencies_without_resource_wrapper(
     source = inspect.getsource(workflow)
     for forbidden_constructor in ["Minio(", "Magika(", "httpx.AsyncClient("]:
         assert forbidden_constructor not in source
+    assert "from app.modules.document.mineru import" not in source
+    assert "request_mineru_zip" not in source
+    assert "mineru_client.request_zip(" in source
 
 
 def test_document_repository_owns_short_lived_sessions():
@@ -150,29 +149,27 @@ def test_document_repository_owns_short_lived_sessions():
     assert "async with self._session_factory() as session" in source
 
 
-def test_api_deps_expose_app_state_getters_without_endpoint_session_alias():
+def test_document_runtime_groups_all_document_module_runtime_resources():
+    from app.modules.document.runtime import DocumentRuntime
+
+    signature = inspect.signature(DocumentRuntime)
+
+    assert list(signature.parameters) == [
+        "repository",
+        "storage",
+        "file_detector",
+        "mineru_client",
+    ]
+
+
+def test_api_deps_avoid_redundant_document_app_state_getters():
     from app.api import deps
 
     assert not hasattr(deps, "DbSession")
-    assert hasattr(deps, "_require")
-
-    repository = object()
-    storage = object()
-    file_detector = object()
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                document_repository=repository,
-                document_storage=storage,
-                document_file_detector=file_detector,
-            )
-        )
-    )
-
-    assert deps.get_document_repository(request) is repository
-    assert deps.get_document_storage(request) is storage
-    assert deps.get_document_file_detector(request) is file_detector
-    assert deps.get_document_repository.__name__ == "get_document_repository"
+    assert not hasattr(deps, "_require")
+    assert not hasattr(deps, "get_document_repository")
+    assert not hasattr(deps, "get_document_storage")
+    assert not hasattr(deps, "get_document_file_detector")
 
 
 def test_api_deps_own_document_runtime_initialization_layer():
@@ -180,14 +177,140 @@ def test_api_deps_own_document_runtime_initialization_layer():
 
     source = inspect.getsource(deps)
     assert "def get_config()" in source
-    assert "async def document_upload_runtime" in source
+    assert "UploadLimits" not in source
+    assert "def get_document_runtime(" in source
+    assert "async def document_runtime" in source
+    assert "document_upload_runtime" not in source
     assert "init_engine(settings.database_url)" in source
     assert "DocumentRepository(get_session_factory())" in source
+    assert "DocumentRuntime(" in source
+    assert "application.state.document_runtime" in source
     assert "DocumentObjectStorage(" in source
     assert "get_minio_client()" in source
+    assert "ensure_minio_bucket(" in source
     assert "get_magika_client()" in source
-    assert "close_mineru_client(application)" in source
-    assert "close_engine()" in source
+    assert "create_mineru_client(settings)" in source
+    assert "push_async_callback(mineru_client.aclose)" in source
+    assert "push_async_callback(close_engine)" in source
+
+
+@pytest.mark.asyncio
+async def test_document_runtime_closes_engine_when_startup_fails(monkeypatch):
+    from app.api import deps
+
+    calls = []
+
+    async def fake_init_engine(database_url):
+        calls.append(("init_engine", database_url))
+
+    async def fake_close_engine():
+        calls.append(("close_engine", None))
+
+    def fake_get_session_factory():
+        return object()
+
+    class FakeDocumentRepository:
+        def __init__(self, session_factory):
+            self.session_factory = session_factory
+
+    def explode_minio_client():
+        raise RuntimeError("minio unavailable")
+
+    monkeypatch.setattr("app.db.session.init_engine", fake_init_engine)
+    monkeypatch.setattr("app.db.session.close_engine", fake_close_engine)
+    monkeypatch.setattr("app.db.session.get_session_factory", fake_get_session_factory)
+    monkeypatch.setattr(
+        "app.modules.document.repository.DocumentRepository",
+        FakeDocumentRepository,
+    )
+    monkeypatch.setattr("app.infrastructure.minio.get_minio_client", explode_minio_client)
+
+    app = SimpleNamespace(state=SimpleNamespace())
+    settings = SimpleNamespace(
+        database_url="postgresql+asyncpg://user:pass@localhost:5432/app",
+        minio_bucket="documents",
+        minio_public_base_url="https://files.example.com",
+        mineru_base_url="https://mineru.example.com",
+        mineru_timeout_seconds=30,
+    )
+
+    with pytest.raises(RuntimeError, match="minio unavailable"):
+        async with deps.document_runtime(app, settings):
+            pass
+
+    assert calls == [
+        ("init_engine", "postgresql+asyncpg://user:pass@localhost:5432/app"),
+        ("close_engine", None),
+    ]
+    assert not hasattr(app.state, "document_runtime")
+
+
+@pytest.mark.asyncio
+async def test_document_runtime_ensures_storage_bucket_before_serving(monkeypatch):
+    from app.api import deps
+
+    calls = []
+
+    async def fake_init_engine(database_url):
+        calls.append(("init_engine", database_url))
+
+    async def fake_close_engine():
+        calls.append(("close_engine", None))
+
+    def fake_get_session_factory():
+        return object()
+
+    class FakeDocumentRepository:
+        def __init__(self, session_factory):
+            self.session_factory = session_factory
+
+    class FakeMinerUClient:
+        async def aclose(self):
+            calls.append(("mineru_aclose", None))
+
+    class FakeDocumentObjectStorage:
+        def __init__(self, *, client, bucket, public_base_url):
+            calls.append(("create_storage", bucket))
+            self.client = client
+            self.bucket = bucket
+            self.public_base_url = public_base_url
+
+    async def fake_ensure_minio_bucket(client, bucket):
+        calls.append(("ensure_minio_bucket", bucket))
+
+    monkeypatch.setattr("app.db.session.init_engine", fake_init_engine)
+    monkeypatch.setattr("app.db.session.close_engine", fake_close_engine)
+    monkeypatch.setattr("app.db.session.get_session_factory", fake_get_session_factory)
+    monkeypatch.setattr(
+        "app.modules.document.repository.DocumentRepository",
+        FakeDocumentRepository,
+    )
+    minio_client = object()
+    monkeypatch.setattr("app.infrastructure.minio.get_minio_client", lambda: minio_client)
+    monkeypatch.setattr("app.infrastructure.minio.ensure_minio_bucket", fake_ensure_minio_bucket)
+    monkeypatch.setattr("app.infrastructure.magika.get_magika_client", lambda: object())
+    monkeypatch.setattr("app.infrastructure.mineru.create_mineru_client", lambda settings: FakeMinerUClient())
+    monkeypatch.setattr(
+        "app.modules.document.storage.DocumentObjectStorage",
+        FakeDocumentObjectStorage,
+    )
+
+    app = SimpleNamespace(state=SimpleNamespace())
+    settings = SimpleNamespace(
+        database_url="postgresql+asyncpg://user:pass@localhost:5432/app",
+        minio_bucket="documents",
+        minio_public_base_url="https://files.example.com",
+        mineru_base_url="https://mineru.example.com",
+        mineru_timeout_seconds=30,
+    )
+
+    async with deps.document_runtime(app, settings):
+        assert calls == [
+            ("init_engine", "postgresql+asyncpg://user:pass@localhost:5432/app"),
+            ("ensure_minio_bucket", "documents"),
+            ("create_storage", "documents"),
+        ]
+        assert app.state.document_runtime.storage.bucket == "documents"
 
 
 def test_document_router_reads_config_through_api_deps():
@@ -196,7 +319,21 @@ def test_document_router_reads_config_through_api_deps():
     source = inspect.getsource(router)
     assert "get_config" in source
     assert "Depends(get_config)" in source
+    assert "max_upload_size_mb=settings.max_upload_size_mb" in source
+    assert "UploadLimits" not in source
     assert "get_settings()" not in source
+
+
+def test_document_router_reads_document_runtime_through_api_deps():
+    from app.modules.document import router
+
+    source = inspect.getsource(router)
+    assert "Depends(get_document_runtime)" in source
+    assert "request.app.state" not in source
+    assert "document_runtime" in source
+    assert "get_document_repository" not in source
+    assert "get_document_storage" not in source
+    assert "get_document_file_detector" not in source
 
 
 def test_main_keeps_app_api_modules_layout_but_uses_lifespan_runtime():
@@ -205,8 +342,9 @@ def test_main_keeps_app_api_modules_layout_but_uses_lifespan_runtime():
     source = inspect.getsource(main)
     assert "from app.api.v1.router import api_router" in source
     assert "lifespan=" in source
-    assert "from app.api.deps import document_upload_runtime" in source
-    assert "async with document_upload_runtime(application, startup_settings)" in source
+    assert "from app.api.deps import document_runtime" in source
+    assert "async with document_runtime(application, startup_settings)" in source
+    assert "document_upload_runtime" not in source
     for implementation_detail in [
         "init_engine",
         "DocumentRepository",

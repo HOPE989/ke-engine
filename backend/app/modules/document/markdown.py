@@ -11,6 +11,7 @@ from app.modules.document.errors import DocumentConversionFailed
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 IMAGE_LINK_PATTERN = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+IMAGE_DESCRIPTION_PLACEHOLDER = "图片描述"
 
 
 def _normalized_archive_path(name: str) -> PurePosixPath:
@@ -96,6 +97,16 @@ def image_content_type(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
+def backfill_markdown_image_descriptions(markdown_text: str) -> str:
+    """回填 Markdown 图片描述。"""
+
+    def replace(match: re.Match[str]) -> str:
+        target = match.group(1).strip()
+        return f"![{IMAGE_DESCRIPTION_PLACEHOLDER}]({target})"
+
+    return IMAGE_LINK_PATTERN.sub(replace, markdown_text)
+
+
 def rewrite_markdown_image_links(markdown_text: str, image_urls: dict[str, str]) -> str:
     """将 Markdown 中的图片链接改写为 MinIO 公网 URL。"""
 
@@ -104,13 +115,13 @@ def rewrite_markdown_image_links(markdown_text: str, image_urls: dict[str, str])
 
         raw_target = match.group(1).strip()
         if "://" in raw_target:
-            return f"![图片描述]({raw_target})"
+            return f"![{IMAGE_DESCRIPTION_PLACEHOLDER}]({raw_target})"
 
         # 相对路径先按路径匹配，再按文件名兜底，以兼容 MinerU 的不同引用格式。
         normalized_target = raw_target.replace("\\", "/").lstrip("./")
         url = image_urls.get(normalized_target) or image_urls.get(Path(normalized_target).name)
         if url is None:
             raise DocumentConversionFailed()
-        return f"![图片描述]({url})"
+        return f"![{IMAGE_DESCRIPTION_PLACEHOLDER}]({url})"
 
     return IMAGE_LINK_PATTERN.sub(replace, markdown_text)

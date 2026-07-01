@@ -2,24 +2,26 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
-
-from app.api.deps import (
-    get_config,
-    get_document_file_detector,
-    get_document_repository,
-    get_document_storage,
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    UploadFile,
+    status,
 )
+
+from app.api.deps import get_config, get_document_runtime
 from app.common.response import APIResponse, success_response
 from app.core.config import Settings
 from app.core.exceptions import AppException
-from app.infrastructure.mineru import get_mineru_client
 from app.modules.document.errors import (
     DocumentConversionFailed,
     DocumentStateConflict,
     DocumentStateRollbackFailed,
     DocumentStorageFailed,
 )
+from app.modules.document.runtime import DocumentRuntime
 from app.modules.document.schemas import (
     DocumentFileTooLarge,
     DocumentMetadata,
@@ -33,11 +35,11 @@ router = APIRouter()
 
 @router.post("/upload", response_model=APIResponse[DocumentMetadata])
 async def upload_document_endpoint(
-    request: Request,
     file: Annotated[UploadFile, File()],
     upload_user: Annotated[str, Form()],
     accessible_by: Annotated[str, Form()],
     settings: Annotated[Settings, Depends(get_config)],
+    document_runtime: Annotated[DocumentRuntime, Depends(get_document_runtime)],
 ) -> APIResponse[DocumentMetadata]:
     """接收 multipart 上传请求并返回文档转换后的元数据。"""
 
@@ -58,10 +60,10 @@ async def upload_document_endpoint(
         # 2. 业务编排交给 workflow，router 只负责 HTTP 依赖和异常映射。
         metadata = await upload_document(
             upload=validated_upload,
-            document_repository=get_document_repository(request),
-            storage=get_document_storage(request),
-            file_detector=get_document_file_detector(request),
-            mineru_client=await get_mineru_client(request),
+            document_repository=document_runtime.repository,
+            storage=document_runtime.storage,
+            file_detector=document_runtime.file_detector,
+            mineru_client=document_runtime.mineru_client,
         )
     except DocumentStorageFailed as exc:
         raise AppException("document storage failed", status.HTTP_502_BAD_GATEWAY) from exc
