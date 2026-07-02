@@ -57,7 +57,7 @@ The global worker process is only a host. It should not contain document busines
 
 ```text
 backend/app/workers/kafka_worker.py
-  Starts enabled consumer runners.
+  Starts module-owned consumer runners.
 
 backend/app/modules/document/workers/conversion.py
   Owns document conversion consumer logic.
@@ -167,7 +167,7 @@ async def main():
         tg.create_task(run_document_conversion_consumer())
 ```
 
-The structure allows future runners:
+The structure allows future runners by explicitly adding their module-owned runners:
 
 ```python
 async def main():
@@ -181,6 +181,8 @@ Each runner should own its own Kafka consumer instance. Avoid one consumer subsc
 
 Deployment can still split heavy runners into separate processes or containers. The code supports shared hosting, while deployment chooses the isolation level.
 
+Topic names and consumer group names are business message contracts. They should live next to the event and worker code, not in generic application configuration. A worker corresponds to a known topic by design.
+
 ## Async and Blocking Work
 
 The worker process uses one asyncio event loop, similar to Uvicorn's concurrency model. Long-lived consumer loops are scheduled as tasks.
@@ -189,7 +191,7 @@ Rules:
 
 - Async DB and HTTP calls should stay as normal `await` operations.
 - Blocking file IO, ZIP extraction, synchronous SDK calls, or medium CPU work should run via `starlette.concurrency.run_in_threadpool` or `asyncio.to_thread`.
-- Document conversion should have a concurrency limit, such as an `asyncio.Semaphore`, so one worker process does not start unbounded PDF conversions.
+- The first document conversion worker should process messages serially in its consumer loop. If conversion parallelism is needed later, add it inside the document conversion worker deliberately.
 - If conversion becomes CPU-heavy or memory-heavy, deploy document conversion as a separate worker role.
 
 ## Offset Commit and Failure Handling
@@ -216,13 +218,16 @@ Add settings similar to:
 
 ```text
 KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:9092
-KAFKA_DOCUMENT_CONVERT_TOPIC=document.convert.requested
-KAFKA_DOCUMENT_CONVERT_GROUP_ID=ke-engine-document-converter
-KAFKA_WORKER_CONSUMERS=document_convert
-DOCUMENT_CONVERT_CONCURRENCY=1
 ```
 
-`KAFKA_WORKER_CONSUMERS` controls which runners the shared worker host starts. First implementation enables only `document_convert`.
+Keep Kafka configuration limited to infrastructure connectivity. The document conversion topic and group are code constants in the document module:
+
+```text
+DOCUMENT_CONVERT_REQUESTED_TOPIC=document.convert.requested
+DOCUMENT_CONVERT_GROUP_ID=ke-engine-document-converter
+```
+
+The worker host explicitly starts `run_document_conversion_consumer()` in the first implementation. Future workers are added by importing and starting their runners, not by configuring topic names in environment variables.
 
 ## Local Development
 
@@ -245,7 +250,7 @@ Unit tests should cover:
 - Conversion consumer commits after successful handling.
 - Conversion consumer does not commit on transient conversion failure.
 - Busy document lock is treated as a no-op success.
-- Worker host starts only configured runners.
+- Worker host starts the module-owned document conversion runner.
 
 Integration tests with a real Kafka container can be added later. The first migration should keep Kafka client calls behind small interfaces so core behavior remains unit-testable without Kafka.
 
