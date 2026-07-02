@@ -252,6 +252,45 @@ async def test_unreadable_upload_stream_returns_invalid_request_before_workflow(
 
 
 @pytest.mark.asyncio
+async def test_upload_validation_stops_reading_when_size_limit_is_exceeded():
+    from app.modules.document.schemas import (
+        DocumentFileTooLarge,
+        validate_document_upload,
+    )
+
+    class ChunkedUpload:
+        filename = "large.md"
+        content_type = "text/markdown"
+
+        def __init__(self):
+            self.chunks = [
+                b"a" * (512 * 1024),
+                b"b" * (512 * 1024),
+                b"c",
+                b"this chunk must not be read",
+            ]
+            self.read_sizes = []
+
+        async def read(self, size=-1):
+            self.read_sizes.append(size)
+            return self.chunks.pop(0)
+
+    upload = ChunkedUpload()
+
+    with pytest.raises(DocumentFileTooLarge):
+        await validate_document_upload(
+            file=upload,
+            upload_user="alice",
+            accessible_by="team-a",
+            max_upload_size_mb=1,
+        )
+
+    assert upload.chunks == [b"this chunk must not be read"]
+    assert upload.read_sizes
+    assert all(size > 0 for size in upload.read_sizes)
+
+
+@pytest.mark.asyncio
 async def test_path_like_filename_is_normalized_before_workflow(
     client_with_capturing_workflow,
 ):

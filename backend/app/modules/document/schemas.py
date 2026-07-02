@@ -21,6 +21,9 @@ class DocumentFileTooLarge(Exception):
     pass
 
 
+UPLOAD_READ_CHUNK_SIZE_BYTES = 1024 * 1024
+
+
 @dataclass(frozen=True, slots=True)
 class ValidatedDocumentUpload:
     """通过 HTTP 边界校验后的上传文件数据。"""
@@ -74,6 +77,28 @@ def safe_upload_basename(filename: str | None) -> str:
     return basename
 
 
+async def _read_upload_content_limited(
+    *,
+    file: UploadFile,
+    max_size_bytes: int,
+) -> bytes:
+    """分块读取上传内容，超过限制后立即拒绝。"""
+
+    chunks: list[bytes] = []
+    total_size = 0
+
+    while True:
+        chunk = await file.read(UPLOAD_READ_CHUNK_SIZE_BYTES)
+        if not chunk:
+            break
+        total_size += len(chunk)
+        if total_size > max_size_bytes:
+            raise DocumentFileTooLarge()
+        chunks.append(chunk)
+
+    return b"".join(chunks)
+
+
 async def validate_document_upload(
     *,
     file: UploadFile,
@@ -91,18 +116,20 @@ async def validate_document_upload(
 
     # 2. 文件名校验早于读取内容，失败时不触发后续业务流程。
     safe_filename = safe_upload_basename(file.filename)
+    max_size_bytes = max_upload_size_mb * 1024 * 1024
     try:
-        content = await file.read()
+        content = await _read_upload_content_limited(
+            file=file,
+            max_size_bytes=max_size_bytes,
+        )
+    except DocumentFileTooLarge:
+        raise
     except Exception as exc:
         raise InvalidDocumentUpload() from exc
 
     # 3. 内容大小在请求边界完成检查，workflow 只接收已验证字节。
     if not content:
         raise InvalidDocumentUpload()
-
-    max_size_bytes = max_upload_size_mb * 1024 * 1024
-    if len(content) > max_size_bytes:
-        raise DocumentFileTooLarge()
 
     return ValidatedDocumentUpload(
         doc_title=safe_filename,

@@ -270,6 +270,57 @@ async def test_conversion_dispatch_failure_still_returns_uploaded(
 
 
 @pytest.mark.asyncio
+async def test_upload_workflow_runs_file_detection_in_threadpool(monkeypatch):
+    detections = []
+    threadpool_calls = []
+
+    def fake_detect_document_file_type(*, filename, content, upload_content_type, magika_client):
+        detections.append(
+            {
+                "filename": filename,
+                "content": content,
+                "upload_content_type": upload_content_type,
+                "magika_client": magika_client,
+            }
+        )
+        return DocumentFileType.PLAIN_TEXT
+
+    async def fake_run_in_threadpool(func, *args, **kwargs):
+        threadpool_calls.append({"func": func, "args": args, "kwargs": kwargs})
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(workflow, "detect_document_file_type", fake_detect_document_file_type)
+    monkeypatch.setattr(workflow, "run_in_threadpool", fake_run_in_threadpool, raising=False)
+
+    storage = FakeStorage()
+    events = []
+    repository = _fake_repository(events)
+    id_generator = FakeIdGenerator(doc_id=45)
+    dispatcher = FakeConversionDispatcher()
+
+    await workflow.upload_document(
+        upload=SimpleNamespace(
+            doc_title="guide.md",
+            safe_filename="guide.md",
+            upload_user="alice",
+            accessible_by="team-a",
+            content_type="text/markdown",
+            content=b"# Guide",
+            size_bytes=7,
+        ),
+        document_repository=repository,
+        storage=storage,
+        file_detector=object(),
+        id_generator=id_generator,
+        conversion_dispatcher=dispatcher,
+    )
+
+    assert len(threadpool_calls) == 1
+    assert threadpool_calls[0]["func"] is fake_detect_document_file_type
+    assert detections[0]["filename"] == "guide.md"
+
+
+@pytest.mark.asyncio
 async def test_original_upload_failure_keeps_init_and_skips_conversion(
     configured_client,
     monkeypatch,

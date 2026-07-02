@@ -1,6 +1,7 @@
 """MinerU miner 工厂与官方/本地 API 调用封装。"""
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -8,6 +9,24 @@ from typing import Any
 import httpx
 
 from app.modules.document.errors import DocumentConversionFailed
+
+logger = logging.getLogger(__name__)
+
+
+def _format_context(context: dict[str, Any]) -> str:
+    parts = []
+    for key, value in context.items():
+        if value is None or value == "":
+            continue
+        parts.append(f"{key}={value!r}")
+    return ", ".join(parts)
+
+
+def _raise_conversion_failed(reason: str, **context: Any) -> None:
+    details = _format_context(context)
+    if details:
+        raise DocumentConversionFailed(f"{reason}: {details}")
+    raise DocumentConversionFailed(reason)
 
 
 def _bearer_headers(api_key: str | None) -> dict[str, str] | None:
@@ -22,10 +41,20 @@ def _require_success_payload(payload: Any) -> dict[str, Any]:
     """校验 MinerU JSON 响应 envelope 并返回 data。"""
 
     if not isinstance(payload, dict) or payload.get("code") != 0:
-        raise DocumentConversionFailed()
+        _raise_conversion_failed(
+            "MinerU API returned unsuccessful payload",
+            code=payload.get("code") if isinstance(payload, dict) else None,
+            msg=payload.get("msg") if isinstance(payload, dict) else None,
+            trace_id=payload.get("trace_id") if isinstance(payload, dict) else None,
+        )
     data = payload.get("data")
     if not isinstance(data, dict):
-        raise DocumentConversionFailed()
+        _raise_conversion_failed(
+            "MinerU API payload missing data",
+            code=payload.get("code"),
+            msg=payload.get("msg"),
+            trace_id=payload.get("trace_id"),
+        )
     return data
 
 
@@ -100,10 +129,10 @@ class OfficialMiner:
         batch_id = data.get("batch_id")
         file_urls = data.get("file_urls")
         if not isinstance(batch_id, str) or not isinstance(file_urls, list) or not file_urls:
-            raise DocumentConversionFailed()
+            _raise_conversion_failed("MinerU upload URL response is invalid", batch_id=batch_id)
         upload_url = file_urls[0]
         if not isinstance(upload_url, str) or not upload_url:
-            raise DocumentConversionFailed()
+            _raise_conversion_failed("MinerU upload URL is invalid", batch_id=batch_id)
         return batch_id, upload_url
 
     async def _upload_file(self, *, upload_url: str, content: bytes) -> None:
@@ -115,15 +144,51 @@ class OfficialMiner:
         while True:
             result = await self._get_batch_result(batch_id)
             state = result.get("state")
+            log_context = {
+                "batch_id": result.get("_batch_id"),
+                "trace_id": result.get("_trace_id"),
+                "file_name": result.get("file_name"),
+                "state": state,
+                "err_msg": result.get("err_msg"),
+            }
+            logger.info("mineru official batch result polled", extra=log_context)
             if state == "done":
                 full_zip_url = result.get("full_zip_url")
                 if isinstance(full_zip_url, str) and full_zip_url:
                     return full_zip_url
-                raise DocumentConversionFailed()
+                logger.error("mineru official task completed without zip url", extra=log_context)
+                _raise_conversion_failed(
+                    "MinerU task completed without full_zip_url",
+                    batch_id=result.get("_batch_id"),
+                    trace_id=result.get("_trace_id"),
+                    file_name=result.get("file_name"),
+                    state=state,
+                    err_msg=result.get("err_msg"),
+                )
             if state == "failed":
-                raise DocumentConversionFailed()
+                logger.error("mineru official task failed", extra=log_context)
+                _raise_conversion_failed(
+                    "MinerU task failed",
+                    batch_id=result.get("_batch_id"),
+                    trace_id=result.get("_trace_id"),
+                    file_name=result.get("file_name"),
+                    state=state,
+                    err_msg=result.get("err_msg"),
+                )
             if time.monotonic() >= deadline:
-                raise DocumentConversionFailed()
+                logger.error(
+                    "mineru official task polling timed out",
+                    extra={**log_context, "timeout_seconds": self.poll_timeout_seconds},
+                )
+                _raise_conversion_failed(
+                    "MinerU task polling timed out",
+                    batch_id=result.get("_batch_id"),
+                    trace_id=result.get("_trace_id"),
+                    file_name=result.get("file_name"),
+                    state=state,
+                    err_msg=result.get("err_msg"),
+                    timeout_seconds=self.poll_timeout_seconds,
+                )
             await asyncio.sleep(self.poll_interval_seconds)
 
     async def _get_batch_result(self, batch_id: str) -> dict[str, Any]:
@@ -132,14 +197,19 @@ class OfficialMiner:
             headers=self._auth_headers(),
         )
         response.raise_for_status()
-        data = _require_success_payload(response.json())
+        payload = response.json()
+        data = _require_success_payload(payload)
         extract_result = data.get("extract_result")
         if not isinstance(extract_result, list) or not extract_result:
-            raise DocumentConversionFailed()
+            _raise_conversion_failed("MinerU batch result is empty", batch_id=batch_id)
         first_result = extract_result[0]
         if not isinstance(first_result, dict):
-            raise DocumentConversionFailed()
-        return first_result
+            _raise_conversion_failed("MinerU batch result item is invalid", batch_id=batch_id)
+        return {
+            **first_result,
+            "_batch_id": data.get("batch_id") or batch_id,
+            "_trace_id": payload.get("trace_id"),
+        }
 
     async def _download_zip(self, full_zip_url: str) -> bytes:
         response = await self.http_client.get(full_zip_url)

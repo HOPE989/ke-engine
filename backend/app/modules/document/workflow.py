@@ -5,6 +5,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from starlette.concurrency import run_in_threadpool
+
 from app.modules.document.errors import (
     DocumentConversionFailed,
     DocumentStorageFailed,
@@ -101,7 +103,8 @@ async def upload_document(
     """处理单次文档上传，返回可持久消费的文档元数据。"""
 
     # 1. 先检测文件类型，避免不支持的内容产生数据库或对象存储副作用。
-    file_type = detect_document_file_type(
+    file_type = await run_in_threadpool(
+        detect_document_file_type,
         filename=upload.safe_filename,
         content=upload.content,
         upload_content_type=upload.content_type,

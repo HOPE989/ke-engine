@@ -246,3 +246,56 @@ async def test_official_miner_failed_task_raises_document_conversion_failed():
 
     with pytest.raises(DocumentConversionFailed):
         await miner.request_zip(filename="guide.pdf", content=b"%PDF-1.7")
+
+
+@pytest.mark.asyncio
+async def test_official_miner_failed_task_includes_upstream_context():
+    from app.infrastructure import mineru as mineru_infra
+
+    http_client = FakeHttpClient(
+        responses=[
+            FakeResponse(
+                json_data={
+                    "code": 0,
+                    "data": {
+                        "batch_id": "batch-1",
+                        "file_urls": ["https://oss.example/upload"],
+                    },
+                }
+            ),
+            FakeResponse(),
+            FakeResponse(
+                json_data={
+                    "code": 0,
+                    "msg": "ok",
+                    "trace_id": "trace-1",
+                    "data": {
+                        "batch_id": "batch-1",
+                        "extract_result": [
+                            {
+                                "file_name": "guide.pdf",
+                                "state": "failed",
+                                "err_msg": "file conversion failed",
+                            }
+                        ],
+                    },
+                }
+            ),
+        ],
+    )
+    miner = mineru_infra.OfficialMiner(
+        http_client=http_client,
+        api_key="official-token",
+        model_version="vlm",
+        poll_interval_seconds=0,
+        poll_timeout_seconds=1,
+    )
+
+    with pytest.raises(DocumentConversionFailed) as exc_info:
+        await miner.request_zip(filename="guide.pdf", content=b"%PDF-1.7")
+
+    message = str(exc_info.value)
+    assert "batch-1" in message
+    assert "trace-1" in message
+    assert "failed" in message
+    assert "file conversion failed" in message
