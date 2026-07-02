@@ -6,13 +6,15 @@ API_PORT ?= 8000
 
 .DEFAULT_GOAL := help
 
-.PHONY: help backend-sync dev dev-api dev-worker dev-infra dev-all-infra test-backend
+.PHONY: help backend-sync dev dev-api dev-worker dev-infra dev-all-infra kafka-topics-init kafka-topics-list test-backend
 
 help:
 	@echo "Available targets:"
 	@echo "  make backend-sync     Sync backend dependencies with uv"
 	@echo "  make dev-infra        Start lightweight backend infra: postgres redis minio kafka"
 	@echo "  make dev-all-infra    Start all docker compose services"
+	@echo "  make kafka-topics-init Create local Kafka topics"
+	@echo "  make kafka-topics-list List local Kafka topics"
 	@echo "  make dev-api          Start FastAPI backend on API_HOST/API_PORT"
 	@echo "  make dev-worker       Start Kafka document conversion worker"
 	@echo "  make dev              Start API and worker in parallel"
@@ -26,6 +28,12 @@ dev-infra:
 
 dev-all-infra:
 	docker compose up -d
+
+kafka-topics-init:
+	docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --create --if-not-exists --topic document.convert.requested --partitions 1 --replication-factor 1
+
+kafka-topics-list:
+	docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --list
 
 dev-api:
 	cd $(BACKEND_DIR) && $(UV) run uvicorn app.main:app --reload --host $(API_HOST) --port $(API_PORT)

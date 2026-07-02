@@ -240,6 +240,18 @@ make dev-worker
 
 `make dev-infra` should start the lightweight backend infrastructure needed for upload and conversion, including Kafka after migration.
 
+Kafka topic provisioning should stay outside application runtime. For local development, use the Kafka CLI inside the local Kafka container:
+
+```text
+make kafka-topics-init
+  docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --create --if-not-exists --topic document.convert.requested --partitions 1 --replication-factor 1
+
+make kafka-topics-list
+  docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --list
+```
+
+Department or production environments can create the same topics through their Kafka UI or deployment scripts. Workers should subscribe to code-owned topic constants and should not create topics during startup.
+
 ## Testing Strategy
 
 Unit tests should cover:
