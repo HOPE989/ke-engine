@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -194,6 +195,91 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
         ("lock_release", None),
         ("redis_close", None),
     ]
+
+
+@pytest.mark.asyncio
+async def test_document_conversion_consumer_ensures_topic_before_subscribing(monkeypatch):
+    from app.modules.document.workers import conversion
+
+    calls = []
+
+    class FakeConsumer:
+        async def subscribe(self, topics):
+            calls.append(("subscribe", topics))
+
+        async def poll(self, *, timeout):
+            calls.append(("poll", timeout))
+            raise RuntimeError("stop consumer")
+
+        async def close(self):
+            calls.append(("close", None))
+
+    def fake_ensure_kafka_topics(*, bootstrap_servers, topic_names):
+        calls.append(("ensure_topics", bootstrap_servers, topic_names))
+
+    def fake_create_kafka_consumer(*, bootstrap_servers, group_id):
+        calls.append(("create_consumer", bootstrap_servers, group_id))
+        return FakeConsumer()
+
+    monkeypatch.setattr(
+        conversion,
+        "get_settings",
+        lambda: SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"),
+    )
+    monkeypatch.setattr(conversion, "ensure_kafka_topics", fake_ensure_kafka_topics)
+    monkeypatch.setattr(conversion, "create_kafka_consumer", fake_create_kafka_consumer)
+
+    with pytest.raises(RuntimeError, match="stop consumer"):
+        await conversion.run_document_conversion_consumer()
+
+    assert calls[:3] == [
+        ("ensure_topics", "kafka.example:9092", ["document.convert.requested"]),
+        ("create_consumer", "kafka.example:9092", "ke-engine-document-converter"),
+        ("subscribe", ["document.convert.requested"]),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_document_conversion_consumer_logs_kafka_error_details(monkeypatch, caplog):
+    from app.modules.document.workers import conversion
+
+    class FakeError:
+        def __str__(self):
+            return "KafkaError{code=UNKNOWN_TOPIC_OR_PART,str=missing topic}"
+
+    class FakeMessage:
+        def error(self):
+            return FakeError()
+
+    class FakeConsumer:
+        def __init__(self):
+            self.polls = 0
+
+        async def subscribe(self, topics):
+            return None
+
+        async def poll(self, *, timeout):
+            self.polls += 1
+            if self.polls == 1:
+                return FakeMessage()
+            raise RuntimeError("stop consumer")
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(
+        conversion,
+        "get_settings",
+        lambda: SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"),
+    )
+    monkeypatch.setattr(conversion, "ensure_kafka_topics", lambda **kwargs: None)
+    monkeypatch.setattr(conversion, "create_kafka_consumer", lambda **kwargs: FakeConsumer())
+
+    with caplog.at_level(logging.WARNING, logger="app.modules.document.workers.conversion"):
+        with pytest.raises(RuntimeError, match="stop consumer"):
+            await conversion.run_document_conversion_consumer()
+
+    assert "UNKNOWN_TOPIC_OR_PART" in caplog.text
 
 
 @pytest.mark.asyncio

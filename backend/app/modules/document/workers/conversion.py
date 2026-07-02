@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from app.core.config import get_settings
-from app.infrastructure.kafka import create_kafka_consumer
+from app.infrastructure.kafka import create_kafka_consumer, ensure_kafka_topics
 from app.modules.document.events import (
     DOCUMENT_CONVERT_GROUP_ID,
     DOCUMENT_CONVERT_REQUESTED_TOPIC,
@@ -20,6 +20,10 @@ async def run_document_conversion_consumer() -> None:
     """Run the long-lived document conversion Kafka consumer loop."""
 
     settings = get_settings()
+    ensure_kafka_topics(
+        bootstrap_servers=settings.kafka_bootstrap_servers,
+        topic_names=[DOCUMENT_CONVERT_REQUESTED_TOPIC],
+    )
     consumer = create_kafka_consumer(
         bootstrap_servers=settings.kafka_bootstrap_servers,
         group_id=DOCUMENT_CONVERT_GROUP_ID,
@@ -32,7 +36,7 @@ async def run_document_conversion_consumer() -> None:
                 continue
             error = message.error()
             if error is not None:
-                logger.warning("kafka consumer error", extra={"error": str(error)})
+                logger.warning("kafka consumer error: %s", error)
                 continue
             await handle_document_conversion_message(message=message, consumer=consumer)
     finally:
