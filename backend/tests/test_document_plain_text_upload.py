@@ -65,7 +65,7 @@ class FakeConversionDispatcher:
         self.failure = failure
         self.doc_ids = []
 
-    def dispatch(self, doc_id):
+    async def dispatch(self, doc_id):
         self.doc_ids.append(doc_id)
         if self.failure is not None:
             raise self.failure

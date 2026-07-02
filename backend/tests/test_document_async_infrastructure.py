@@ -1,4 +1,3 @@
-import importlib
 from types import SimpleNamespace
 
 import pytest
@@ -22,38 +21,28 @@ def test_snowflake_id_generator_returns_monotonic_64_bit_ids(monkeypatch):
     assert first.bit_length() <= 63
 
 
-def test_conversion_dispatcher_uses_celery_apply_async(monkeypatch):
-    from app.modules.document import tasks
+@pytest.mark.asyncio
+async def test_conversion_dispatcher_produces_kafka_event():
+    from app.modules.document import dispatcher
 
     calls = []
 
-    class FakeTask:
-        def apply_async(self, *, args):
-            calls.append(args)
+    class FakeDelivery:
+        async def wait(self):
+            calls.append(("delivery_wait", None))
 
-    monkeypatch.setattr(tasks, "convert_document", FakeTask())
+    class FakeProducer:
+        async def produce(self, *, topic, key, value):
+            calls.append(("produce", topic, key, value))
+            return FakeDelivery()
 
-    tasks.CeleryDocumentConversionDispatcher().dispatch(42)
+    await dispatcher.KafkaDocumentConversionDispatcher(FakeProducer()).dispatch(42)
 
-    assert calls == [(42,)]
-
-
-def test_celery_app_uses_redis_broker_and_json_serializer(monkeypatch):
-    from app.core import config
-
-    class FakeSettings:
-        celery_broker_url = "redis://redis.example:6379/4"
-        celery_result_backend = "redis://redis.example:6379/5"
-
-    monkeypatch.setattr(config, "get_settings", lambda: FakeSettings())
-
-    module = importlib.import_module("app.infrastructure.celery")
-    module = importlib.reload(module)
-
-    assert module.celery_app.conf.broker_url == "redis://redis.example:6379/4"
-    assert module.celery_app.conf.result_backend == "redis://redis.example:6379/5"
-    assert module.celery_app.conf.task_serializer == "json"
-    assert module.celery_app.conf.accept_content == ["json"]
+    assert calls[0][0] == "produce"
+    assert calls[0][1] == "document.convert.requested"
+    assert calls[0][2] == b"42"
+    assert b'"event_type":"document.convert.requested"' in calls[0][3]
+    assert calls[1] == ("delivery_wait", None)
 
 
 class FakeRedisClient:

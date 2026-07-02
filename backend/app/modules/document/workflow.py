@@ -138,9 +138,9 @@ async def upload_document(
     await document_repository.mark_uploaded(doc_id=document.doc_id, doc_url=doc_url)
 
     try:
-        conversion_dispatcher.dispatch(document.doc_id)
+        await conversion_dispatcher.dispatch(document.doc_id)
     except Exception:
-        logger.exception("failed to dispatch document conversion task", extra={"doc_id": document.doc_id})
+        logger.exception("failed to dispatch document conversion event", extra={"doc_id": document.doc_id})
 
     return DocumentMetadata(
         doc_id=str(document.doc_id),

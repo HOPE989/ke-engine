@@ -38,12 +38,13 @@ async def document_runtime(
     """初始化并释放文档模块所需的启动期单例资源。"""
 
     from app.db.session import close_engine, get_session_factory, init_engine
+    from app.infrastructure.kafka import create_kafka_producer
     from app.infrastructure.magika import get_magika_client
     from app.infrastructure.minio import ensure_minio_bucket, get_minio_client
     from app.infrastructure.snowflake import SnowflakeIdGenerator
+    from app.modules.document.dispatcher import KafkaDocumentConversionDispatcher
     from app.modules.document.repository import DocumentRepository
     from app.modules.document.storage import DocumentObjectStorage
-    from app.modules.document.tasks import CeleryDocumentConversionDispatcher
 
     async with AsyncExitStack() as stack:
         await init_engine(settings.database_url)
@@ -63,7 +64,9 @@ async def document_runtime(
             storage=storage,
             file_detector=get_magika_client(),
             id_generator=SnowflakeIdGenerator(worker_id=settings.snowflake_worker_id),
-            conversion_dispatcher=CeleryDocumentConversionDispatcher(),
+            conversion_dispatcher=KafkaDocumentConversionDispatcher(
+                create_kafka_producer(settings.kafka_bootstrap_servers),
+            ),
         )
         stack.callback(_discard_app_state_attr, application, "document_runtime")
 

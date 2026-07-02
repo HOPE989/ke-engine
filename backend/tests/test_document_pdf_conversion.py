@@ -78,7 +78,7 @@ class FakeConversionDispatcher:
     def __init__(self):
         self.doc_ids = []
 
-    def dispatch(self, doc_id):
+    async def dispatch(self, doc_id):
         self.doc_ids.append(doc_id)
 
 
