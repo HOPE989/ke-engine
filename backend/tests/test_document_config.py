@@ -7,37 +7,43 @@ from app.core import config
 
 DOCUMENT_ENV_LINES = [
     "DATABASE_URL=postgresql+asyncpg://user:pass@db.example:5432/app",
-    "MAX_UPLOAD_SIZE_MB=25",
-    "MINIO_ENDPOINT=minio.example:9000",
     "MINIO_ACCESS_KEY=minio-access",
     "MINIO_SECRET_KEY=minio-secret",
-    "MINIO_BUCKET=documents",
-    "MINIO_PUBLIC_BASE_URL=https://files.example.com",
-    "MINIO_SECURE=true",
-    "MINERU_BASE_URL=https://mineru.example.com",
-    "MINERU_PROVIDER=official",
     "MINERU_API_KEY=mineru-key",
-    "MINERU_MODEL_VERSION=vlm",
-    "MINERU_POLL_INTERVAL_SECONDS=2",
-    "MINERU_POLL_TIMEOUT_SECONDS=120",
-    "MINERU_TIMEOUT_SECONDS=45",
-    "REDIS_URL=redis://redis.example:6379/3",
-    "KAFKA_BOOTSTRAP_SERVERS=kafka.example:9092",
-    "DOCUMENT_CONVERT_LOCK_EXPIRE_SECONDS=180",
-    "SNOWFLAKE_WORKER_ID=7",
     "OPENAI_API_KEY=openai-key",
-    "OPENAI_BASE_URL=https://openai.example.com/v1",
-    "OPENAI_MODEL=test-model",
 ]
 
 
-def test_document_settings_load_from_backend_env_style_names(tmp_path, monkeypatch):
+DOCUMENT_CONFIG_YAML = """
+max_upload_size_mb: 25
+minio_endpoint: minio.example:9000
+minio_bucket: documents
+minio_public_base_url: https://files.example.com
+minio_secure: true
+mineru_base_url: https://mineru.example.com
+mineru_provider: official
+mineru_model_version: vlm
+mineru_poll_interval_seconds: 2
+mineru_poll_timeout_seconds: 120
+mineru_timeout_seconds: 45
+redis_url: redis://redis.example:6379/3
+kafka_bootstrap_servers: kafka.example:9092
+document_convert_lock_expire_seconds: 180
+snowflake_worker_id: 7
+openai_base_url: https://openai.example.com/v1
+openai_model: test-model
+"""
+
+
+def test_document_settings_load_from_env_and_config_yaml(tmp_path, monkeypatch):
     env_file = tmp_path / "backend.env"
+    config_file = tmp_path / "config.yaml"
     env_file.write_text("\n".join(DOCUMENT_ENV_LINES), encoding="utf-8")
+    config_file.write_text(DOCUMENT_CONFIG_YAML, encoding="utf-8")
     for line in DOCUMENT_ENV_LINES:
         monkeypatch.delenv(line.split("=", 1)[0], raising=False)
 
-    settings = config.create_settings(env_file=env_file)
+    settings = config.create_settings(env_file=env_file, config_file=config_file)
 
     assert settings.database_url == "postgresql+asyncpg://user:pass@db.example:5432/app"
     assert settings.max_upload_size_mb == 25
@@ -58,23 +64,41 @@ def test_document_settings_load_from_backend_env_style_names(tmp_path, monkeypat
     assert settings.kafka_bootstrap_servers == "kafka.example:9092"
     assert settings.document_convert_lock_expire_seconds == 180
     assert settings.snowflake_worker_id == 7
+    assert settings.openai_api_key == "openai-key"
+    assert settings.openai_base_url == "https://openai.example.com/v1"
+    assert settings.openai_model == "test-model"
 
 
-def test_env_example_documents_document_upload_configuration_names():
+def test_process_environment_overrides_config_yaml(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("max_upload_size_mb: 25\n", encoding="utf-8")
+    monkeypatch.setenv("MAX_UPLOAD_SIZE_MB", "99")
+
+    settings = config.create_settings(config_file=config_file)
+
+    assert settings.max_upload_size_mb == 99
+
+
+def test_env_example_documents_user_required_and_secret_configuration_names():
     env_example = Path(config.BACKEND_DIR, ".env.example").read_text(encoding="utf-8")
 
     for name in [
         "DATABASE_URL",
-        "MAX_UPLOAD_SIZE_MB",
-        "MINIO_ENDPOINT",
         "MINIO_ACCESS_KEY",
         "MINIO_SECRET_KEY",
+        "MINERU_API_KEY",
+        "OPENAI_API_KEY",
+    ]:
+        assert f"{name}=" in env_example
+
+    for name in [
+        "MAX_UPLOAD_SIZE_MB",
+        "MINIO_ENDPOINT",
         "MINIO_BUCKET",
         "MINIO_PUBLIC_BASE_URL",
         "MINIO_SECURE",
         "MINERU_BASE_URL",
         "MINERU_PROVIDER",
-        "MINERU_API_KEY",
         "MINERU_MODEL_VERSION",
         "MINERU_POLL_INTERVAL_SECONDS",
         "MINERU_POLL_TIMEOUT_SECONDS",
@@ -83,11 +107,44 @@ def test_env_example_documents_document_upload_configuration_names():
         "KAFKA_BOOTSTRAP_SERVERS",
         "DOCUMENT_CONVERT_LOCK_EXPIRE_SECONDS",
         "SNOWFLAKE_WORKER_ID",
-        "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
         "OPENAI_MODEL",
     ]:
-        assert f"{name}=" in env_example
+        assert f"{name}=" not in env_example
+
+
+def test_config_yaml_documents_non_secret_runtime_defaults():
+    config_yaml = Path(config.BACKEND_DIR, "config.yaml").read_text(encoding="utf-8")
+
+    for name in [
+        "max_upload_size_mb",
+        "minio_endpoint",
+        "minio_bucket",
+        "minio_public_base_url",
+        "minio_secure",
+        "mineru_base_url",
+        "mineru_provider",
+        "mineru_model_version",
+        "mineru_poll_interval_seconds",
+        "mineru_poll_timeout_seconds",
+        "mineru_timeout_seconds",
+        "redis_url",
+        "kafka_bootstrap_servers",
+        "document_convert_lock_expire_seconds",
+        "snowflake_worker_id",
+        "openai_base_url",
+        "openai_model",
+    ]:
+        assert f"{name}:" in config_yaml
+
+    for name in [
+        "database_url",
+        "minio_access_key",
+        "minio_secret_key",
+        "mineru_api_key",
+        "openai_api_key",
+    ]:
+        assert f"{name}:" not in config_yaml
 
 
 def test_document_upload_dependencies_are_available():

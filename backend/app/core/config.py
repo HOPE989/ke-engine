@@ -1,16 +1,24 @@
 """应用配置加载。
 
-配置优先从环境变量读取，也可从 backend/.env 加载本地开发默认值。
+配置优先从环境变量读取，其次从 backend/.env 加载用户必须配置的值，
+再从 backend/config.yaml 加载非敏感运行默认值。
 """
 
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings.sources import YamlConfigSettingsSource
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_ENV_FILE = BACKEND_DIR / ".env"
+DEFAULT_CONFIG_FILE = BACKEND_DIR / "config.yaml"
+_CONFIG_FILE_OVERRIDE: ContextVar[Path | None] = ContextVar(
+    "CONFIG_FILE_OVERRIDE",
+    default=None,
+)
 
 
 class Settings(BaseSettings):
@@ -123,7 +131,26 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="KE_ENGINE_",
         extra="ignore",
+        populate_by_name=True,
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        config_file = _CONFIG_FILE_OVERRIDE.get() or DEFAULT_CONFIG_FILE
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            YamlConfigSettingsSource(settings_cls, yaml_file=config_file),
+            file_secret_settings,
+        )
 
 
 STARTUP_ONLY_SETTINGS = {
@@ -149,10 +176,17 @@ STARTUP_ONLY_SETTINGS = {
 REQUEST_TIME_SETTINGS = {"max_upload_size_mb"}
 
 
-def create_settings(env_file: Path | None = None) -> Settings:
-    """从显式 env 文件或默认 backend/.env 创建配置。"""
+def create_settings(
+    env_file: Path | None = None,
+    config_file: Path | None = None,
+) -> Settings:
+    """从 env 文件和 YAML 配置文件创建配置。"""
 
-    return Settings(_env_file=env_file or DEFAULT_ENV_FILE)
+    token = _CONFIG_FILE_OVERRIDE.set(config_file or DEFAULT_CONFIG_FILE)
+    try:
+        return Settings(_env_file=env_file or DEFAULT_ENV_FILE)
+    finally:
+        _CONFIG_FILE_OVERRIDE.reset(token)
 
 
 @lru_cache
