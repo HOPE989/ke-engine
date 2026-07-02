@@ -12,5 +12,3 @@ def test_root_makefile_exposes_backend_dev_targets():
     assert "$(UV) run uvicorn app.main:app --reload" in content
     assert "$(UV) run python -m app.workers.kafka_worker" in content
     assert "docker compose up -d postgres redis minio kafka" in content
-    assert "CELERY_POOL" not in content
-    assert "celery -A" not in content

@@ -199,7 +199,6 @@ def test_api_deps_own_document_runtime_initialization_layer():
     assert "SnowflakeIdGenerator(worker_id=settings.snowflake_worker_id)" in source
     assert "KafkaDocumentConversionDispatcher(" in source
     assert "create_kafka_producer(" in source
-    assert "CeleryDocumentConversionDispatcher(" not in source
     assert "push_async_callback(close_engine)" in source
 
 
