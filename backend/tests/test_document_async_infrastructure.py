@@ -198,7 +198,7 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_document_conversion_consumer_ensures_topic_before_subscribing(monkeypatch):
+async def test_document_conversion_consumer_subscribes_without_managing_topics(monkeypatch):
     from app.modules.document.workers import conversion
 
     calls = []
@@ -214,9 +214,6 @@ async def test_document_conversion_consumer_ensures_topic_before_subscribing(mon
         async def close(self):
             calls.append(("close", None))
 
-    async def fake_ensure_kafka_topics_async(*, bootstrap_servers, topic_names):
-        calls.append(("ensure_topics", bootstrap_servers, topic_names))
-
     def fake_create_kafka_consumer(*, bootstrap_servers, group_id):
         calls.append(("create_consumer", bootstrap_servers, group_id))
         return FakeConsumer()
@@ -226,16 +223,15 @@ async def test_document_conversion_consumer_ensures_topic_before_subscribing(mon
         "get_settings",
         lambda: SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"),
     )
-    monkeypatch.setattr(conversion, "ensure_kafka_topics_async", fake_ensure_kafka_topics_async)
     monkeypatch.setattr(conversion, "create_kafka_consumer", fake_create_kafka_consumer)
 
     with pytest.raises(RuntimeError, match="stop consumer"):
         await conversion.run_document_conversion_consumer()
 
     assert calls[:3] == [
-        ("ensure_topics", "kafka.example:9092", ["document.convert.requested"]),
         ("create_consumer", "kafka.example:9092", "ke-engine-document-converter"),
         ("subscribe", ["document.convert.requested"]),
+        ("poll", 1.0),
     ]
 
 
@@ -272,10 +268,6 @@ async def test_document_conversion_consumer_logs_kafka_error_details(monkeypatch
         "get_settings",
         lambda: SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"),
     )
-    async def fake_ensure_kafka_topics_async(**kwargs):
-        return None
-
-    monkeypatch.setattr(conversion, "ensure_kafka_topics_async", fake_ensure_kafka_topics_async)
     monkeypatch.setattr(conversion, "create_kafka_consumer", lambda **kwargs: FakeConsumer())
 
     with caplog.at_level(logging.WARNING, logger="app.modules.document.workers.conversion"):
