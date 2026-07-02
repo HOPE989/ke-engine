@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_create_kafka_producer_uses_bootstrap_servers(monkeypatch):
     from app.infrastructure import kafka
 
@@ -79,6 +82,35 @@ def test_ensure_kafka_topics_creates_missing_topics(monkeypatch):
         ("document.convert.requested", 1, 1)
     ]
 
+
+@pytest.mark.asyncio
+async def test_ensure_kafka_topics_async_runs_sync_helper_in_thread(monkeypatch):
+    from app.infrastructure import kafka
+
+    calls = []
+
+    async def fake_to_thread(func, **kwargs):
+        calls.append((func, kwargs))
+        return "created"
+
+    monkeypatch.setattr(kafka.asyncio, "to_thread", fake_to_thread)
+
+    await kafka.ensure_kafka_topics_async(
+        bootstrap_servers="kafka.example:9092",
+        topic_names=["document.convert.requested"],
+    )
+
+    assert calls == [
+        (
+            kafka.ensure_kafka_topics,
+            {
+                "bootstrap_servers": "kafka.example:9092",
+                "topic_names": ["document.convert.requested"],
+                "num_partitions": 1,
+                "replication_factor": 1,
+            },
+        )
+    ]
 
 def test_ensure_kafka_topics_keeps_admin_client_alive_until_futures_complete(monkeypatch):
     from app.infrastructure import kafka

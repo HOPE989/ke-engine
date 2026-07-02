@@ -1,5 +1,6 @@
 """Kafka client factories."""
 
+import asyncio
 from collections.abc import Iterable
 
 from confluent_kafka import KafkaError, KafkaException
@@ -56,3 +57,21 @@ def ensure_kafka_topics(
             if getattr(error, "code", lambda: None)() == KafkaError.TOPIC_ALREADY_EXISTS:
                 continue
             raise
+
+
+async def ensure_kafka_topics_async(
+    *,
+    bootstrap_servers: str,
+    topic_names: Iterable[str],
+    num_partitions: int = 1,
+    replication_factor: int = 1,
+) -> None:
+    """Create Kafka topics without blocking the event loop."""
+
+    await asyncio.to_thread(
+        ensure_kafka_topics,
+        bootstrap_servers=bootstrap_servers,
+        topic_names=topic_names,
+        num_partitions=num_partitions,
+        replication_factor=replication_factor,
+    )
