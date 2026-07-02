@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+from app.core.logging import configure_logging
 from app.modules.document.workers.conversion import run_document_conversion_consumer
 
 
@@ -15,6 +16,7 @@ async def start_worker_consumers() -> None:
 
 
 async def main() -> None:
+    configure_logging()
     await start_worker_consumers()
 
 

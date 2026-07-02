@@ -23,4 +23,5 @@ class KafkaDocumentConversionDispatcher:
             key=event.doc_id.encode(),
             value=event.to_json().encode(),
         )
-        await delivery.wait()
+        await self._producer.flush()
+        await delivery

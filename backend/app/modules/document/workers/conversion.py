@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from app.core.config import get_settings
@@ -25,6 +26,11 @@ async def run_document_conversion_consumer() -> None:
         group_id=DOCUMENT_CONVERT_GROUP_ID,
     )
     await consumer.subscribe([DOCUMENT_CONVERT_REQUESTED_TOPIC])
+    logger.info(
+        "document conversion kafka consumer subscribed topic=%s group_id=%s",
+        DOCUMENT_CONVERT_REQUESTED_TOPIC,
+        DOCUMENT_CONVERT_GROUP_ID,
+    )
     try:
         while True:
             message = await consumer.poll(timeout=1.0)
@@ -43,8 +49,26 @@ async def handle_document_conversion_message(*, message: Any, consumer: Any) -> 
     """Handle and commit one document conversion Kafka message."""
 
     event = DocumentConvertRequested.from_json(message.value())
-    await run_document_conversion(doc_id=event.doc_id_int())
-    await consumer.commit(message=message)
+    doc_id = event.doc_id_int()
+    started_at = time.perf_counter()
+    logger.info("processing document conversion message doc_id=%s", doc_id)
+    try:
+        await run_document_conversion(doc_id=doc_id)
+        await consumer.commit(message=message)
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        logger.exception(
+            "failed to handle document conversion message doc_id=%s elapsed_ms=%.2f",
+            doc_id,
+            elapsed_ms,
+        )
+        raise
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    logger.info(
+        "committed document conversion message doc_id=%s elapsed_ms=%.2f",
+        doc_id,
+        elapsed_ms,
+    )
 
 
 async def run_document_conversion(doc_id: int) -> None:

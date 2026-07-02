@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from types import SimpleNamespace
 
@@ -28,22 +29,27 @@ async def test_conversion_dispatcher_produces_kafka_event():
 
     calls = []
 
-    class FakeDelivery:
-        async def wait(self):
-            calls.append(("delivery_wait", None))
-
     class FakeProducer:
+        def __init__(self):
+            self.delivery = None
+
         async def produce(self, *, topic, key, value):
             calls.append(("produce", topic, key, value))
-            return FakeDelivery()
+            delivery = asyncio.Future()
+            self.delivery = delivery
+            return delivery
 
-    await dispatcher.KafkaDocumentConversionDispatcher(FakeProducer()).dispatch(42)
+        async def flush(self):
+            calls.append(("flush", None))
+            self.delivery.set_result(SimpleNamespace(topic="document.convert.requested"))
+
+    await asyncio.wait_for(dispatcher.KafkaDocumentConversionDispatcher(FakeProducer()).dispatch(42), timeout=0.1)
 
     assert calls[0][0] == "produce"
     assert calls[0][1] == "document.convert.requested"
     assert calls[0][2] == b"42"
     assert b'"event_type":"document.convert.requested"' in calls[0][3]
-    assert calls[1] == ("delivery_wait", None)
+    assert calls[1] == ("flush", None)
 
 
 class FakeRedisClient:
@@ -198,7 +204,7 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_document_conversion_consumer_subscribes_without_managing_topics(monkeypatch):
+async def test_document_conversion_consumer_subscribes_without_managing_topics(monkeypatch, caplog):
     from app.modules.document.workers import conversion
 
     calls = []
@@ -225,14 +231,19 @@ async def test_document_conversion_consumer_subscribes_without_managing_topics(m
     )
     monkeypatch.setattr(conversion, "create_kafka_consumer", fake_create_kafka_consumer)
 
-    with pytest.raises(RuntimeError, match="stop consumer"):
-        await conversion.run_document_conversion_consumer()
+    with caplog.at_level(logging.INFO, logger="app.modules.document.workers.conversion"):
+        with pytest.raises(RuntimeError, match="stop consumer"):
+            await conversion.run_document_conversion_consumer()
 
     assert calls[:3] == [
         ("create_consumer", "kafka.example:9092", "ke-engine-document-converter"),
         ("subscribe", ["document.convert.requested"]),
         ("poll", 1.0),
     ]
+    assert (
+        "document conversion kafka consumer subscribed topic=document.convert.requested "
+        "group_id=ke-engine-document-converter"
+    ) in caplog.text
 
 
 @pytest.mark.asyncio
@@ -278,7 +289,7 @@ async def test_document_conversion_consumer_logs_kafka_error_details(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_handle_document_conversion_event_commits_after_success(monkeypatch):
+async def test_handle_document_conversion_event_commits_after_success(monkeypatch, caplog):
     from app.modules.document.workers import conversion
 
     calls = []
@@ -298,15 +309,20 @@ async def test_handle_document_conversion_event_commits_after_success(monkeypatc
         calls.append(("convert", doc_id))
 
     monkeypatch.setattr(conversion, "run_document_conversion", fake_run_document_conversion)
+    monotonic_times = iter([100.0, 100.125])
+    monkeypatch.setattr(conversion.time, "perf_counter", lambda: next(monotonic_times))
 
     message = FakeMessage()
-    await conversion.handle_document_conversion_message(message=message, consumer=FakeConsumer())
+    with caplog.at_level(logging.INFO, logger="app.modules.document.workers.conversion"):
+        await conversion.handle_document_conversion_message(message=message, consumer=FakeConsumer())
 
     assert calls == [("convert", 42), ("commit", message)]
+    assert "processing document conversion message doc_id=42" in caplog.text
+    assert "committed document conversion message doc_id=42 elapsed_ms=125.00" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_handle_document_conversion_event_does_not_commit_on_conversion_failure(monkeypatch):
+async def test_handle_document_conversion_event_does_not_commit_on_conversion_failure(monkeypatch, caplog):
     from app.modules.document.workers import conversion
 
     class FakeMessage:
@@ -324,6 +340,11 @@ async def test_handle_document_conversion_event_does_not_commit_on_conversion_fa
         raise RuntimeError("conversion failed")
 
     monkeypatch.setattr(conversion, "run_document_conversion", fail_conversion)
+    monotonic_times = iter([200.0, 200.25])
+    monkeypatch.setattr(conversion.time, "perf_counter", lambda: next(monotonic_times))
 
-    with pytest.raises(RuntimeError, match="conversion failed"):
-        await conversion.handle_document_conversion_message(message=FakeMessage(), consumer=FakeConsumer())
+    with caplog.at_level(logging.ERROR, logger="app.modules.document.workers.conversion"):
+        with pytest.raises(RuntimeError, match="conversion failed"):
+            await conversion.handle_document_conversion_message(message=FakeMessage(), consumer=FakeConsumer())
+
+    assert "failed to handle document conversion message doc_id=42 elapsed_ms=250.00" in caplog.text
