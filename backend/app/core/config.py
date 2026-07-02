@@ -100,15 +100,10 @@ class Settings(BaseSettings):
         validation_alias="REDIS_URL",
         description="startup-only: Redis client is created for document conversion locks.",
     )
-    celery_broker_url: str = Field(
-        default="redis://localhost:6379/0",
-        validation_alias="CELERY_BROKER_URL",
-        description="startup-only: Celery broker is configured during process startup.",
-    )
-    celery_result_backend: str = Field(
-        default="redis://localhost:6379/1",
-        validation_alias="CELERY_RESULT_BACKEND",
-        description="startup-only: Celery result backend is configured during process startup.",
+    kafka_bootstrap_servers: str = Field(
+        default="localhost:9092",
+        validation_alias="KAFKA_BOOTSTRAP_SERVERS",
+        description="startup-only: Kafka clients are configured during process startup.",
     )
     document_convert_lock_expire_seconds: int = Field(
         default=120,
@@ -147,8 +142,7 @@ STARTUP_ONLY_SETTINGS = {
     "mineru_poll_timeout_seconds",
     "mineru_timeout_seconds",
     "redis_url",
-    "celery_broker_url",
-    "celery_result_backend",
+    "kafka_bootstrap_servers",
     "document_convert_lock_expire_seconds",
     "snowflake_worker_id",
 }

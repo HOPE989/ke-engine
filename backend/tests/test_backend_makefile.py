@@ -10,6 +10,7 @@ def test_root_makefile_exposes_backend_dev_targets():
     assert "dev-worker:" in content
     assert "dev-infra:" in content
     assert "$(UV) run uvicorn app.main:app --reload" in content
-    assert "$(UV) run celery -A $(CELERY_APP) worker -l" in content
-    assert "CELERY_POOL ?= solo" in content
-    assert "-P $(CELERY_POOL)" in content
+    assert "$(UV) run python -m app.workers.kafka_worker" in content
+    assert "docker compose up -d postgres redis minio kafka" in content
+    assert "CELERY_POOL" not in content
+    assert "celery -A" not in content

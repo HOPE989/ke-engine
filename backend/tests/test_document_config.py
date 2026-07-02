@@ -22,8 +22,7 @@ DOCUMENT_ENV_LINES = [
     "MINERU_POLL_TIMEOUT_SECONDS=120",
     "MINERU_TIMEOUT_SECONDS=45",
     "REDIS_URL=redis://redis.example:6379/3",
-    "CELERY_BROKER_URL=redis://redis.example:6379/4",
-    "CELERY_RESULT_BACKEND=redis://redis.example:6379/5",
+    "KAFKA_BOOTSTRAP_SERVERS=kafka.example:9092",
     "DOCUMENT_CONVERT_LOCK_EXPIRE_SECONDS=180",
     "SNOWFLAKE_WORKER_ID=7",
     "OPENAI_API_KEY=openai-key",
@@ -56,8 +55,7 @@ def test_document_settings_load_from_backend_env_style_names(tmp_path, monkeypat
     assert settings.mineru_poll_timeout_seconds == 120
     assert settings.mineru_timeout_seconds == 45
     assert settings.redis_url == "redis://redis.example:6379/3"
-    assert settings.celery_broker_url == "redis://redis.example:6379/4"
-    assert settings.celery_result_backend == "redis://redis.example:6379/5"
+    assert settings.kafka_bootstrap_servers == "kafka.example:9092"
     assert settings.document_convert_lock_expire_seconds == 180
     assert settings.snowflake_worker_id == 7
 
@@ -82,8 +80,7 @@ def test_env_example_documents_document_upload_configuration_names():
         "MINERU_POLL_TIMEOUT_SECONDS",
         "MINERU_TIMEOUT_SECONDS",
         "REDIS_URL",
-        "CELERY_BROKER_URL",
-        "CELERY_RESULT_BACKEND",
+        "KAFKA_BOOTSTRAP_SERVERS",
         "DOCUMENT_CONVERT_LOCK_EXPIRE_SECONDS",
         "SNOWFLAKE_WORKER_ID",
         "OPENAI_API_KEY",
@@ -94,7 +91,15 @@ def test_env_example_documents_document_upload_configuration_names():
 
 
 def test_document_upload_dependencies_are_available():
-    for module_name in ["alembic", "celery", "minio", "magika", "multipart", "redis", "redis_lock"]:
+    for module_name in [
+        "alembic",
+        "confluent_kafka",
+        "minio",
+        "magika",
+        "multipart",
+        "redis",
+        "redis_lock",
+    ]:
         assert importlib.util.find_spec(module_name) is not None
 
 
@@ -115,8 +120,7 @@ def test_settings_document_startup_and_request_time_boundaries():
         "mineru_poll_timeout_seconds",
         "mineru_timeout_seconds",
         "redis_url",
-        "celery_broker_url",
-        "celery_result_backend",
+        "kafka_bootstrap_servers",
         "document_convert_lock_expire_seconds",
         "snowflake_worker_id",
     }
