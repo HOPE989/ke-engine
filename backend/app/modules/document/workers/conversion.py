@@ -1,32 +1,54 @@
-"""文档转换 Celery 任务。"""
+"""Document conversion Kafka worker."""
 
 from __future__ import annotations
 
-import asyncio
+import logging
 from typing import Any
 
 from app.core.config import get_settings
-from app.infrastructure.celery import celery_app
+from app.infrastructure.kafka import create_kafka_consumer
+from app.modules.document.events import (
+    DOCUMENT_CONVERT_GROUP_ID,
+    DOCUMENT_CONVERT_REQUESTED_TOPIC,
+    DocumentConvertRequested,
+)
+
+logger = logging.getLogger(__name__)
 
 
-class CeleryDocumentConversionDispatcher:
-    """把文档解析任务投递给 Celery。"""
+async def run_document_conversion_consumer() -> None:
+    """Run the long-lived document conversion Kafka consumer loop."""
 
-    def dispatch(self, doc_id: int) -> None:
-        """异步投递单文档解析任务。"""
+    settings = get_settings()
+    consumer = create_kafka_consumer(
+        bootstrap_servers=settings.kafka_bootstrap_servers,
+        group_id=DOCUMENT_CONVERT_GROUP_ID,
+    )
+    await consumer.subscribe([DOCUMENT_CONVERT_REQUESTED_TOPIC])
+    try:
+        while True:
+            message = await consumer.poll(timeout=1.0)
+            if message is None:
+                continue
+            error = message.error()
+            if error is not None:
+                logger.warning("kafka consumer error", extra={"error": str(error)})
+                continue
+            await handle_document_conversion_message(message=message, consumer=consumer)
+    finally:
+        await consumer.close()
 
-        convert_document.apply_async(args=(doc_id,))
+
+async def handle_document_conversion_message(*, message: Any, consumer: Any) -> None:
+    """Handle and commit one document conversion Kafka message."""
+
+    event = DocumentConvertRequested.from_json(message.value())
+    await run_document_conversion(doc_id=event.doc_id_int())
+    await consumer.commit(message=message)
 
 
-@celery_app.task(name="document.convert")
-def convert_document(doc_id: int) -> None:
-    """Celery 入口：解析单个已上传文档。"""
-
-    asyncio.run(_run_document_conversion(doc_id=int(doc_id)))
-
-
-async def _run_document_conversion(doc_id: int) -> None:
-    """为 worker 单次任务按需创建运行时资源并执行解析。"""
+async def run_document_conversion(doc_id: int) -> None:
+    """Create per-message resources and execute document conversion."""
 
     from app.infrastructure.redis_lock import create_redis_client, document_conversion_lock
 
@@ -41,15 +63,15 @@ async def _run_document_conversion(doc_id: int) -> None:
         if not lock.acquire(blocking=False):
             return
         try:
-            await _run_locked_document_conversion(doc_id=doc_id, settings=settings)
+            await run_locked_document_conversion(doc_id=doc_id, settings=settings)
         finally:
             lock.release()
     finally:
         redis_client.close()
 
 
-async def _run_locked_document_conversion(*, doc_id: int, settings: Any) -> None:
-    """在已持有单文档锁的前提下执行文档解析。"""
+async def run_locked_document_conversion(*, doc_id: int, settings: Any) -> None:
+    """Execute document conversion while holding the per-document lock."""
 
     from app.db.session import close_engine, get_session_factory, init_engine
     from app.modules.document.processing import convert_uploaded_document
@@ -70,7 +92,7 @@ async def _run_locked_document_conversion(*, doc_id: int, settings: Any) -> None
 
 
 class _LazyDocumentStorage:
-    """只在 PDF 分支真正访问对象存储时创建 MinIO storage。"""
+    """Create MinIO storage only when a PDF path needs object storage."""
 
     def __init__(self, settings: Any) -> None:
         self._settings = settings
@@ -107,7 +129,7 @@ class _LazyDocumentStorage:
 
 
 class _LazyMinerUClient:
-    """只在 PDF 分支真正请求 MinerU 时创建 HTTP client。"""
+    """Create MinerU HTTP client only when a PDF path needs conversion."""
 
     def __init__(self, settings: Any) -> None:
         self._settings = settings

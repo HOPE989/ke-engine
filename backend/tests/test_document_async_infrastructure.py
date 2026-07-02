@@ -100,10 +100,10 @@ def _worker_settings():
 
 @pytest.mark.asyncio
 async def test_worker_skips_runtime_initialization_when_document_lock_is_busy(monkeypatch):
-    from app.modules.document import tasks
+    from app.modules.document.workers import conversion
 
     calls = []
-    monkeypatch.setattr(tasks, "get_settings", _worker_settings)
+    monkeypatch.setattr(conversion, "get_settings", _worker_settings)
     monkeypatch.setattr(
         "app.infrastructure.redis_lock.create_redis_client",
         lambda redis_url: FakeRedisClient(calls),
@@ -130,7 +130,7 @@ async def test_worker_skips_runtime_initialization_when_document_lock_is_busy(mo
         ),
     )
 
-    await tasks._run_document_conversion(doc_id=42)
+    await conversion.run_document_conversion(doc_id=42)
 
     assert calls == [
         ("lock_acquire", False),
@@ -140,10 +140,10 @@ async def test_worker_skips_runtime_initialization_when_document_lock_is_busy(mo
 
 @pytest.mark.asyncio
 async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatch):
-    from app.modules.document import tasks
+    from app.modules.document.workers import conversion
 
     calls = []
-    monkeypatch.setattr(tasks, "get_settings", _worker_settings)
+    monkeypatch.setattr(conversion, "get_settings", _worker_settings)
     monkeypatch.setattr(
         "app.infrastructure.redis_lock.create_redis_client",
         lambda redis_url: FakeRedisClient(calls),
@@ -185,7 +185,7 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
         ),
     )
 
-    await tasks._run_document_conversion(doc_id=42)
+    await conversion.run_document_conversion(doc_id=42)
 
     assert calls == [
         ("lock_acquire", False),
@@ -194,3 +194,55 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
         ("lock_release", None),
         ("redis_close", None),
     ]
+
+
+@pytest.mark.asyncio
+async def test_handle_document_conversion_event_commits_after_success(monkeypatch):
+    from app.modules.document.workers import conversion
+
+    calls = []
+
+    class FakeMessage:
+        def value(self):
+            return (
+                b'{"event_id":"event-1","event_type":"document.convert.requested",'
+                b'"doc_id":"42","occurred_at":"2026-07-02T00:00:00Z"}'
+            )
+
+    class FakeConsumer:
+        async def commit(self, message=None):
+            calls.append(("commit", message))
+
+    async def fake_run_document_conversion(doc_id):
+        calls.append(("convert", doc_id))
+
+    monkeypatch.setattr(conversion, "run_document_conversion", fake_run_document_conversion)
+
+    message = FakeMessage()
+    await conversion.handle_document_conversion_message(message=message, consumer=FakeConsumer())
+
+    assert calls == [("convert", 42), ("commit", message)]
+
+
+@pytest.mark.asyncio
+async def test_handle_document_conversion_event_does_not_commit_on_conversion_failure(monkeypatch):
+    from app.modules.document.workers import conversion
+
+    class FakeMessage:
+        def value(self):
+            return (
+                b'{"event_id":"event-1","event_type":"document.convert.requested",'
+                b'"doc_id":"42","occurred_at":"2026-07-02T00:00:00Z"}'
+            )
+
+    class FakeConsumer:
+        async def commit(self, message=None):
+            raise AssertionError("must not commit failed conversion")
+
+    async def fail_conversion(doc_id):
+        raise RuntimeError("conversion failed")
+
+    monkeypatch.setattr(conversion, "run_document_conversion", fail_conversion)
+
+    with pytest.raises(RuntimeError, match="conversion failed"):
+        await conversion.handle_document_conversion_message(message=FakeMessage(), consumer=FakeConsumer())
