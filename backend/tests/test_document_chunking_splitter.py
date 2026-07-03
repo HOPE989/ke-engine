@@ -277,3 +277,81 @@ def test_splitter_returns_zero_segments_for_empty_markdown():
         )
         == []
     )
+
+
+def _document():
+    return SimpleNamespace(
+        doc_id=42,
+        doc_title="guide.pdf",
+        converted_doc_url="https://files.example.com/documents/documents/42/converted/document.md",
+        accessible_by="team-a",
+    )
+
+
+def _segment_metadata_for_text(text):
+    from app.modules.document.chunking import (
+        MarkdownSplitChunk,
+        build_segment_drafts,
+    )
+
+    drafts = build_segment_drafts(
+        document=_document(),
+        split_chunks=[
+            MarkdownSplitChunk(
+                chunk_id="10001",
+                text=text,
+                langchain_metadata={"Header 1": "Guide"},
+                skip_embedding=False,
+                parent_chunk_id=None,
+            )
+        ],
+        id_generator=FakeIdGenerator([9001]),
+    )
+    return drafts[0].metadata
+
+
+def test_segment_metadata_records_supported_markdown_images():
+    metadata = _segment_metadata_for_text(
+        "See ![diagram](https://example.com/diagram.png) in this section."
+    )
+
+    assert metadata["images"] == [
+        {
+            "url": "https://example.com/diagram.png",
+            "alt": "diagram",
+            "source": "markdown-image",
+        }
+    ]
+
+
+def test_segment_metadata_records_empty_images_when_chunk_has_no_supported_images():
+    metadata = _segment_metadata_for_text("No images in this chunk.")
+
+    assert metadata["images"] == []
+
+
+def test_segment_metadata_derives_object_key_for_document_storage_image_url():
+    metadata = _segment_metadata_for_text(
+        "![page](https://files.example.com/documents/documents/42/assets/page-1.png)"
+    )
+
+    assert metadata["images"] == [
+        {
+            "url": "https://files.example.com/documents/documents/42/assets/page-1.png",
+            "alt": "page",
+            "source": "markdown-image",
+            "objectKey": "documents/42/assets/page-1.png",
+        }
+    ]
+
+
+def test_segment_metadata_keeps_external_image_url_without_object_key():
+    metadata = _segment_metadata_for_text("![remote](https://example.com/image.png)")
+
+    assert metadata["images"] == [
+        {
+            "url": "https://example.com/image.png",
+            "alt": "remote",
+            "source": "markdown-image",
+        }
+    ]

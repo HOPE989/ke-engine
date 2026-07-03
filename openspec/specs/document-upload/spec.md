@@ -201,12 +201,19 @@ The system SHALL treat supported Markdown and text files as already converted co
 - **AND** the system SHALL return HTTP 200 with the converted document metadata
 
 ### Requirement: PDF conversion with MinerU
-The system SHALL synchronously convert uploaded PDF files to Markdown by calling MinerU.
+The system SHALL convert uploaded PDF files to Markdown by calling MinerU and SHALL treat per-image processing as best-effort enrichment.
+
+#### Scenario: Markdown image parsing uses bounded MinerU syntax
+- **WHEN** the system parses Markdown image references during PDF conversion
+- **THEN** the system SHALL recognize inline image references shaped as `![alt](target)` and `![](target)`
+- **AND** local image targets SHALL be treated as MinerU-produced relative paths
+- **AND** absolute image targets SHALL be treated as external URLs
+- **AND** this change SHALL NOT require support for Markdown title syntax, angle-bracket destinations, escaped delimiters, nested parentheses, or user-uploaded Markdown sidecar image assets
 
 #### Scenario: PDF upload enters converting state
 - **WHEN** a PDF original file has been uploaded to MinIO
 - **THEN** the system SHALL transition the document status from `UPLOADED` to `CONVERTING`
-- **AND** the system SHALL call MinerU `POST /file_parse`
+- **AND** the system SHALL call MinerU for PDF conversion
 
 #### Scenario: MinerU ZIP is safely extracted
 - **WHEN** MinerU returns a ZIP response
@@ -224,7 +231,7 @@ The system SHALL synchronously convert uploaded PDF files to Markdown by calling
 - **WHEN** MinerU returns a ZIP response with multiple Markdown files
 - **THEN** the system SHALL select Markdown according to MinerU output conventions
 - **AND** the system SHALL prefer a Markdown file whose normalized basename matches the uploaded PDF stem
-- **AND** if no basename matches, the system SHALL prefer a Markdown file under a directory whose normalized name matches the uploaded PDF stem
+- **AND** if no basename matches, the system SHALL prefer a Markdown file under a directory whose normalized name matches the PDF stem
 - **AND** if no path matches the PDF stem, the system SHALL choose the lexicographically first normalized Markdown path
 - **AND** the system MUST NOT fail solely because multiple Markdown files exist
 
@@ -234,15 +241,49 @@ The system SHALL synchronously convert uploaded PDF files to Markdown by calling
 - **AND** the response message SHALL be `document conversion failed`
 - **AND** the document status SHALL be restored to or remain `UPLOADED`
 
-#### Scenario: PDF conversion uploads Markdown and images
-- **WHEN** MinerU returns a valid ZIP containing usable Markdown and images
-- **THEN** the system SHALL upload extracted images under `documents/{doc_id}/assets/`
-- **AND** the system SHALL upload the final Markdown under `documents/{doc_id}/converted/document.md`
+#### Scenario: PDF conversion uploads final Markdown
+- **WHEN** MinerU returns a valid ZIP containing usable Markdown
+- **THEN** the system SHALL upload the final Markdown under `documents/{doc_id}/converted/document.md`
 
-#### Scenario: Markdown image references are rewritten
-- **WHEN** MinerU Markdown contains relative image references
-- **THEN** the system SHALL rewrite those references to full MinIO URLs
-- **AND** the system SHALL fill image alt text with `图片描述` for the first version
+#### Scenario: PDF conversion uploads available images
+- **WHEN** MinerU returns a valid ZIP containing usable Markdown and images
+- **THEN** the system SHALL attempt to upload extracted images under `documents/{doc_id}/assets/`
+- **AND** failure to upload one extracted image MUST NOT fail the whole PDF conversion
+- **AND** the system SHALL continue processing the remaining Markdown and images
+
+#### Scenario: Markdown image reference is rewritten with generated description
+- **WHEN** MinerU Markdown contains a relative image reference
+- **AND** the referenced image is uploaded successfully
+- **AND** image description generation succeeds with text whose `strip()` is non-empty
+- **THEN** the system SHALL rewrite that image reference to the full MinIO URL
+- **AND** the system SHALL set that image alt text to the generated image description
+
+#### Scenario: Markdown image URL succeeds but description fails
+- **WHEN** MinerU Markdown contains a relative image reference
+- **AND** the referenced image is uploaded successfully
+- **AND** image description generation fails or returns text whose `strip()` is empty
+- **THEN** the system SHALL rewrite that image reference to the full MinIO URL
+- **AND** the system SHALL set that image alt text to `图片解析错误`
+- **AND** the document conversion MUST NOT fail because of that image description failure
+
+#### Scenario: Markdown image URL cannot be rewritten
+- **WHEN** MinerU Markdown contains a relative image reference
+- **AND** the referenced image is missing, cannot be read, or cannot be uploaded
+- **THEN** the system SHALL leave that image reference target unchanged
+- **AND** the system SHALL set that image alt text to `图片解析错误`
+- **AND** the document conversion MUST NOT fail because of that image processing failure
+
+#### Scenario: Markdown image reference already uses absolute URL
+- **WHEN** MinerU Markdown contains an image reference whose target is an absolute URL
+- **THEN** the system SHALL leave that image target unchanged
+- **AND** the system SHALL preserve the original image alt text unless local image description generation is available for that image
+- **AND** the document conversion MUST NOT fetch arbitrary external image URLs for description generation
+
+#### Scenario: PDF conversion completes successfully with image failures
+- **WHEN** main Markdown selection and final converted Markdown upload succeed
+- **AND** one or more images fail upload, URL rewrite, or description generation
+- **THEN** the system SHALL set `converted_doc_url` to the final Markdown URL
+- **AND** the system SHALL transition the document status to `CONVERTED`
 
 #### Scenario: PDF conversion completes successfully
 - **WHEN** PDF conversion and converted Markdown upload succeed
@@ -251,7 +292,7 @@ The system SHALL synchronously convert uploaded PDF files to Markdown by calling
 - **AND** the system SHALL return HTTP 200 with the converted document metadata
 
 #### Scenario: PDF conversion failure leaves uploaded original
-- **WHEN** MinerU request, ZIP extraction, Markdown rewrite, or converted object upload fails after original upload
+- **WHEN** MinerU request, ZIP extraction, Markdown selection, Markdown read, or converted object upload fails after original upload
 - **THEN** the system SHALL return HTTP 502 with `APIResponse.code` equal to `502`
 - **AND** the response message SHALL be `document conversion failed`
 - **AND** the document status SHALL be restored to or remain `UPLOADED`

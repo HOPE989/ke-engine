@@ -13,6 +13,13 @@ This change makes image handling explicit: document conversion succeeds when the
 - Add chunk-level image metadata so each persisted segment records the Markdown images it contains.
 - Keep chunking synchronous and free of model calls; it only extracts image information already present in converted Markdown.
 
+## Scope Assumptions
+
+- Image description runtime configuration is present and valid before conversion work starts; missing credentials such as `OPENAI_API_KEY` or provider construction misconfiguration are deployment setup failures, not per-image degradation cases for this change.
+- Description generation is specified at the business outcome level: success returns text whose `strip()` is non-empty; all other callable failures degrade to `图片解析错误` without enumerating provider-specific failure modes.
+- PDF-local image references come from MinerU ZIP output and use MinerU-style inline Markdown image syntax. This change does not aim to support arbitrary CommonMark image forms or user-uploaded Markdown sidecar image assets.
+- MinerU image outputs are assumed to use stable, non-conflicting relative image paths for a single conversion; handling different extracted image paths with the same basename is out of scope.
+
 ## Capabilities
 
 ### New Capabilities

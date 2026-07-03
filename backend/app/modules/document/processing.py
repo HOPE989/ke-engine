@@ -26,6 +26,7 @@ async def convert_uploaded_document(
     document_repository: Any,
     storage: Any,
     mineru_client: Any,
+    image_describer: Any | None = None,
 ) -> None:
     """把一个 UPLOADED 文档自动解析推进到 CONVERTED。"""
 
@@ -43,6 +44,7 @@ async def convert_uploaded_document(
             document=document,
             storage=storage,
             mineru_client=mineru_client,
+            image_describer=image_describer,
         )
     except DocumentConversionFailed:
         await _rollback_to_uploaded(document_repository=document_repository, doc_id=doc_id)
@@ -64,6 +66,7 @@ async def convert_document_with_lock(
     document_repository: Any,
     storage: Any,
     mineru_client: Any,
+    image_describer: Any | None = None,
     lock: Any,
 ) -> None:
     """在单文档 Redis 锁内执行解析，拿不到锁时直接跳过。"""
@@ -76,6 +79,7 @@ async def convert_document_with_lock(
             document_repository=document_repository,
             storage=storage,
             mineru_client=mineru_client,
+            image_describer=image_describer,
         )
     finally:
         lock.release()
@@ -86,6 +90,7 @@ async def _convert_document_content(
     document: Any,
     storage: Any,
     mineru_client: Any,
+    image_describer: Any | None = None,
 ) -> str:
     file_type = _file_type_value(document.file_type)
     if file_type == DocumentFileType.PLAIN_TEXT.value:
@@ -119,6 +124,7 @@ async def _convert_document_content(
         upload=upload,
         storage=storage,
         mineru_client=mineru_client,
+        image_describer=image_describer,
     )
 
 

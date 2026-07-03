@@ -15,8 +15,15 @@ The chunking flow later downloads converted Markdown, splits it by headers and l
 - Replace mock `图片描述` with model-generated image descriptions when generation succeeds.
 - Use `图片解析错误` as the visible alt text for image references whose upload, URL rewrite, or description generation fails.
 - Preserve converted Markdown preview by rewriting image URLs to MinIO URLs whenever image upload succeeds.
-- Persist chunk-level image metadata so later retrieval can build multimodal model image blocks from recalled segments.
+- Persist chunk-level image metadata by extracting image URL and alt text from converted Markdown chunks.
 - Keep chunking synchronous and deterministic: chunking extracts image metadata from converted Markdown and does not call the image description model.
+
+**Assumptions:**
+
+- Image description runtime configuration is present and valid before conversion work starts. Missing credentials such as `OPENAI_API_KEY` or provider construction misconfiguration are treated as deployment setup failures, not acceptance scenarios for this change.
+- Description generation has two business outcomes: success with text whose `strip()` is non-empty, or generic failure that produces `图片解析错误`. Provider-specific setup failures, timeout categories, and response-shape details are not separately specified.
+- MinerU output is expected to use stable relative image references and non-conflicting image paths for a single conversion.
+- User-uploaded Markdown documents do not include sidecar image assets; external image URLs in Markdown are not fetched or described.
 
 **Non-Goals:**
 
@@ -25,6 +32,8 @@ The chunking flow later downloads converted Markdown, splits it by headers and l
 - Add a retry queue for failed per-image processing.
 - Fetch or describe arbitrary external image URLs.
 - Guarantee every converted image has a real model description.
+- Implement a complete CommonMark image parser or support uncommon image syntax outside MinerU-style inline image references.
+- Resolve conflicting MinerU image outputs that contain different directories with the same image basename.
 
 ## Decisions
 
@@ -42,15 +51,15 @@ Chunking should not call the image model. It is a synchronous endpoint and shoul
 
 Alternative considered: generate descriptions during chunking. That gives direct chunk context but blocks a synchronous request and duplicates work when the same image appears in multiple chunks.
 
-### Decision 3: Use a single Markdown image rewrite path
+### Decision 3: Use a shared bounded Markdown image parser
 
-Replace the duplicate `rewrite_markdown_image_links` and `backfill_markdown_image_descriptions` behavior with one rewrite operation that handles original alt, original target, resolved URL, and generated alt text together.
+Replace the duplicate `rewrite_markdown_image_links` and `backfill_markdown_image_descriptions` parsing behavior with one shared parser for supported Markdown image references. Conversion and chunking should each consume the parsed image references for their own outputs instead of sharing one large conversion/chunk metadata helper.
 
-The rewrite operation should parse Markdown image references once per conversion. For each match:
+The conversion rewrite operation should parse Markdown image references once per conversion. For each match:
 
 1. Preserve the original target unless a MinIO URL is available.
-2. Use model-generated description when URL/image processing and description generation both succeed.
-3. Use `图片解析错误` when local image upload, URL rewrite, or description generation fails.
+2. Use model-generated description when URL/image processing and description generation both succeed with text whose `strip()` is non-empty.
+3. Use `图片解析错误` when local image upload, URL rewrite, or description generation generically fails.
 4. Leave already-absolute external URLs unchanged and preserve their original alt unless the system has a local extracted image match.
 
 Alternative considered: keep URL rewrite and alt backfill as separate passes. That preserves the current structure but repeats responsibilities and makes it harder to distinguish successful image description from fallback text.
@@ -65,11 +74,11 @@ Alternative considered: compute chunk image ownership during conversion. That wo
 
 ## Risks / Trade-offs
 
-- Model calls can slow conversion worker throughput -> make description best-effort, bounded by timeouts, and avoid failing the document on per-image errors.
+- Model calls can slow conversion worker throughput -> make description best-effort and avoid failing the document on per-image errors.
 - Per-image failures become less visible to operators if only Markdown alt changes -> log per-image failures with doc id and image target while keeping secrets and raw provider errors out of user responses.
 - `图片解析错误` may overwrite a useful original alt on model failure -> this is intentional for local extracted images because the user asked for explicit image processing failure visibility.
 - External absolute image URLs cannot be safely described without fetching arbitrary remote content -> leave their URL unchanged and keep the original alt unless a local image match exists.
-- Markdown regex parsing can miss uncommon Markdown image syntax -> centralize parsing in one helper so conversion and chunking share the same supported syntax.
+- A bounded parser will not support every CommonMark image form -> acceptable because conversion input is MinerU output, and centralizing the parser keeps conversion and chunking on the same supported syntax.
 
 ## Migration Plan
 

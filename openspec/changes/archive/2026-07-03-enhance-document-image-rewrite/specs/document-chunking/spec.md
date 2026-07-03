@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Segment metadata payload
-The system SHALL store self-contained metadata on each segment for later Elasticsearch ingestion and multimodal retrieval assembly.
+The system SHALL store self-contained metadata on each segment, including document fields, splitter metadata, and image references found in the segment text.
 
 #### Scenario: Segment metadata includes document and chunk fields
 - **WHEN** the system persists a segment
@@ -33,14 +33,14 @@ The system SHALL store self-contained metadata on each segment for later Elastic
 - **AND** the system MUST NOT flatten LangChain metadata into the top-level segment metadata payload
 
 #### Scenario: Segment image metadata is extracted from chunk Markdown
-- **WHEN** the system persists a segment whose chunk text contains Markdown image references
-- **THEN** `metadata.images` SHALL contain one entry per Markdown image reference found in that segment text
+- **WHEN** the system persists a segment whose chunk text contains supported Markdown image references
+- **THEN** `metadata.images` SHALL contain one entry per supported Markdown image reference found in that segment text
 - **AND** each image entry SHALL include `url` equal to the Markdown image target
 - **AND** each image entry SHALL include `alt` equal to the Markdown image alt text
 - **AND** each image entry SHALL include `source` equal to `markdown-image`
 
 #### Scenario: Segment without images records empty image metadata
-- **WHEN** the system persists a segment whose chunk text contains no Markdown image references
+- **WHEN** the system persists a segment whose chunk text contains no supported Markdown image references
 - **THEN** `metadata.images` SHALL be an empty list
 
 #### Scenario: Stored document image object key is derived when possible

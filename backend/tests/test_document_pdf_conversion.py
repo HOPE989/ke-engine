@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from io import BytesIO
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from zipfile import ZipFile
@@ -50,10 +51,13 @@ class FakeMinerUClient:
 
 
 class FakeStorage:
-    def __init__(self):
+    def __init__(self, *, fail_on_object_key=None):
+        self.fail_on_object_key = fail_on_object_key
         self.uploads = []
 
     async def upload_bytes(self, *, object_key, content, content_type):
+        if object_key == self.fail_on_object_key:
+            raise RuntimeError("storage failed")
         self.uploads.append(
             {
                 "object_key": object_key,
@@ -62,6 +66,25 @@ class FakeStorage:
             }
         )
         return f"https://files.example.com/documents/{object_key}"
+
+
+class FakeImageDescriber:
+    def __init__(self, result="generated page description", failure=None):
+        self.result = result
+        self.failure = failure
+        self.calls = []
+
+    async def describe_image(self, *, filename, content, content_type):
+        self.calls.append(
+            {
+                "filename": filename,
+                "content": content,
+                "content_type": content_type,
+            }
+        )
+        if self.failure is not None:
+            raise self.failure
+        return self.result
 
 
 class FakeIdGenerator:
@@ -163,6 +186,7 @@ async def test_pdf_conversion_uploads_markdown_and_rewritten_images():
     )
     mineru_client = FakeMinerUClient(zip_bytes)
     storage = FakeStorage()
+    image_describer = FakeImageDescriber("generated page description")
     upload = ValidatedDocumentUpload(
         doc_title="guide.pdf",
         safe_filename="guide.pdf",
@@ -178,6 +202,7 @@ async def test_pdf_conversion_uploads_markdown_and_rewritten_images():
         upload=upload,
         storage=storage,
         mineru_client=mineru_client,
+        image_describer=image_describer,
     )
 
     assert mineru_client.calls == [{"filename": "guide.pdf", "content": b"%PDF-1.7"}]
@@ -191,11 +216,168 @@ async def test_pdf_conversion_uploads_markdown_and_rewritten_images():
             "object_key": "documents/42/converted/document.md",
             "content": (
                 "# Guide\n\n"
-                "![图片描述](https://files.example.com/documents/documents/42/assets/page-1.png)\n"
+                "![generated page description](https://files.example.com/documents/documents/42/assets/page-1.png)\n"
             ).encode(),
             "content_type": "text/markdown",
         },
     ]
+    assert image_describer.calls == [
+        {
+            "filename": "page-1.png",
+            "content": b"image-bytes",
+            "content_type": "image/png",
+        }
+    ]
+    assert converted_url == "https://files.example.com/documents/documents/42/converted/document.md"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "image_describer",
+    [
+        pytest.param(
+            FakeImageDescriber(failure=RuntimeError("provider failed")),
+            id="generic-description-failure",
+        ),
+        pytest.param(FakeImageDescriber("   \n\t"), id="blank-description"),
+    ],
+)
+async def test_pdf_conversion_marks_description_failures_without_losing_image_url(
+    image_describer,
+    caplog,
+):
+    zip_bytes = make_zip(
+        {
+            "guide.md": "# Guide\n\n![](images/page-1.png)\n",
+            "images/page-1.png": b"image-bytes",
+        }
+    )
+    storage = FakeStorage()
+    upload = ValidatedDocumentUpload(
+        doc_title="guide.pdf",
+        safe_filename="guide.pdf",
+        upload_user="alice",
+        accessible_by="team-a",
+        content_type="application/pdf",
+        content=b"%PDF-1.7",
+        size_bytes=len(b"%PDF-1.7"),
+    )
+
+    caplog.set_level(logging.WARNING, logger="app.modules.document.workflow")
+
+    converted_url = await workflow.convert_pdf_document(
+        doc_id=42,
+        upload=upload,
+        storage=storage,
+        mineru_client=FakeMinerUClient(zip_bytes),
+        image_describer=image_describer,
+    )
+
+    assert storage.uploads[-1] == {
+        "object_key": "documents/42/converted/document.md",
+        "content": (
+            "# Guide\n\n"
+            "![图片解析错误](https://files.example.com/documents/documents/42/assets/page-1.png)\n"
+        ).encode(),
+        "content_type": "text/markdown",
+    }
+    matching_records = [
+        record
+        for record in caplog.records
+        if record.message == "document image description failed"
+    ]
+    assert len(matching_records) == 1
+    assert matching_records[0].doc_id == 42
+    assert matching_records[0].image_target == "images/page-1.png"
+    assert converted_url == "https://files.example.com/documents/documents/42/converted/document.md"
+
+
+@pytest.mark.asyncio
+async def test_pdf_conversion_marks_missing_image_without_failing_conversion(caplog):
+    zip_bytes = make_zip({"guide.md": "# Guide\n\n![](images/missing.png)\n"})
+    storage = FakeStorage()
+    image_describer = FakeImageDescriber("should not be called")
+    upload = ValidatedDocumentUpload(
+        doc_title="guide.pdf",
+        safe_filename="guide.pdf",
+        upload_user="alice",
+        accessible_by="team-a",
+        content_type="application/pdf",
+        content=b"%PDF-1.7",
+        size_bytes=len(b"%PDF-1.7"),
+    )
+
+    caplog.set_level(logging.WARNING, logger="app.modules.document.workflow")
+
+    converted_url = await workflow.convert_pdf_document(
+        doc_id=42,
+        upload=upload,
+        storage=storage,
+        mineru_client=FakeMinerUClient(zip_bytes),
+        image_describer=image_describer,
+    )
+
+    assert storage.uploads == [
+        {
+            "object_key": "documents/42/converted/document.md",
+            "content": "# Guide\n\n![图片解析错误](images/missing.png)\n".encode(),
+            "content_type": "text/markdown",
+        }
+    ]
+    matching_records = [
+        record for record in caplog.records if record.message == "document image rewrite failed"
+    ]
+    assert len(matching_records) == 1
+    assert matching_records[0].doc_id == 42
+    assert matching_records[0].image_target == "images/missing.png"
+    assert image_describer.calls == []
+    assert converted_url == "https://files.example.com/documents/documents/42/converted/document.md"
+
+
+@pytest.mark.asyncio
+async def test_pdf_conversion_marks_asset_upload_failure_without_failing_conversion(caplog):
+    zip_bytes = make_zip(
+        {
+            "guide.md": "# Guide\n\n![](images/page-1.png)\n",
+            "images/page-1.png": b"image-bytes",
+        }
+    )
+    storage = FakeStorage(fail_on_object_key="documents/42/assets/page-1.png")
+    image_describer = FakeImageDescriber("should not be called")
+    upload = ValidatedDocumentUpload(
+        doc_title="guide.pdf",
+        safe_filename="guide.pdf",
+        upload_user="alice",
+        accessible_by="team-a",
+        content_type="application/pdf",
+        content=b"%PDF-1.7",
+        size_bytes=len(b"%PDF-1.7"),
+    )
+
+    caplog.set_level(logging.WARNING, logger="app.modules.document.workflow")
+
+    converted_url = await workflow.convert_pdf_document(
+        doc_id=42,
+        upload=upload,
+        storage=storage,
+        mineru_client=FakeMinerUClient(zip_bytes),
+        image_describer=image_describer,
+    )
+
+    assert storage.uploads == [
+        {
+            "object_key": "documents/42/converted/document.md",
+            "content": "# Guide\n\n![图片解析错误](images/page-1.png)\n".encode(),
+            "content_type": "text/markdown",
+        }
+    ]
+    matching_records = [
+        record for record in caplog.records if record.message == "document image upload failed"
+    ]
+    assert len(matching_records) == 1
+    assert matching_records[0].doc_id == 42
+    assert matching_records[0].image_target == "images/page-1.png"
+    assert image_describer.calls == []
     assert converted_url == "https://files.example.com/documents/documents/42/converted/document.md"
 
 

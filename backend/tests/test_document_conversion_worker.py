@@ -98,6 +98,25 @@ class FakeMinerUClient:
         return self.zip_bytes
 
 
+class FakeImageDescriber:
+    def __init__(self, result="worker generated description", failure=None):
+        self.result = result
+        self.failure = failure
+        self.calls = []
+
+    async def describe_image(self, *, filename, content, content_type):
+        self.calls.append(
+            {
+                "filename": filename,
+                "content": content,
+                "content_type": content_type,
+            }
+        )
+        if self.failure is not None:
+            raise self.failure
+        return self.result
+
+
 class FakeLock:
     def __init__(self, *, acquired=True):
         self.acquired = acquired
@@ -180,12 +199,14 @@ async def test_worker_converts_pdf_from_original_object_and_uploads_markdown():
             }
         )
     )
+    image_describer = FakeImageDescriber("worker generated description")
 
     await convert_uploaded_document(
         doc_id=42,
         document_repository=repository,
         storage=storage,
         mineru_client=mineru_client,
+        image_describer=image_describer,
     )
 
     assert storage.download_calls == ["documents/42/original/guide.pdf"]
@@ -196,7 +217,128 @@ async def test_worker_converts_pdf_from_original_object_and_uploads_markdown():
         "converted_doc_url": "https://files.example.com/documents/documents/42/converted/document.md",
         "expected_status": DocumentStatus.CONVERTING,
     }
+    assert storage.uploads[-1] == {
+        "object_key": "documents/42/converted/document.md",
+        "content": (
+            "# Guide\n\n"
+            "![worker generated description](https://files.example.com/documents/documents/42/assets/page-1.png)\n"
+        ).encode(),
+        "content_type": "text/markdown",
+    }
+    assert image_describer.calls == [
+        {
+            "filename": "page-1.png",
+            "content": b"image-bytes",
+            "content_type": "image/png",
+        }
+    ]
     assert document.status == DocumentStatus.CONVERTED.value
+
+
+@pytest.mark.asyncio
+async def test_locked_worker_injects_image_describer(monkeypatch):
+    from app.db import session as session_module
+    from app.modules.document import processing as processing_module
+    from app.modules.document import repository as repository_module
+    from app.modules.document.workers import conversion as conversion_worker
+
+    calls = []
+
+    async def fake_init_engine(database_url):
+        calls.append({"action": "init_engine", "database_url": database_url})
+
+    async def fake_close_engine():
+        calls.append({"action": "close_engine"})
+
+    def fake_get_session_factory():
+        return "session-factory"
+
+    class FakeDocumentRepository:
+        def __init__(self, session_factory):
+            self.session_factory = session_factory
+
+    class FakeLazyStorage:
+        def __init__(self, settings):
+            self.settings = settings
+
+    class FakeLazyMinerUClient:
+        def __init__(self, settings):
+            self.settings = settings
+
+        async def aclose(self):
+            calls.append({"action": "mineru_close"})
+
+    class FakeLazyImageDescriber:
+        def __init__(self, settings):
+            self.settings = settings
+
+    async def fake_convert_uploaded_document(**kwargs):
+        calls.append({"action": "convert_uploaded_document", "kwargs": kwargs})
+
+    monkeypatch.setattr(session_module, "init_engine", fake_init_engine)
+    monkeypatch.setattr(session_module, "close_engine", fake_close_engine)
+    monkeypatch.setattr(session_module, "get_session_factory", fake_get_session_factory)
+    monkeypatch.setattr(repository_module, "DocumentRepository", FakeDocumentRepository)
+    monkeypatch.setattr(processing_module, "convert_uploaded_document", fake_convert_uploaded_document)
+    monkeypatch.setattr(conversion_worker, "_LazyDocumentStorage", FakeLazyStorage)
+    monkeypatch.setattr(conversion_worker, "_LazyMinerUClient", FakeLazyMinerUClient)
+    monkeypatch.setattr(conversion_worker, "_LazyImageDescriber", FakeLazyImageDescriber, raising=False)
+
+    settings = SimpleNamespace(database_url="postgresql://db")
+
+    await conversion_worker.run_locked_document_conversion(doc_id=42, settings=settings)
+
+    convert_call = next(call for call in calls if call["action"] == "convert_uploaded_document")
+    assert isinstance(convert_call["kwargs"]["image_describer"], FakeLazyImageDescriber)
+    assert convert_call["kwargs"]["image_describer"].settings is settings
+
+
+@pytest.mark.asyncio
+async def test_image_describer_invokes_langchain_with_human_message():
+    from langchain_core.messages import HumanMessage
+
+    from app.modules.document.workers.conversion import _LazyImageDescriber
+
+    class FakeModel:
+        def __init__(self):
+            self.messages = None
+
+        async def ainvoke(self, messages):
+            self.messages = messages
+            return SimpleNamespace(content="描述结果")
+
+    model = FakeModel()
+    describer = _LazyImageDescriber(
+        SimpleNamespace(
+            openai_api_key="test-key",
+            openai_base_url=None,
+            openai_model=None,
+        )
+    )
+    describer._model = model
+
+    result = await describer.describe_image(
+        filename="page-1.png",
+        content=b"image-bytes",
+        content_type="image/png",
+    )
+
+    assert result == "描述结果"
+    assert len(model.messages) == 1
+    message = model.messages[0]
+    assert isinstance(message, HumanMessage)
+    assert message.content == [
+        {
+            "type": "text",
+            "text": "请用一句简洁中文描述图片 page-1.png 的主要内容。",
+        },
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
+            },
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -205,7 +347,6 @@ async def test_worker_converts_pdf_from_original_object_and_uploads_markdown():
     [
         ("documents/42/original/guide.pdf", None),
         (None, RuntimeError("mineru secret-key failed")),
-        ("documents/42/assets/page-1.png", None),
         ("documents/42/converted/document.md", None),
     ],
 )
@@ -242,6 +383,49 @@ async def test_worker_rolls_back_to_uploaded_when_pdf_conversion_fails(
     assert repository.events[-1] == {"action": "rollback_to_uploaded", "doc_id": 42}
     assert document.status == DocumentStatus.UPLOADED.value
     assert document.converted_doc_url is None
+
+
+@pytest.mark.asyncio
+async def test_worker_marks_converted_when_pdf_asset_upload_fails():
+    from app.modules.document.processing import convert_uploaded_document
+
+    document = _document(file_type=DocumentFileType.PDF.value)
+    repository = FakeRepository(document)
+    storage = FakeStorage(
+        downloads={"documents/42/original/guide.pdf": b"%PDF-1.7"},
+        fail_on_object_key="documents/42/assets/page-1.png",
+    )
+    mineru_client = FakeMinerUClient(
+        zip_bytes=make_zip(
+            {
+                "guide.md": "# Guide\n\n![](images/page-1.png)\n",
+                "images/page-1.png": b"image-bytes",
+            }
+        )
+    )
+
+    await convert_uploaded_document(
+        doc_id=42,
+        document_repository=repository,
+        storage=storage,
+        mineru_client=mineru_client,
+    )
+
+    assert repository.events[-1] == {
+        "action": "mark_converted",
+        "doc_id": 42,
+        "converted_doc_url": "https://files.example.com/documents/documents/42/converted/document.md",
+        "expected_status": DocumentStatus.CONVERTING,
+    }
+    assert storage.uploads[-1] == {
+        "object_key": "documents/42/converted/document.md",
+        "content": "# Guide\n\n![图片解析错误](images/page-1.png)\n".encode(),
+        "content_type": "text/markdown",
+    }
+    assert document.status == DocumentStatus.CONVERTED.value
+    assert document.converted_doc_url == (
+        "https://files.example.com/documents/documents/42/converted/document.md"
+    )
 
 
 @pytest.mark.asyncio

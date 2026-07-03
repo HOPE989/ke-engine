@@ -25,9 +25,9 @@ from app.modules.document.chunking import (
 )
 from app.modules.document.file_types import detect_document_file_type
 from app.modules.document.markdown import (
+    IMAGE_PARSE_ERROR_DESCRIPTION,
     IMAGE_SUFFIXES,
     MARKDOWN_SUFFIXES,
-    backfill_markdown_image_descriptions,
     extract_mineru_zip,
     image_content_type,
     rewrite_markdown_image_links,
@@ -50,6 +50,7 @@ async def convert_pdf_document(
     upload: Any,
     storage: Any,
     mineru_client: Any,
+    image_describer: Any | None = None,
 ) -> str:
     """转换 PDF 文件，上传图片和最终 Markdown，并返回 Markdown URL。"""
 
@@ -71,26 +72,88 @@ async def convert_pdf_document(
                 markdown_paths,
                 Path(upload.safe_filename).stem,
             )
+            ensure_image_describer_configured = getattr(
+                image_describer,
+                "ensure_configured",
+                None,
+            )
+            if ensure_image_describer_configured is not None:
+                ensure_image_describer_configured()
 
-            # 3. 上传图片资源，并同时记录相对路径和文件名两种匹配键。
+            # 3. 先处理 ZIP 里的图片文件，生成后续 Markdown 重写需要的两张表：
+            #    - image_urls: Markdown target -> 上传后的 MinIO URL
+            #    - image_descriptions: Markdown target -> 模型生成描述或失败占位
+            #
+            # 每张图都会写入两种 key：ZIP 内相对路径和 basename。这样 MinerU Markdown
+            # 无论引用 `images/page-1.png` 还是 `page-1.png`，重写时都能找到同一结果。
             image_urls: dict[str, str] = {}
+            image_descriptions: dict[str, str] = {}
             for image_path in extracted_paths:
                 if image_path.suffix.lower() not in IMAGE_SUFFIXES:
                     continue
 
                 image_key = asset_object_key(doc_id=doc_id, image_filename=image_path.name)
-                image_url = await storage.upload_bytes(
-                    object_key=image_key,
-                    content=(root / image_path).read_bytes(),
-                    content_type=image_content_type(image_path),
-                )
+                try:
+                    image_bytes = (root / image_path).read_bytes()
+                    content_type = image_content_type(image_path)
+                    image_url = await storage.upload_bytes(
+                        object_key=image_key,
+                        content=image_bytes,
+                        content_type=content_type,
+                    )
+                except Exception:
+                    logger.warning(
+                        "document image upload failed",
+                        extra={"doc_id": doc_id, "image_target": image_path.as_posix()},
+                    )
+                    # 单张图片失败不影响主 Markdown 转换。该图片不会进入 image_urls，
+                    # rewrite_markdown_image_links 会在看到对应 Markdown 引用时保留原 target，
+                    # 并把 alt 写成 `图片解析错误`。
+                    continue
                 image_urls[image_path.as_posix()] = image_url
                 image_urls[image_path.name] = image_url
+                if image_describer is not None:
+                    try:
+                        description = await image_describer.describe_image(
+                            filename=image_path.name,
+                            content=image_bytes,
+                            content_type=content_type,
+                        )
+                        alt_text = str(description).strip()
+                        if not alt_text:
+                            logger.warning(
+                                "document image description failed",
+                                extra={
+                                    "doc_id": doc_id,
+                                    "image_target": image_path.as_posix(),
+                                },
+                            )
+                            alt_text = IMAGE_PARSE_ERROR_DESCRIPTION
+                    except Exception:
+                        logger.warning(
+                            "document image description failed",
+                            extra={"doc_id": doc_id, "image_target": image_path.as_posix()},
+                        )
+                        alt_text = IMAGE_PARSE_ERROR_DESCRIPTION
+                    # 描述结果和 URL 使用同一套 lookup key。这样 URL 能命中哪种 Markdown
+                    # target 形式，alt 文案也能按同样形式命中。
+                    image_descriptions[image_path.as_posix()] = alt_text
+                    image_descriptions[image_path.name] = alt_text
 
-            # 4. 重写 Markdown 图片链接后上传最终 Markdown。
+            # 4. 最终 Markdown 重写只依赖上面两张表：
+            #    - 外链：保留原 URL 和原 alt
+            #    - 本地图片有 URL：改成 MinIO URL，并使用描述或失败占位
+            #    - 本地图片无 URL：保留原 target，并使用失败占位
             markdown_text = (root / selected_markdown_path).read_text(encoding="utf-8")
-            rewritten_markdown = rewrite_markdown_image_links(markdown_text, image_urls)
-            rewritten_markdown = backfill_markdown_image_descriptions(rewritten_markdown)
+            rewritten_markdown = rewrite_markdown_image_links(
+                markdown_text,
+                image_urls,
+                image_descriptions=image_descriptions,
+                on_missing_image=lambda reference: logger.warning(
+                    "document image rewrite failed",
+                    extra={"doc_id": doc_id, "image_target": reference.target},
+                ),
+            )
 
             return await storage.upload_bytes(
                 object_key=converted_markdown_object_key(doc_id=doc_id),

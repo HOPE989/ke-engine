@@ -103,12 +103,14 @@ async def run_locked_document_conversion(*, doc_id: int, settings: Any) -> None:
 
     await init_engine(settings.database_url)
     mineru_client = _LazyMinerUClient(settings)
+    image_describer = _LazyImageDescriber(settings)
     try:
         await convert_uploaded_document(
             doc_id=doc_id,
             document_repository=DocumentRepository(get_session_factory()),
             storage=_LazyDocumentStorage(settings),
             mineru_client=mineru_client,
+            image_describer=image_describer,
         )
     finally:
         await mineru_client.aclose()
@@ -172,3 +174,73 @@ class _LazyMinerUClient:
     async def aclose(self) -> None:
         if self._client is not None:
             await self._client.aclose()
+
+
+class _LazyImageDescriber:
+    """Create an OpenAI vision-capable chat model for PDF image descriptions."""
+
+    def __init__(self, settings: Any) -> None:
+        self._settings = settings
+        self._model: Any | None = None
+        self._kwargs: dict[str, str] | None = None
+
+    def ensure_configured(self) -> None:
+        if self._kwargs is None:
+            self._kwargs = self._model_kwargs(self._settings)
+
+    def _model_kwargs(self, settings: Any) -> dict[str, str]:
+        api_key = _clean_value(getattr(settings, "openai_api_key", None))
+        if api_key is None:
+            raise RuntimeError("OPENAI_API_KEY is required for document image description")
+
+        kwargs: dict[str, str] = {
+            "api_key": api_key,
+            "model": "qwen3.6-flash"
+            # "model": _clean_value(getattr(settings, "openai_model", None)) or "gpt-4o-mini",
+        }
+        base_url = _clean_value(getattr(settings, "openai_base_url", None))
+        if base_url is not None:
+            kwargs["base_url"] = base_url
+        return kwargs
+
+    def _get_model(self) -> Any:
+        self.ensure_configured()
+        if self._model is None:
+            from langchain_openai import ChatOpenAI
+
+            assert self._kwargs is not None
+            self._model = ChatOpenAI(**self._kwargs)
+        return self._model
+
+    async def describe_image(self, *, filename: str, content: bytes, content_type: str) -> str:
+        import base64
+
+        from langchain_core.messages import HumanMessage
+
+        encoded = base64.b64encode(content).decode("ascii")
+        response = await self._get_model().ainvoke(
+            [
+                HumanMessage(
+                    content=[
+                        {
+                            "type": "text",
+                            "text": f"请用一句简洁中文描述图片 {filename} 的主要内容。",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{content_type};base64,{encoded}",
+                            },
+                        },
+                    ],
+                )
+            ]
+        )
+        return str(response.content)
+
+
+def _clean_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None

@@ -2,16 +2,26 @@
 
 import mimetypes
 import re
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path, PurePosixPath
+from typing import Callable
 from zipfile import BadZipFile, ZipFile
 
 from app.modules.document.errors import DocumentConversionFailed
 
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
-IMAGE_LINK_PATTERN = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
-IMAGE_DESCRIPTION_PLACEHOLDER = "图片描述"
+SUPPORTED_IMAGE_LINK_PATTERN = re.compile(r"!\[([^\]\\]*)\]\(([^()<>\s]+)\)")
+IMAGE_PARSE_ERROR_DESCRIPTION = "图片解析错误"
+
+
+@dataclass(frozen=True)
+class MarkdownImageReference:
+    alt: str
+    target: str
+    start: int
+    end: int
 
 
 def _normalized_archive_path(name: str) -> PurePosixPath:
@@ -97,31 +107,90 @@ def image_content_type(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
-def backfill_markdown_image_descriptions(markdown_text: str) -> str:
-    """回填 Markdown 图片描述。"""
+def parse_markdown_image_references(markdown_text: str) -> list[MarkdownImageReference]:
+    """解析 MinerU 风格的受限 Markdown 图片引用。
 
-    def replace(match: re.Match[str]) -> str:
-        target = match.group(1).strip()
-        return f"![{IMAGE_DESCRIPTION_PLACEHOLDER}]({target})"
+    这里故意只支持 OpenSpec 声明的简单内联图片语法：
+    `![alt](target)` 和 `![](target)`。复杂 CommonMark 形式不在本次范围内。
+    start/end 会在后续重写时用于按原文切片拼接，避免正则替换误伤非目标文本。
+    """
 
-    return IMAGE_LINK_PATTERN.sub(replace, markdown_text)
+    return [
+        MarkdownImageReference(
+            alt=match.group(1),
+            target=match.group(2),
+            start=match.start(),
+            end=match.end(),
+        )
+        for match in SUPPORTED_IMAGE_LINK_PATTERN.finditer(markdown_text)
+    ]
 
 
-def rewrite_markdown_image_links(markdown_text: str, image_urls: dict[str, str]) -> str:
-    """将 Markdown 中的图片链接改写为 MinIO 公网 URL。"""
+def _image_lookup(mapping: dict[str, str], target: str) -> str | None:
+    """用 MinerU 引用路径查找图片处理结果。
 
-    def replace(match: re.Match[str]) -> str:
-        """替换单个 Markdown 图片链接。"""
+    MinerU Markdown 可能写 `images/page-1.png`，而上传对象只用 basename
+    `page-1.png` 生成 asset key。调用方会同时写入完整相对路径和 basename，
+    这里也按同样规则兜底查找，确保两种引用都能命中同一张图片。
+    """
 
-        raw_target = match.group(1).strip()
+    normalized_target = target.replace("\\", "/").lstrip("./")
+    return mapping.get(normalized_target) or mapping.get(Path(normalized_target).name)
+
+
+def rewrite_markdown_image_links(
+    markdown_text: str,
+    image_urls: dict[str, str],
+    *,
+    image_descriptions: dict[str, str] | None = None,
+    on_missing_image: Callable[[MarkdownImageReference], None] | None = None,
+) -> str:
+    """将 Markdown 中的本地图片链接改写为 MinIO 公网 URL。
+
+    替换规则：
+    1. 外链图片保持原 target 和原 alt，不下载、不描述。
+    2. 本地图片上传成功且描述成功时，target 改为 MinIO URL，alt 改为描述文本。
+    3. 本地图片上传失败、缺失，或描述失败时，target 尽量保留可用值，
+       alt 统一写成 `图片解析错误`。
+
+    实现上不直接使用 `re.sub`，而是用 parser 返回的 start/end 分段拼接。
+    这样可以只替换受支持图片引用，其他 Markdown 内容和不支持的图片语法会原样保留。
+    """
+
+    descriptions = image_descriptions or {}
+    pieces: list[str] = []
+    previous_end = 0
+    for reference in parse_markdown_image_references(markdown_text):
+        # 先追加上一个图片引用结束到当前图片引用开始之间的原文。
+        # 这段可能包含普通 Markdown、不支持的图片语法或任意正文，必须原样保留。
+        pieces.append(markdown_text[previous_end : reference.start])
+        raw_target = reference.target.strip()
+
         if "://" in raw_target:
-            return f"![{IMAGE_DESCRIPTION_PLACEHOLDER}]({raw_target})"
+            # 绝对 URL 被视为外部图片。按需求不能抓取远端内容，也没有本地文件可描述，
+            # 因此只把当前引用按规范化后的 target/alt 拼回去。
+            pieces.append(f"![{reference.alt}]({raw_target})")
+            previous_end = reference.end
+            continue
 
-        # 相对路径先按路径匹配，再按文件名兜底，以兼容 MinerU 的不同引用格式。
-        normalized_target = raw_target.replace("\\", "/").lstrip("./")
-        url = image_urls.get(normalized_target) or image_urls.get(Path(normalized_target).name)
+        # 本地图片：先找上传后的 MinIO URL。找不到说明图片缺失、读取失败、
+        # 上传失败，或者 Markdown 引用了 ZIP 中不存在的文件。
+        url = _image_lookup(image_urls, raw_target)
         if url is None:
-            raise DocumentConversionFailed()
-        return f"![{IMAGE_DESCRIPTION_PLACEHOLDER}]({url})"
+            if on_missing_image is not None:
+                on_missing_image(reference)
+            # URL 不可用时，不能凭空生成预览地址，所以保留原始 target；
+            # 但 alt 要显式标记图片处理失败，避免继续显示旧的 mock 文案。
+            pieces.append(f"![{IMAGE_PARSE_ERROR_DESCRIPTION}]({raw_target})")
+            previous_end = reference.end
+            continue
 
-    return IMAGE_LINK_PATTERN.sub(replace, markdown_text)
+        # URL 已经可用，但描述可能失败或未返回有效文本。
+        # 这种情况下仍保留可预览的 MinIO URL，只把 alt 降级为图片解析错误。
+        alt = _image_lookup(descriptions, raw_target) or IMAGE_PARSE_ERROR_DESCRIPTION
+        pieces.append(f"![{alt}]({url})")
+        previous_end = reference.end
+
+    # 追加最后一个图片引用之后的剩余原文。
+    pieces.append(markdown_text[previous_end:])
+    return "".join(pieces)

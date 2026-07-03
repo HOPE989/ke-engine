@@ -111,19 +111,6 @@ class FakeRepository:
         ),
         pytest.param({"zip_bytes": make_zip({"images/page-1.png": b"image"})}, id="no-markdown"),
         pytest.param(
-            {"zip_bytes": make_zip({"guide.md": "# Guide\n\n![](missing.png)\n"})},
-            id="markdown-rewrite-failure",
-        ),
-        pytest.param(
-            {
-                "zip_bytes": make_zip(
-                    {"guide.md": "# Guide\n\n![](images/page-1.png)\n", "images/page-1.png": b"image"}
-                ),
-                "fail_on_object_key": "documents/42/assets/page-1.png",
-            },
-            id="converted-asset-upload-failure",
-        ),
-        pytest.param(
             {
                 "zip_bytes": make_zip(
                     {"guide.md": "# Guide\n\n![](images/page-1.png)\n", "images/page-1.png": b"image"}
@@ -155,6 +142,52 @@ async def test_pdf_conversion_failures_restore_uploaded(case):
     assert repository.document.status == DocumentStatus.UPLOADED.value
     assert repository.document.converted_doc_url is None
     assert repository.events[-1] == {"action": "rollback_to_uploaded", "doc_id": 42}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            {"zip_bytes": make_zip({"guide.md": "# Guide\n\n![](missing.png)\n"})},
+            id="missing-image",
+        ),
+        pytest.param(
+            {
+                "zip_bytes": make_zip(
+                    {"guide.md": "# Guide\n\n![](images/page-1.png)\n", "images/page-1.png": b"image"}
+                ),
+                "fail_on_object_key": "documents/42/assets/page-1.png",
+            },
+            id="asset-upload-failure",
+        ),
+    ],
+)
+async def test_pdf_conversion_image_failures_mark_converted(case):
+    from app.modules.document.processing import convert_uploaded_document
+
+    repository = FakeRepository()
+    storage = FakeStorage(fail_on_object_key=case.get("fail_on_object_key"))
+    mineru_client = FakeMinerUClient(zip_bytes=case["zip_bytes"])
+
+    await convert_uploaded_document(
+        doc_id=42,
+        document_repository=repository,
+        storage=storage,
+        mineru_client=mineru_client,
+    )
+
+    assert repository.document.status == DocumentStatus.CONVERTED.value
+    assert repository.document.converted_doc_url == (
+        "https://files.example.com/documents/documents/42/converted/document.md"
+    )
+    assert repository.events[-1] == {
+        "action": "mark_converted",
+        "doc_id": 42,
+        "converted_doc_url": "https://files.example.com/documents/documents/42/converted/document.md",
+        "expected_status": DocumentStatus.CONVERTING,
+    }
+    assert {"action": "rollback_to_uploaded", "doc_id": 42} not in repository.events
 
 
 @pytest.mark.asyncio

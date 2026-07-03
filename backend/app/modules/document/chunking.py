@@ -14,6 +14,7 @@ from app.modules.document.errors import (
     ConvertedMarkdownUnavailable,
     DocumentStateConflict,
 )
+from app.modules.document.markdown import parse_markdown_image_references
 
 HEADERS_TO_SPLIT_ON = [
     ("#", "Header 1"),
@@ -227,6 +228,10 @@ def build_segment_drafts(
             "accessibleBy": document.accessible_by,
             "parentChunkId": split_chunk.parent_chunk_id,
             "langchain": dict(split_chunk.langchain_metadata),
+            "images": _extract_markdown_images(
+                text=split_chunk.text,
+                document=document,
+            ),
         }
         drafts.append(
             SegmentDraft(
@@ -243,3 +248,56 @@ def build_segment_drafts(
         )
 
     return drafts
+
+
+def _extract_markdown_images(*, text: str, document: Any) -> list[dict[str, str]]:
+    images: list[dict[str, str]] = []
+    for reference in parse_markdown_image_references(text):
+        image = {
+            "url": reference.target,
+            "alt": reference.alt,
+            "source": "markdown-image",
+        }
+        object_key = _derive_document_image_object_key(
+            image_url=reference.target,
+            document=document,
+        )
+        if object_key is not None:
+            image["objectKey"] = object_key
+        images.append(image)
+    return images
+
+
+def _derive_document_image_object_key(*, image_url: str, document: Any) -> str | None:
+    converted_doc_url = getattr(document, "converted_doc_url", None)
+    if not converted_doc_url:
+        return None
+
+    converted = urlparse(converted_doc_url)
+    image = urlparse(image_url)
+    if image.scheme != converted.scheme or image.netloc != converted.netloc:
+        return None
+
+    doc_prefix = ["documents", str(document.doc_id)]
+    converted_parts = [part for part in unquote(converted.path).split("/") if part]
+    image_parts = [part for part in unquote(image.path).split("/") if part]
+    marker_index = _find_subsequence(converted_parts, doc_prefix)
+    if marker_index is None or marker_index == 0:
+        return None
+
+    base_and_bucket_parts = converted_parts[:marker_index]
+    if image_parts[: len(base_and_bucket_parts)] != base_and_bucket_parts:
+        return None
+
+    object_key_parts = image_parts[len(base_and_bucket_parts) :]
+    if object_key_parts[:2] != doc_prefix:
+        return None
+
+    return "/".join(object_key_parts)
+
+
+def _find_subsequence(parts: list[str], subsequence: list[str]) -> int | None:
+    for index in range(0, len(parts) - len(subsequence) + 1):
+        if parts[index : index + len(subsequence)] == subsequence:
+            return index
+    return None

@@ -3,6 +3,13 @@
 ### Requirement: PDF conversion with MinerU
 The system SHALL convert uploaded PDF files to Markdown by calling MinerU and SHALL treat per-image processing as best-effort enrichment.
 
+#### Scenario: Markdown image parsing uses bounded MinerU syntax
+- **WHEN** the system parses Markdown image references during PDF conversion
+- **THEN** the system SHALL recognize inline image references shaped as `![alt](target)` and `![](target)`
+- **AND** local image targets SHALL be treated as MinerU-produced relative paths
+- **AND** absolute image targets SHALL be treated as external URLs
+- **AND** this change SHALL NOT require support for Markdown title syntax, angle-bracket destinations, escaped delimiters, nested parentheses, or user-uploaded Markdown sidecar image assets
+
 #### Scenario: PDF upload enters converting state
 - **WHEN** a PDF original file has been uploaded to MinIO
 - **THEN** the system SHALL transition the document status from `UPLOADED` to `CONVERTING`
@@ -47,14 +54,14 @@ The system SHALL convert uploaded PDF files to Markdown by calling MinerU and SH
 #### Scenario: Markdown image reference is rewritten with generated description
 - **WHEN** MinerU Markdown contains a relative image reference
 - **AND** the referenced image is uploaded successfully
-- **AND** image description generation succeeds with non-empty text
+- **AND** image description generation succeeds with text whose `strip()` is non-empty
 - **THEN** the system SHALL rewrite that image reference to the full MinIO URL
 - **AND** the system SHALL set that image alt text to the generated image description
 
 #### Scenario: Markdown image URL succeeds but description fails
 - **WHEN** MinerU Markdown contains a relative image reference
 - **AND** the referenced image is uploaded successfully
-- **AND** image description generation fails or returns empty text
+- **AND** image description generation fails or returns text whose `strip()` is empty
 - **THEN** the system SHALL rewrite that image reference to the full MinIO URL
 - **AND** the system SHALL set that image alt text to `图片解析错误`
 - **AND** the document conversion MUST NOT fail because of that image description failure

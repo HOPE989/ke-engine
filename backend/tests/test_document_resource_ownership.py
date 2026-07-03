@@ -127,6 +127,7 @@ def test_upload_workflow_accepts_preowned_dependencies_without_resource_wrapper(
         "upload",
         "storage",
         "mineru_client",
+        "image_describer",
     ]
 
     source = inspect.getsource(workflow)

@@ -108,12 +108,14 @@ def test_segment_metadata_contains_required_document_and_chunk_fields():
         "accessibleBy",
         "parentChunkId",
         "langchain",
+        "images",
     }
     assert metadata["fileName"] == "guide.pdf"
     assert metadata["url"] == _document().converted_doc_url
     assert metadata["accessibleBy"] == "team-a"
     assert metadata["parentChunkId"] is None
     assert metadata["langchain"] == {"Header 1": "Guide", "Header 2": "Install"}
+    assert metadata["images"] == []
     assert "Header 1" not in metadata
 
 
