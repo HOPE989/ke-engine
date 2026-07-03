@@ -8,6 +8,10 @@ class DocumentStateConflict(Exception):
     """生命周期状态更新不符合预期状态时抛出。"""
 
 
+class DocumentNotFound(Exception):
+    """请求的文档不存在时抛出。"""
+
+
 class UnsupportedDocumentFileType(Exception):
     """文件类型检测结果不在当前支持范围内时抛出。"""
 
@@ -26,3 +30,27 @@ class DocumentConversionFailed(Exception):
 
 class DocumentStateRollbackFailed(Exception):
     """转换失败后无法将文档状态回滚到 UPLOADED 时抛出。"""
+
+
+class ConvertedMarkdownUnavailable(Exception):
+    """转换后的 Markdown 对象无法从对象存储读取时抛出。"""
+
+
+class ConvertedMarkdownInvalid(Exception):
+    """转换后的 Markdown 字节不是有效 UTF-8 时抛出。"""
+
+
+class ChunkPersistenceFailed(Exception):
+    """分段持久化或完成状态更新失败时抛出。"""
+
+
+class ChunkSplittingFailed(Exception):
+    """LangChain Markdown 分段失败时抛出。"""
+
+
+class ChunkRollbackFailed(Exception):
+    """切分失败后无法将文档状态回滚到 CONVERTED 时抛出。"""
+
+
+class ChunkLockUnavailable(Exception):
+    """文档切分 Redis 锁基础设施不可用时抛出。"""

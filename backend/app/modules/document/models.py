@@ -3,7 +3,8 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, String, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -16,6 +17,8 @@ class DocumentStatus(str, Enum):
     UPLOADED = "UPLOADED"
     CONVERTING = "CONVERTING"
     CONVERTED = "CONVERTED"
+    CHUNKING = "CHUNKING"
+    CHUNKED = "CHUNKED"
 
 
 class KnowledgeDocument(Base):
@@ -24,7 +27,7 @@ class KnowledgeDocument(Base):
     __tablename__ = "knowledge_document"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('INIT', 'UPLOADED', 'CONVERTING', 'CONVERTED')",
+            "status IN ('INIT', 'UPLOADED', 'CONVERTING', 'CONVERTED', 'CHUNKING', 'CHUNKED')",
             name="ck_knowledge_document_status",
         ),
     )
@@ -55,3 +58,30 @@ class KnowledgeDocument(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class KnowledgeSegment(Base):
+    """knowledge_segment 表的 ORM 映射。"""
+
+    __tablename__ = "knowledge_segment"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    chunk_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    document_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("knowledge_document.doc_id"),
+        nullable=False,
+        index=True,
+    )
+    chunk_order: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    embedding_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default="INIT",
+        server_default="INIT",
+        index=True,
+    )
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False)
+    skip_embedding: Mapped[bool] = mapped_column(Boolean, nullable=False)

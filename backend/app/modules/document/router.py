@@ -15,19 +15,31 @@ from app.api.deps import get_config, get_document_runtime
 from app.common.response import APIResponse, success_response
 from app.core.config import Settings
 from app.core.exceptions import AppException
+from app.infrastructure.redis_lock import document_chunking_lock
 from app.modules.document.errors import (
+    ChunkLockUnavailable,
+    ChunkPersistenceFailed,
+    ChunkRollbackFailed,
+    ChunkSplittingFailed,
+    ConvertedMarkdownInvalid,
+    ConvertedMarkdownUnavailable,
+    DocumentNotFound,
     DocumentStateConflict,
     DocumentStorageFailed,
 )
 from app.modules.document.runtime import DocumentRuntime
 from app.modules.document.schemas import (
+    DocumentChunkRequest,
+    DocumentChunkResponse,
     DocumentFileTooLarge,
     DocumentMetadata,
     InvalidDocumentUpload,
+    InvalidDocumentChunkRequest,
     document_metadata_from_record,
+    validate_document_chunk_request,
     validate_document_upload,
 )
-from app.modules.document.workflow import upload_document
+from app.modules.document.workflow import chunk_document, upload_document
 
 router = APIRouter()
 
@@ -75,6 +87,58 @@ async def upload_document_endpoint(
         raise AppException("document state conflict", status.HTTP_409_CONFLICT) from exc
 
     return success_response(metadata)
+
+
+@router.post(
+    "/{doc_id}/chunk",
+    response_model=APIResponse[DocumentChunkResponse],
+)
+async def chunk_document_endpoint(
+    doc_id: int,
+    request: DocumentChunkRequest,
+    settings: Annotated[Settings, Depends(get_config)],
+    document_runtime: Annotated[DocumentRuntime, Depends(get_document_runtime)],
+) -> APIResponse[DocumentChunkResponse]:
+    """同步切分一个已转换文档。"""
+
+    try:
+        validated_request = validate_document_chunk_request(request)
+    except InvalidDocumentChunkRequest as exc:
+        raise AppException("invalid chunk request", status.HTTP_400_BAD_REQUEST) from exc
+
+    lock = document_chunking_lock(
+        redis_client=document_runtime.redis_client,
+        doc_id=doc_id,
+        expire_seconds=settings.document_convert_lock_expire_seconds,
+    )
+    try:
+        response = await chunk_document(
+            doc_id=doc_id,
+            document_repository=document_runtime.repository,
+            storage=document_runtime.storage,
+            id_generator=document_runtime.id_generator,
+            lock=lock,
+            chunk_size=validated_request.chunk_size,
+            overlap=validated_request.overlap,
+        )
+    except DocumentNotFound as exc:
+        raise AppException("document not found", status.HTTP_404_NOT_FOUND) from exc
+    except DocumentStateConflict as exc:
+        raise AppException("document state conflict", status.HTTP_409_CONFLICT) from exc
+    except ChunkLockUnavailable as exc:
+        raise AppException("chunk lock unavailable", status.HTTP_503_SERVICE_UNAVAILABLE) from exc
+    except ConvertedMarkdownUnavailable as exc:
+        raise AppException("converted markdown unavailable", status.HTTP_502_BAD_GATEWAY) from exc
+    except ConvertedMarkdownInvalid as exc:
+        raise AppException("converted markdown invalid", 422) from exc
+    except ChunkSplittingFailed as exc:
+        raise AppException("chunk splitting failed", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
+    except ChunkPersistenceFailed as exc:
+        raise AppException("chunk persistence failed", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
+    except ChunkRollbackFailed as exc:
+        raise AppException("chunk rollback failed", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
+
+    return success_response(response)
 
 
 @router.get("/{doc_id}", response_model=APIResponse[DocumentMetadata])

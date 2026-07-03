@@ -166,6 +166,7 @@ def test_document_runtime_groups_all_document_module_runtime_resources():
         "file_detector",
         "id_generator",
         "conversion_dispatcher",
+        "redis_client",
     ]
 
 
@@ -199,6 +200,7 @@ def test_api_deps_own_document_runtime_initialization_layer():
     assert "SnowflakeIdGenerator(worker_id=settings.snowflake_worker_id)" in source
     assert "KafkaDocumentConversionDispatcher(" in source
     assert "create_kafka_producer(" in source
+    assert "create_redis_client(" in source
     assert "push_async_callback(close_engine)" in source
 
 
@@ -296,6 +298,14 @@ async def test_document_runtime_ensures_storage_bucket_before_serving(monkeypatc
         def __init__(self, producer):
             calls.append(("create_dispatcher", producer))
 
+    class FakeRedisClient:
+        def close(self):
+            calls.append(("redis_close", None))
+
+    def fake_create_redis_client(redis_url):
+        calls.append(("create_redis_client", redis_url))
+        return FakeRedisClient()
+
     monkeypatch.setattr("app.db.session.init_engine", fake_init_engine)
     monkeypatch.setattr("app.db.session.close_engine", fake_close_engine)
     monkeypatch.setattr("app.db.session.get_session_factory", fake_get_session_factory)
@@ -316,6 +326,7 @@ async def test_document_runtime_ensures_storage_bucket_before_serving(monkeypatc
         FakeSnowflakeIdGenerator,
     )
     monkeypatch.setattr("app.infrastructure.kafka.create_kafka_producer", lambda bootstrap_servers: "producer")
+    monkeypatch.setattr("app.infrastructure.redis_lock.create_redis_client", fake_create_redis_client)
     monkeypatch.setattr(
         "app.modules.document.dispatcher.KafkaDocumentConversionDispatcher",
         FakeKafkaDocumentConversionDispatcher,
@@ -326,6 +337,7 @@ async def test_document_runtime_ensures_storage_bucket_before_serving(monkeypatc
         database_url="postgresql+asyncpg://user:pass@localhost:5432/app",
         minio_bucket="documents",
         minio_public_base_url="https://files.example.com",
+        redis_url="redis://redis.example:6379/0",
         kafka_bootstrap_servers="kafka.example:9092",
         mineru_base_url="https://mineru.example.com",
         mineru_timeout_seconds=30,
@@ -336,11 +348,13 @@ async def test_document_runtime_ensures_storage_bucket_before_serving(monkeypatc
         assert calls == [
             ("init_engine", "postgresql+asyncpg://user:pass@localhost:5432/app"),
             ("ensure_minio_bucket", "documents"),
+            ("create_redis_client", "redis://redis.example:6379/0"),
             ("create_storage", "documents"),
             ("create_id_generator", 7),
             ("create_dispatcher", "producer"),
         ]
         assert app.state.document_runtime.storage.bucket == "documents"
+        assert app.state.document_runtime.redis_client is not None
 
 
 def test_document_router_reads_config_through_api_deps():

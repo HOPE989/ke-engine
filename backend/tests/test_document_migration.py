@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -110,7 +111,7 @@ def test_knowledge_document_migration_constrains_status(monkeypatch):
 
     assert len(constraints) == 1
     constraint_sql = str(constraints[0].sqltext)
-    for status in ["INIT", "UPLOADED", "CONVERTING", "CONVERTED"]:
+    for status in ["INIT", "UPLOADED", "CONVERTING", "CONVERTED", "CHUNKING", "CHUNKED"]:
         assert status in constraint_sql
 
 
@@ -125,3 +126,63 @@ def test_knowledge_document_migration_adds_lookup_indexes(monkeypatch):
     assert indexes_by_columns[("knowledge_document", ("status",))]
     assert indexes_by_columns[("knowledge_document", ("upload_user",))]
     assert indexes_by_columns[("knowledge_document", ("created_at",))]
+
+
+def test_knowledge_segment_migration_defines_columns_and_foreign_key(monkeypatch):
+    recorder = _load_knowledge_document_migration(monkeypatch)
+
+    elements = recorder.tables["knowledge_segment"]
+    columns = {
+        element.name: element
+        for element in elements
+        if isinstance(element, sa.Column)
+    }
+
+    assert isinstance(columns["id"].type, sa.BigInteger)
+    assert columns["id"].primary_key is True
+    assert columns["id"].identity is None
+
+    assert isinstance(columns["chunk_id"].type, sa.String)
+    assert columns["chunk_id"].type.length == 255
+    assert columns["chunk_id"].nullable is False
+
+    assert isinstance(columns["text"].type, sa.Text)
+    assert columns["text"].nullable is False
+
+    assert isinstance(columns["document_id"].type, sa.BigInteger)
+    assert columns["document_id"].nullable is False
+    foreign_keys = list(columns["document_id"].foreign_keys)
+    assert len(foreign_keys) == 1
+    assert foreign_keys[0].target_fullname == "knowledge_document.doc_id"
+
+    assert isinstance(columns["chunk_order"].type, sa.Integer)
+    assert columns["chunk_order"].nullable is False
+
+    assert isinstance(columns["embedding_id"].type, sa.String)
+    assert columns["embedding_id"].type.length == 255
+    assert columns["embedding_id"].nullable is True
+
+    assert isinstance(columns["status"].type, sa.String)
+    assert columns["status"].type.length == 255
+    assert columns["status"].nullable is False
+    assert str(columns["status"].server_default.arg).strip("'") == "INIT"
+
+    assert isinstance(columns["metadata"].type, postgresql.JSONB)
+    assert columns["metadata"].nullable is False
+
+    assert isinstance(columns["skip_embedding"].type, sa.Boolean)
+    assert columns["skip_embedding"].nullable is False
+
+
+def test_knowledge_segment_migration_adds_lookup_indexes(monkeypatch):
+    recorder = _load_knowledge_document_migration(monkeypatch)
+
+    indexes_by_columns = {
+        (index["table_name"], index["columns"]): index["name"]
+        for index in recorder.indexes
+    }
+
+    assert indexes_by_columns[("knowledge_segment", ("document_id",))]
+    assert indexes_by_columns[("knowledge_segment", ("chunk_id",))]
+    assert indexes_by_columns[("knowledge_segment", ("status",))]
+    assert indexes_by_columns[("knowledge_segment", ("chunk_order",))]

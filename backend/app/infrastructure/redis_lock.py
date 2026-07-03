@@ -26,3 +26,19 @@ def document_conversion_lock(
         expire=expire_seconds,
         auto_renewal=True,
     )
+
+
+def document_chunking_lock(
+    *,
+    redis_client: Any,
+    doc_id: int,
+    expire_seconds: int,
+):
+    """创建单文档切分锁。"""
+
+    return redis_lock.Lock(
+        redis_client,
+        name=f"document:{doc_id}:chunk",
+        expire=expire_seconds,
+        auto_renewal=True,
+    )

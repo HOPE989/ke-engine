@@ -8,8 +8,21 @@ from typing import Any
 from starlette.concurrency import run_in_threadpool
 
 from app.modules.document.errors import (
+    ChunkPersistenceFailed,
+    ChunkRollbackFailed,
+    ChunkSplittingFailed,
+    ConvertedMarkdownInvalid,
+    ConvertedMarkdownUnavailable,
     DocumentConversionFailed,
+    DocumentNotFound,
+    DocumentStateConflict,
     DocumentStorageFailed,
+)
+from app.modules.document.chunking import (
+    build_segment_drafts,
+    load_converted_markdown,
+    run_with_document_chunk_lock,
+    split_markdown_into_chunks,
 )
 from app.modules.document.file_types import detect_document_file_type
 from app.modules.document.markdown import (
@@ -22,7 +35,7 @@ from app.modules.document.markdown import (
     select_markdown_path,
 )
 from app.modules.document.models import DocumentStatus
-from app.modules.document.schemas import DocumentMetadata
+from app.modules.document.schemas import DocumentChunkResponse, DocumentMetadata
 from app.modules.document.storage import (
     asset_object_key,
     converted_markdown_object_key,
@@ -151,3 +164,81 @@ async def upload_document(
         converted_doc_url=None,
         status=DocumentStatus.UPLOADED.value,
     )
+
+
+async def chunk_document(
+    *,
+    doc_id: int,
+    document_repository: Any,
+    storage: Any,
+    id_generator: Any,
+    lock: Any,
+    chunk_size: int,
+    overlap: int,
+) -> Any:
+    """执行单个已转换文档的手动切分工作流。"""
+
+    document = await document_repository.get_document(doc_id)
+    if document is None:
+        raise DocumentNotFound()
+    if document.status != DocumentStatus.CONVERTED.value:
+        raise DocumentStateConflict()
+    if not document.converted_doc_url:
+        raise DocumentStateConflict()
+
+    async def operation() -> DocumentChunkResponse:
+        await document_repository.start_chunking(doc_id=doc_id)
+        try:
+            markdown = await load_converted_markdown(document=document, storage=storage)
+            try:
+                split_chunks = await run_in_threadpool(
+                    split_markdown_into_chunks,
+                    markdown,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                )
+            except Exception as exc:
+                raise ChunkSplittingFailed() from exc
+
+            segment_drafts = build_segment_drafts(
+                document=document,
+                split_chunks=split_chunks,
+                id_generator=id_generator,
+            )
+            try:
+                await document_repository.complete_chunking(
+                    doc_id=doc_id,
+                    segment_drafts=segment_drafts,
+                )
+            except ChunkPersistenceFailed:
+                raise
+            except Exception as exc:
+                raise ChunkPersistenceFailed() from exc
+        except (
+            DocumentStateConflict,
+            ConvertedMarkdownUnavailable,
+            ConvertedMarkdownInvalid,
+            ChunkSplittingFailed,
+            ChunkPersistenceFailed,
+        ):
+            await _rollback_to_converted(
+                document_repository=document_repository,
+                doc_id=doc_id,
+            )
+            raise
+        return DocumentChunkResponse(
+            doc_id=str(doc_id),
+            status=DocumentStatus.CHUNKED.value,
+            segment_count=len(segment_drafts),
+        )
+
+    return await run_with_document_chunk_lock(lock=lock, operation=operation)
+
+
+async def _rollback_to_converted(*, document_repository: Any, doc_id: int) -> None:
+    try:
+        await document_repository.rollback_to_converted(doc_id=doc_id)
+    except ChunkRollbackFailed:
+        raise
+    except Exception as exc:
+        raise ChunkRollbackFailed() from exc

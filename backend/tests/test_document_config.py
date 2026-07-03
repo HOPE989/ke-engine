@@ -160,6 +160,16 @@ def test_document_upload_dependencies_are_available():
         assert importlib.util.find_spec(module_name) is not None
 
 
+def test_document_chunking_dependencies_are_available():
+    from langchain_text_splitters import (
+        MarkdownHeaderTextSplitter,
+        RecursiveCharacterTextSplitter,
+    )
+
+    assert MarkdownHeaderTextSplitter.__name__ == "MarkdownHeaderTextSplitter"
+    assert RecursiveCharacterTextSplitter.__name__ == "RecursiveCharacterTextSplitter"
+
+
 def test_settings_document_startup_and_request_time_boundaries():
     assert config.STARTUP_ONLY_SETTINGS == {
         "database_url",

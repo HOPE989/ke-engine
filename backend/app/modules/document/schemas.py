@@ -6,7 +6,7 @@
 from dataclasses import dataclass
 
 from fastapi import UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictInt
 
 
 class InvalidDocumentUpload(Exception):
@@ -17,6 +17,12 @@ class InvalidDocumentUpload(Exception):
 
 class DocumentFileTooLarge(Exception):
     """上传文件超过配置大小上限时使用的内部校验异常。"""
+
+    pass
+
+
+class InvalidDocumentChunkRequest(Exception):
+    """chunk 参数关系不合法时使用的内部校验异常。"""
 
     pass
 
@@ -47,6 +53,29 @@ class DocumentMetadata(BaseModel):
     doc_url: str | None
     converted_doc_url: str | None
     status: str
+
+
+class DocumentChunkRequest(BaseModel):
+    """文档切分请求体。"""
+
+    chunk_size: StrictInt
+    overlap: StrictInt
+
+
+class DocumentChunkResponse(BaseModel):
+    """文档切分成功后返回给客户端的稳定元数据。"""
+
+    doc_id: str
+    status: str
+    segment_count: int
+
+
+def validate_document_chunk_request(request: DocumentChunkRequest) -> DocumentChunkRequest:
+    """校验 chunk_size 与 overlap 的业务关系。"""
+
+    if request.chunk_size <= 0 or request.overlap < 0 or request.overlap >= request.chunk_size:
+        raise InvalidDocumentChunkRequest()
+    return request
 
 
 def document_metadata_from_record(record) -> DocumentMetadata:

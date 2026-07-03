@@ -3,8 +3,12 @@
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.document.errors import DocumentStateConflict
-from app.modules.document.models import DocumentStatus, KnowledgeDocument
+from app.modules.document.errors import (
+    ChunkPersistenceFailed,
+    ChunkRollbackFailed,
+    DocumentStateConflict,
+)
+from app.modules.document.models import DocumentStatus, KnowledgeDocument, KnowledgeSegment
 
 
 def _status_value(status: DocumentStatus | str) -> str:
@@ -150,3 +154,62 @@ class DocumentRepository:
             expected_status=DocumentStatus.CONVERTING,
             values={"status": DocumentStatus.UPLOADED.value},
         )
+
+    async def start_chunking(self, *, doc_id: int) -> None:
+        """将 CONVERTED 文档推进到 CHUNKING。"""
+
+        await self._update_with_expected_status(
+            doc_id=doc_id,
+            expected_status=DocumentStatus.CONVERTED,
+            values={"status": DocumentStatus.CHUNKING.value},
+        )
+
+    async def complete_chunking(self, *, doc_id: int, segment_drafts: list) -> None:
+        """在一个事务中写入 segment 并将 CHUNKING 文档推进到 CHUNKED。"""
+
+        async with self._session_factory() as session:
+            try:
+                async with session.begin():
+                    session.add_all(
+                        [
+                            KnowledgeSegment(
+                                id=draft.id,
+                                chunk_id=draft.chunk_id,
+                                text=draft.text,
+                                document_id=draft.document_id,
+                                chunk_order=draft.chunk_order,
+                                embedding_id=draft.embedding_id,
+                                status=draft.status,
+                                metadata_=draft.metadata,
+                                skip_embedding=draft.skip_embedding,
+                            )
+                            for draft in segment_drafts
+                        ]
+                    )
+                    statement = (
+                        update(KnowledgeDocument)
+                        .where(
+                            KnowledgeDocument.doc_id == doc_id,
+                            KnowledgeDocument.status == DocumentStatus.CHUNKING.value,
+                        )
+                        .values(status=DocumentStatus.CHUNKED.value, updated_at=func.now())
+                    )
+                    result = await session.execute(statement)
+                    if result.rowcount == 0:
+                        raise ChunkPersistenceFailed()
+            except ChunkPersistenceFailed:
+                raise
+            except Exception as exc:
+                raise ChunkPersistenceFailed() from exc
+
+    async def rollback_to_converted(self, *, doc_id: int) -> None:
+        """切分失败后将 CHUNKING 文档回滚到 CONVERTED。"""
+
+        try:
+            await self._update_with_expected_status(
+                doc_id=doc_id,
+                expected_status=DocumentStatus.CHUNKING,
+                values={"status": DocumentStatus.CONVERTED.value},
+            )
+        except Exception as exc:
+            raise ChunkRollbackFailed() from exc

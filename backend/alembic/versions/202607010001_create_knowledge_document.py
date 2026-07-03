@@ -6,6 +6,7 @@ Revises: None
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 revision = "202607010001"
 down_revision = None
@@ -39,18 +40,44 @@ def upgrade() -> None:
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
         sa.CheckConstraint(
-            "status IN ('INIT', 'UPLOADED', 'CONVERTING', 'CONVERTED')",
+            "status IN ('INIT', 'UPLOADED', 'CONVERTING', 'CONVERTED', 'CHUNKING', 'CHUNKED')",
             name="ck_knowledge_document_status",
         ),
     )
     op.create_index("ix_knowledge_document_status", "knowledge_document", ["status"])
     op.create_index("ix_knowledge_document_upload_user", "knowledge_document", ["upload_user"])
     op.create_index("ix_knowledge_document_created_at", "knowledge_document", ["created_at"])
+    op.create_table(
+        "knowledge_segment",
+        sa.Column("id", sa.BigInteger(), primary_key=True, nullable=False),
+        sa.Column("chunk_id", sa.String(length=255), nullable=False),
+        sa.Column("text", sa.Text(), nullable=False),
+        sa.Column(
+            "document_id",
+            sa.BigInteger(),
+            sa.ForeignKey("knowledge_document.doc_id"),
+            nullable=False,
+        ),
+        sa.Column("chunk_order", sa.Integer(), nullable=False),
+        sa.Column("embedding_id", sa.String(length=255), nullable=True),
+        sa.Column("status", sa.String(length=255), nullable=False, server_default=sa.text("'INIT'")),
+        sa.Column("metadata", postgresql.JSONB(), nullable=False),
+        sa.Column("skip_embedding", sa.Boolean(), nullable=False),
+    )
+    op.create_index("ix_knowledge_segment_document_id", "knowledge_segment", ["document_id"])
+    op.create_index("ix_knowledge_segment_chunk_id", "knowledge_segment", ["chunk_id"])
+    op.create_index("ix_knowledge_segment_status", "knowledge_segment", ["status"])
+    op.create_index("ix_knowledge_segment_chunk_order", "knowledge_segment", ["chunk_order"])
 
 
 def downgrade() -> None:
     """删除文档元数据表及其索引。"""
 
+    op.drop_index("ix_knowledge_segment_chunk_order", table_name="knowledge_segment")
+    op.drop_index("ix_knowledge_segment_status", table_name="knowledge_segment")
+    op.drop_index("ix_knowledge_segment_chunk_id", table_name="knowledge_segment")
+    op.drop_index("ix_knowledge_segment_document_id", table_name="knowledge_segment")
+    op.drop_table("knowledge_segment")
     op.drop_index("ix_knowledge_document_created_at", table_name="knowledge_document")
     op.drop_index("ix_knowledge_document_upload_user", table_name="knowledge_document")
     op.drop_index("ix_knowledge_document_status", table_name="knowledge_document")
