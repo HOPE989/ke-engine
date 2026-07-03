@@ -1,8 +1,12 @@
+import os
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy import event, text
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 class FakeTransaction:
@@ -377,5 +381,82 @@ async def test_complete_chunking_failure_rolls_back_segment_inserts():
     assert len(session.added) == 1
     assert session.transaction_commits == 0
     assert session.transaction_rollbacks == 1
+
+
+@pytest.mark.asyncio
+async def test_complete_chunking_rolls_back_inserted_segments_on_postgres_stale_chunked_state():
+    database_url = os.environ.get("DOCUMENT_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("set DOCUMENT_TEST_DATABASE_URL to run PostgreSQL transaction integration tests")
+
+    from app.db.base import Base
+    from app.modules.document.errors import ChunkPersistenceFailed
+    from app.modules.document.repository import DocumentRepository
+
+    _, _, DocumentStatus, KnowledgeDocument, KnowledgeSegment = _document_modules()
+
+    schema_name = f"test_doc_chunk_{uuid4().hex}"
+    bootstrap_engine = create_async_engine(database_url)
+    async with bootstrap_engine.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA "{schema_name}"'))
+    await bootstrap_engine.dispose()
+
+    engine = create_async_engine(database_url)
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_search_path(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute(f'SET search_path TO "{schema_name}"')
+        finally:
+            cursor.close()
+
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+
+        session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+        doc_id = 424242
+        async with session_factory() as session:
+            session.add(
+                KnowledgeDocument(
+                    doc_id=doc_id,
+                    doc_title="chunked.md",
+                    upload_user="tester",
+                    accessible_by="team-a",
+                    file_type="markdown",
+                    converted_doc_url=(
+                        "https://files.example.com/documents/documents/424242/converted/document.md"
+                    ),
+                    status=DocumentStatus.CHUNKED.value,
+                )
+            )
+            await session.commit()
+
+        repository = DocumentRepository(session_factory)
+        with pytest.raises(ChunkPersistenceFailed):
+            await repository.complete_chunking(
+                doc_id=doc_id,
+                segment_drafts=[_segment_draft(document_id=doc_id)],
+            )
+
+        async with session_factory() as session:
+            segment_count = await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(KnowledgeSegment)
+                .where(KnowledgeSegment.document_id == doc_id)
+            )
+            status = await session.scalar(
+                sa.select(KnowledgeDocument.status).where(KnowledgeDocument.doc_id == doc_id)
+            )
+
+        assert segment_count == 0
+        assert status == DocumentStatus.CHUNKED.value
+    finally:
+        await engine.dispose()
+        cleanup_engine = create_async_engine(database_url)
+        async with cleanup_engine.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        await cleanup_engine.dispose()
 
 

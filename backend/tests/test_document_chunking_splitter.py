@@ -221,6 +221,7 @@ def test_splitter_returns_parent_and_children_for_oversized_section():
     )
 
     assert chunks[0].text == "alpha beta gamma delta epsilon zeta eta theta"
+    assert "# Guide" not in chunks[0].text
     assert chunks[0].skip_embedding is True
     assert chunks[0].chunk_id == "10001"
     assert chunks[0].parent_chunk_id is None

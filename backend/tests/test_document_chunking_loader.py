@@ -37,6 +37,43 @@ async def test_load_converted_markdown_resolves_valid_public_url_to_object_key()
 
 
 @pytest.mark.asyncio
+async def test_load_converted_markdown_allows_same_document_object_key_outside_default_path():
+    from app.modules.document.chunking import load_converted_markdown
+
+    storage = FakeStorage(payload="# Alternate\ncontent".encode())
+    document = SimpleNamespace(
+        doc_id=42,
+        converted_doc_url=(
+            "https://files.example.com/documents/documents/42/alternate/output.md"
+        ),
+    )
+
+    markdown = await load_converted_markdown(document=document, storage=storage)
+
+    assert markdown == "# Alternate\ncontent"
+    assert storage.downloaded_keys == ["documents/42/alternate/output.md"]
+
+
+@pytest.mark.asyncio
+async def test_load_converted_markdown_rejects_same_bucket_object_key_for_other_document():
+    from app.modules.document.chunking import load_converted_markdown
+    from app.modules.document.errors import DocumentStateConflict
+
+    storage = FakeStorage()
+    document = SimpleNamespace(
+        doc_id=42,
+        converted_doc_url=(
+            "https://files.example.com/documents/documents/43/converted/document.md"
+        ),
+    )
+
+    with pytest.raises(DocumentStateConflict):
+        await load_converted_markdown(document=document, storage=storage)
+
+    assert storage.downloaded_keys == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "converted_doc_url",
     [

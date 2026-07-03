@@ -33,6 +33,13 @@ class FailingCompleteRepository(FakeRepository):
         raise ChunkPersistenceFailed()
 
 
+class StaleStateCompleteRepository(FakeRepository):
+    async def complete_chunking(self, *, doc_id, segment_drafts):
+        from app.modules.document.errors import ChunkPersistenceFailed
+
+        raise ChunkPersistenceFailed()
+
+
 class FakeStorage:
     bucket = "documents"
     public_base_url = "https://files.example.com"
@@ -50,9 +57,10 @@ class FakeStorage:
 
 
 class FakeLock:
-    def __init__(self, *, acquired=True, acquire_error=None):
+    def __init__(self, *, acquired=True, acquire_error=None, release_error=None):
         self.acquired = acquired
         self.acquire_error = acquire_error
+        self.release_error = release_error
         self.acquire_calls = []
         self.releases = 0
 
@@ -64,6 +72,8 @@ class FakeLock:
 
     def release(self):
         self.releases += 1
+        if self.release_error is not None:
+            raise self.release_error
 
 
 class FakeIdGenerator:
@@ -322,6 +332,24 @@ async def test_chunk_workflow_leaves_converted_on_markdown_download_failure():
 
 
 @pytest.mark.asyncio
+async def test_chunk_workflow_preserves_business_error_when_lock_release_fails():
+    from app.modules.document.errors import ConvertedMarkdownUnavailable
+
+    repository = FakeRepository(_document())
+    lock = FakeLock(release_error=OSError("redis release failed"))
+
+    with pytest.raises(ConvertedMarkdownUnavailable):
+        await _chunk_document(
+            document_repository=repository,
+            lock=lock,
+            storage=FakeStorage(download_error=OSError("minio down")),
+        )
+
+    assert lock.releases == 1
+    assert repository.completed == []
+
+
+@pytest.mark.asyncio
 async def test_chunk_workflow_leaves_converted_on_non_utf8_markdown():
     from app.modules.document.errors import ConvertedMarkdownInvalid
 
@@ -363,3 +391,16 @@ async def test_chunk_workflow_maps_persistence_failure_without_rollback():
         await _chunk_document(document_repository=repository)
 
     assert repository.completed
+
+
+@pytest.mark.asyncio
+async def test_chunk_workflow_maps_stale_chunked_state_at_persistence_boundary():
+    from app.modules.document.errors import ChunkPersistenceFailed
+
+    repository = StaleStateCompleteRepository(_document(status=DocumentStatus.CONVERTED.value))
+
+    with pytest.raises(ChunkPersistenceFailed):
+        await _chunk_document(document_repository=repository)
+
+    assert repository.get_calls == [42]
+    assert repository.completed == []
