@@ -128,7 +128,7 @@ The system SHALL split converted Markdown by Markdown headers first and by recur
 - **WHEN** the system constructs the `MarkdownHeaderTextSplitter`
 - **THEN** it SHALL set `headers_to_split_on` for `#`, `##`, `###`, `####`, `#####`, and `######`
 - **AND** it SHALL map those headers to `Header 1`, `Header 2`, `Header 3`, `Header 4`, `Header 5`, and `Header 6`
-- **AND** it SHALL set `strip_headers` to `False`
+- **AND** it SHALL set `strip_headers` to `True`
 - **AND** it SHALL set `return_each_line` to `False`
 
 #### Scenario: Recursive splitter configuration is stable
@@ -148,7 +148,7 @@ The system SHALL split converted Markdown by Markdown headers first and by recur
 
 #### Scenario: Header section exceeding chunk size creates parent and child segments
 - **WHEN** a first-pass header section has text length greater than `chunk_size`
-- **THEN** the system SHALL persist one parent segment containing the complete header section text
+- **THEN** the system SHALL persist one parent segment containing the complete header section body text without Markdown header lines
 - **AND** the parent segment SHALL have `skip_embedding` set to `true`
 - **AND** the system SHALL recursively split that parent text into child segments
 - **AND** each child segment SHALL have `skip_embedding` set to `false`

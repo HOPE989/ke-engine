@@ -25,7 +25,7 @@
 
 ## 4. LangChain Splitter Wrapper
 
-- [x] 4.1 RED: Add splitter tests proving `MarkdownHeaderTextSplitter` uses `#` through `######`, `Header 1` through `Header 6`, `strip_headers=False`, and `return_each_line=False`.
+- [x] 4.1 RED: Add splitter tests proving `MarkdownHeaderTextSplitter` uses `#` through `######`, `Header 1` through `Header 6`, `strip_headers=True`, and `return_each_line=False`.
 - [x] 4.2 RED: Add splitter tests proving `RecursiveCharacterTextSplitter` uses request `chunk_size`, request `overlap`, `length_function=len`, `is_separator_regex=False`, and the configured CJK-friendly separator list.
 - [x] 4.3 RED: Add behavior tests for normal section output, oversized parent plus child output, child inheritance of parent LangChain metadata, empty chunk discard, and zero-segment output.
 - [x] 4.4 GREEN: Implement the LangChain-backed splitter wrapper without hand-writing Markdown parsing or recursive chunking algorithms.

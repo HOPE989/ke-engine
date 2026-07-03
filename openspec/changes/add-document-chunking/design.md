@@ -139,7 +139,7 @@ headers_to_split_on = [
 MarkdownHeaderTextSplitter(
     headers_to_split_on=headers_to_split_on,
     return_each_line=False,
-    strip_headers=False,
+    strip_headers=True,
 )
 
 RecursiveCharacterTextSplitter(
@@ -163,7 +163,7 @@ RecursiveCharacterTextSplitter(
 )
 ```
 
-`strip_headers=False` is required so a parent segment can store the complete header section text, including the header line. Recursive child chunks inherit the parent header metadata under `metadata.langchain`.
+`strip_headers=True` keeps Markdown header lines out of segment text while preserving header values in LangChain metadata. Parent and child chunks inherit the parent header metadata under `metadata.langchain`.
 
 The first version treats converted plain text as Markdown without headers. MinerU output is also treated as Markdown, even when all headings are effectively top-level.
 
@@ -180,7 +180,7 @@ metadata.parentChunkId = null
 
 If a header section exceeds `chunk_size`, the system persists:
 
-- one parent segment containing the complete header section text, with `skip_embedding = true`
+- one parent segment containing the complete header section body text without Markdown header lines, with `skip_embedding = true`
 - multiple child segments containing recursive splits, each with `skip_embedding = false`
 - `metadata.parentChunkId` on each child pointing to the parent `chunkId`
 
