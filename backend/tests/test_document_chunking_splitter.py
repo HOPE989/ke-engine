@@ -136,6 +136,60 @@ def test_recursive_splitter_uses_request_parameters_and_stable_separators(monkey
     }
 
 
+def test_recursive_splitter_is_reused_for_multiple_oversized_sections(monkeypatch):
+    from app.modules.document import chunking
+
+    constructed = []
+    split_inputs = []
+
+    class FakeMarkdownHeaderTextSplitter:
+        def __init__(self, **kwargs):
+            pass
+
+        def split_text(self, markdown):
+            return [
+                SimpleNamespace(page_content="a" * 20, metadata={"Header 1": "One"}),
+                SimpleNamespace(page_content="b" * 20, metadata={"Header 1": "Two"}),
+            ]
+
+    class FakeRecursiveCharacterTextSplitter:
+        def __init__(self, **kwargs):
+            constructed.append(kwargs)
+
+        def split_text(self, text):
+            split_inputs.append(text)
+            return [text[:5]]
+
+    monkeypatch.setattr(
+        chunking,
+        "MarkdownHeaderTextSplitter",
+        FakeMarkdownHeaderTextSplitter,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        chunking,
+        "RecursiveCharacterTextSplitter",
+        FakeRecursiveCharacterTextSplitter,
+        raising=False,
+    )
+
+    chunks = chunking.split_markdown_into_chunks(
+        "ignored",
+        chunk_size=10,
+        overlap=2,
+        id_generator=FakeIdGenerator(range(10001, 10010)),
+    )
+
+    assert len(constructed) == 1
+    assert split_inputs == ["a" * 20, "b" * 20]
+    assert [chunk.parent_chunk_id for chunk in chunks] == [
+        None,
+        "10001",
+        None,
+        "10003",
+    ]
+
+
 def test_splitter_returns_normal_section_when_within_chunk_size():
     from app.modules.document.chunking import split_markdown_into_chunks
 

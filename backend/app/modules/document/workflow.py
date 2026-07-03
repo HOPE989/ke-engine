@@ -177,22 +177,22 @@ async def chunk_document(
 ) -> Any:
     """执行单个已转换文档的手动切分工作流。"""
 
-    document = await document_repository.get_document(doc_id)
-    if document is None:
-        raise DocumentNotFound()
-    if document.status == DocumentStatus.CHUNKED.value:
-        segment_count = await document_repository.count_embeddable_segments(doc_id=doc_id)
-        return DocumentChunkResponse(
-            doc_id=str(doc_id),
-            status=DocumentStatus.CHUNKED.value,
-            segment_count=segment_count,
-        )
-    if document.status != DocumentStatus.CONVERTED.value:
-        raise DocumentStateConflict()
-    if not document.converted_doc_url:
-        raise DocumentStateConflict()
-
     async def operation() -> DocumentChunkResponse:
+        document = await document_repository.get_document(doc_id)
+        if document is None:
+            raise DocumentNotFound()
+        if document.status == DocumentStatus.CHUNKED.value:
+            segment_count = await document_repository.count_embeddable_segments(doc_id=doc_id)
+            return DocumentChunkResponse(
+                doc_id=str(doc_id),
+                status=DocumentStatus.CHUNKED.value,
+                segment_count=segment_count,
+            )
+        if document.status != DocumentStatus.CONVERTED.value:
+            raise DocumentStateConflict()
+        if not document.converted_doc_url:
+            raise DocumentStateConflict()
+
         markdown = await load_converted_markdown(document=document, storage=storage)
         try:
             split_chunks = await run_in_threadpool(

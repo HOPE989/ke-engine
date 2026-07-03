@@ -7,11 +7,16 @@ from app.modules.document.models import DocumentStatus
 
 class FakeRepository:
     def __init__(self, document=None):
+        self.documents = list(document) if isinstance(document, list) else [document]
         self.document = document
         self.completed = []
+        self.get_calls = []
 
     async def get_document(self, doc_id):
-        return self.document
+        self.get_calls.append(doc_id)
+        if len(self.documents) > 1:
+            return self.documents.pop(0)
+        return self.documents[0]
 
     async def complete_chunking(self, *, doc_id, segment_drafts):
         self.completed.append({"doc_id": doc_id, "segment_drafts": segment_drafts})
@@ -101,15 +106,18 @@ async def _chunk_document(**overrides):
 
 
 @pytest.mark.asyncio
-async def test_chunk_workflow_rejects_missing_document_before_locking():
+async def test_chunk_workflow_rejects_missing_document_after_locking():
     from app.modules.document.errors import DocumentNotFound
 
     lock = FakeLock()
+    repository = FakeRepository(None)
 
     with pytest.raises(DocumentNotFound):
-        await _chunk_document(document_repository=FakeRepository(None), lock=lock)
+        await _chunk_document(document_repository=repository, lock=lock)
 
-    assert lock.acquire_calls == []
+    assert lock.acquire_calls == [{"blocking": False}]
+    assert repository.get_calls == [42]
+    assert lock.releases == 1
 
 
 @pytest.mark.asyncio
@@ -126,25 +134,36 @@ async def test_chunk_workflow_rejects_non_converted_document(status):
 
     repository = FakeRepository(_document(status=status))
     lock = FakeLock()
+    storage = FakeStorage()
 
     with pytest.raises(DocumentStateConflict):
-        await _chunk_document(document_repository=repository, lock=lock)
+        await _chunk_document(document_repository=repository, lock=lock, storage=storage)
 
-    assert lock.acquire_calls == []
+    assert lock.acquire_calls == [{"blocking": False}]
+    assert storage.downloaded_keys == []
+    assert repository.completed == []
+    assert lock.releases == 1
 
 
 @pytest.mark.asyncio
-async def test_chunk_workflow_returns_already_chunked_document_without_locking():
+async def test_chunk_workflow_returns_already_chunked_document_after_locking():
     repository = FakeRepository(_document(status=DocumentStatus.CHUNKED.value))
     lock = FakeLock()
+    storage = FakeStorage()
 
-    response = await _chunk_document(document_repository=repository, lock=lock)
+    response = await _chunk_document(
+        document_repository=repository,
+        lock=lock,
+        storage=storage,
+    )
 
     assert response.doc_id == "42"
     assert response.status == DocumentStatus.CHUNKED.value
     assert response.segment_count == 3
     assert repository.completed == []
-    assert lock.acquire_calls == []
+    assert storage.downloaded_keys == []
+    assert lock.acquire_calls == [{"blocking": False}]
+    assert lock.releases == 1
 
 
 @pytest.mark.asyncio
@@ -152,10 +171,13 @@ async def test_chunk_workflow_rejects_converted_document_without_url():
     from app.modules.document.errors import DocumentStateConflict
 
     repository = FakeRepository(_document(converted_doc_url=None))
+    storage = FakeStorage()
 
     with pytest.raises(DocumentStateConflict):
-        await _chunk_document(document_repository=repository)
+        await _chunk_document(document_repository=repository, storage=storage)
 
+    assert storage.downloaded_keys == []
+    assert repository.completed == []
 
 
 @pytest.mark.asyncio
@@ -183,6 +205,7 @@ async def test_chunk_workflow_rejects_busy_lock_without_starting_chunking():
         await _chunk_document(document_repository=repository, lock=lock)
 
     assert lock.acquire_calls == [{"blocking": False}]
+    assert repository.get_calls == []
 
 
 @pytest.mark.asyncio
@@ -209,6 +232,48 @@ async def test_chunk_workflow_success_persists_segments_and_returns_response():
     assert repository.completed[0]["segment_drafts"][0].text == "short content"
     assert storage.downloaded_keys == ["documents/42/converted/document.md"]
     assert lock.releases == 1
+
+
+@pytest.mark.asyncio
+async def test_chunk_workflow_reads_document_after_lock_and_returns_chunked_state():
+    repository = FakeRepository(_document(status=DocumentStatus.CHUNKED.value))
+    storage = FakeStorage()
+    lock = FakeLock()
+
+    response = await _chunk_document(
+        document_repository=repository,
+        storage=storage,
+        lock=lock,
+    )
+
+    assert response.doc_id == "42"
+    assert response.status == DocumentStatus.CHUNKED.value
+    assert response.segment_count == 3
+    assert repository.get_calls == [42]
+    assert storage.downloaded_keys == []
+    assert repository.completed == []
+    assert lock.acquire_calls == [{"blocking": False}]
+    assert lock.releases == 1
+
+
+@pytest.mark.asyncio
+async def test_chunk_workflow_rejects_cross_document_converted_url():
+    from app.modules.document.errors import DocumentStateConflict
+
+    storage = FakeStorage()
+    repository = FakeRepository(
+        _document(
+            converted_doc_url=(
+                "https://files.example.com/documents/documents/43/converted/document.md"
+            )
+        )
+    )
+
+    with pytest.raises(DocumentStateConflict):
+        await _chunk_document(document_repository=repository, storage=storage)
+
+    assert storage.downloaded_keys == []
+    assert repository.completed == []
 
 
 @pytest.mark.asyncio

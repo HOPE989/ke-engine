@@ -1,7 +1,8 @@
 """文档切分前的 Markdown 读取与分段能力。"""
 
-from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+import logging
 from typing import Any
 from urllib.parse import unquote, urlparse
 
@@ -36,6 +37,8 @@ RECURSIVE_SEPARATORS = [
     "\u3002",
     "",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,10 +85,13 @@ async def run_with_document_chunk_lock(
     try:
         return await operation()
     finally:
-        lock.release()
+        try:
+            lock.release()
+        except Exception:
+            logger.exception("failed to release document chunk lock")
 
 
-def _resolve_converted_object_key(*, converted_doc_url: str, storage: Any) -> str:
+def _resolve_converted_object_key(*, converted_doc_url: str, storage: Any, doc_id: int) -> str:
     base = urlparse(storage.public_base_url.rstrip("/"))
     url = urlparse(converted_doc_url)
     if url.scheme != base.scheme or url.netloc != base.netloc:
@@ -103,6 +109,8 @@ def _resolve_converted_object_key(*, converted_doc_url: str, storage: Any) -> st
     bucket, separator, object_key = relative_path.partition("/")
     if bucket != storage.bucket or not separator or not object_key.strip("/"):
         raise DocumentStateConflict()
+    if not object_key.startswith(f"documents/{doc_id}/"):
+        raise DocumentStateConflict()
     return object_key
 
 
@@ -116,6 +124,7 @@ async def load_converted_markdown(*, document: Any, storage: Any) -> str:
     object_key = _resolve_converted_object_key(
         converted_doc_url=converted_doc_url,
         storage=storage,
+        doc_id=document.doc_id,
     )
     try:
         content = await storage.download_bytes(object_key=object_key)
@@ -143,6 +152,7 @@ def split_markdown_into_chunks(
         return_each_line=False,
     )
     chunks: list[MarkdownSplitChunk] = []
+    recursive_splitter: RecursiveCharacterTextSplitter | None = None
 
     for section in header_splitter.split_text(markdown):
         section_text = section.page_content
@@ -162,6 +172,14 @@ def split_markdown_into_chunks(
             )
             continue
 
+        if recursive_splitter is None:
+            recursive_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=chunk_size,
+                chunk_overlap=overlap,
+                length_function=len,
+                is_separator_regex=False,
+                separators=RECURSIVE_SEPARATORS,
+            )
         parent_chunk_id = str(id_generator.next_id())
         chunks.append(
             MarkdownSplitChunk(
@@ -171,13 +189,6 @@ def split_markdown_into_chunks(
                 skip_embedding=True,
                 parent_chunk_id=None,
             )
-        )
-        recursive_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=overlap,
-            length_function=len,
-            is_separator_regex=False,
-            separators=RECURSIVE_SEPARATORS,
         )
         for child_text in recursive_splitter.split_text(section_text):
             if not child_text.strip():

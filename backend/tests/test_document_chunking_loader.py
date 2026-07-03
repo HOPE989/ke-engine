@@ -24,6 +24,7 @@ async def test_load_converted_markdown_resolves_valid_public_url_to_object_key()
 
     storage = FakeStorage(payload="# Guide\ncontent".encode())
     document = SimpleNamespace(
+        doc_id=42,
         converted_doc_url=(
             "https://files.example.com/documents/documents/42/converted/document.md"
         )
@@ -49,7 +50,7 @@ async def test_load_converted_markdown_rejects_invalid_public_url(converted_doc_
     from app.modules.document.errors import DocumentStateConflict
 
     storage = FakeStorage()
-    document = SimpleNamespace(converted_doc_url=converted_doc_url)
+    document = SimpleNamespace(doc_id=42, converted_doc_url=converted_doc_url)
 
     with pytest.raises(DocumentStateConflict):
         await load_converted_markdown(document=document, storage=storage)
@@ -65,6 +66,7 @@ async def test_load_converted_markdown_maps_download_failures_to_unavailable(dow
 
     storage = FakeStorage(download_error=download_error)
     document = SimpleNamespace(
+        doc_id=42,
         converted_doc_url=(
             "https://files.example.com/documents/documents/42/converted/document.md"
         )
@@ -83,6 +85,7 @@ async def test_load_converted_markdown_maps_non_utf8_bytes_to_invalid():
 
     storage = FakeStorage(payload=b"\xff\xfe\xfa")
     document = SimpleNamespace(
+        doc_id=42,
         converted_doc_url=(
             "https://files.example.com/documents/documents/42/converted/document.md"
         )

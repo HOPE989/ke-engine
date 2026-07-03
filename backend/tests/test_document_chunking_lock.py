@@ -2,9 +2,10 @@ import pytest
 
 
 class FakeLock:
-    def __init__(self, *, acquired=True, acquire_error=None):
+    def __init__(self, *, acquired=True, acquire_error=None, release_error=None):
         self.acquired = acquired
         self.acquire_error = acquire_error
+        self.release_error = release_error
         self.acquire_calls = []
         self.releases = 0
 
@@ -16,6 +17,8 @@ class FakeLock:
 
     def release(self):
         self.releases += 1
+        if self.release_error is not None:
+            raise self.release_error
 
 
 def test_document_chunking_lock_factory_uses_document_chunk_key(monkeypatch):
@@ -103,3 +106,38 @@ async def test_document_chunk_lock_helper_maps_lock_infrastructure_failure():
 
     assert lock.acquire_calls == [{"blocking": False}]
     assert lock.releases == 0
+
+
+@pytest.mark.asyncio
+async def test_document_chunk_lock_helper_ignores_release_failure_after_success():
+    from app.modules.document.chunking import run_with_document_chunk_lock
+
+    async def operation():
+        return "chunked"
+
+    lock = FakeLock(release_error=OSError("redis release failed"))
+
+    result = await run_with_document_chunk_lock(lock=lock, operation=operation)
+
+    assert result == "chunked"
+    assert lock.acquire_calls == [{"blocking": False}]
+    assert lock.releases == 1
+
+
+@pytest.mark.asyncio
+async def test_document_chunk_lock_helper_preserves_operation_failure_when_release_fails():
+    from app.modules.document.chunking import run_with_document_chunk_lock
+
+    operation_error = RuntimeError("markdown failed")
+
+    async def operation():
+        raise operation_error
+
+    lock = FakeLock(release_error=OSError("redis release failed"))
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await run_with_document_chunk_lock(lock=lock, operation=operation)
+
+    assert exc_info.value is operation_error
+    assert lock.acquire_calls == [{"blocking": False}]
+    assert lock.releases == 1
