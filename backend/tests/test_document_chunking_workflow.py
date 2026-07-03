@@ -8,21 +8,16 @@ from app.modules.document.models import DocumentStatus
 class FakeRepository:
     def __init__(self, document=None):
         self.document = document
-        self.started = []
         self.completed = []
-        self.rollbacks = []
 
     async def get_document(self, doc_id):
         return self.document
 
-    async def start_chunking(self, *, doc_id):
-        self.started.append(doc_id)
-
     async def complete_chunking(self, *, doc_id, segment_drafts):
         self.completed.append({"doc_id": doc_id, "segment_drafts": segment_drafts})
 
-    async def rollback_to_converted(self, *, doc_id):
-        self.rollbacks.append(doc_id)
+    async def count_embeddable_segments(self, *, doc_id):
+        return 3
 
 
 class FailingCompleteRepository(FakeRepository):
@@ -31,14 +26,6 @@ class FailingCompleteRepository(FakeRepository):
 
         self.completed.append({"doc_id": doc_id, "segment_drafts": segment_drafts})
         raise ChunkPersistenceFailed()
-
-
-class FailingRollbackRepository(FakeRepository):
-    async def rollback_to_converted(self, *, doc_id):
-        from app.modules.document.errors import ChunkRollbackFailed
-
-        self.rollbacks.append(doc_id)
-        raise ChunkRollbackFailed()
 
 
 class FakeStorage:
@@ -132,7 +119,6 @@ async def test_chunk_workflow_rejects_missing_document_before_locking():
         DocumentStatus.INIT.value,
         DocumentStatus.UPLOADED.value,
         DocumentStatus.CONVERTING.value,
-        DocumentStatus.CHUNKING.value,
     ],
 )
 async def test_chunk_workflow_rejects_non_converted_document(status):
@@ -144,20 +130,21 @@ async def test_chunk_workflow_rejects_non_converted_document(status):
     with pytest.raises(DocumentStateConflict):
         await _chunk_document(document_repository=repository, lock=lock)
 
-    assert repository.started == []
     assert lock.acquire_calls == []
 
 
 @pytest.mark.asyncio
-async def test_chunk_workflow_rejects_already_chunked_document():
-    from app.modules.document.errors import DocumentStateConflict
-
+async def test_chunk_workflow_returns_already_chunked_document_without_locking():
     repository = FakeRepository(_document(status=DocumentStatus.CHUNKED.value))
+    lock = FakeLock()
 
-    with pytest.raises(DocumentStateConflict):
-        await _chunk_document(document_repository=repository)
+    response = await _chunk_document(document_repository=repository, lock=lock)
 
+    assert response.doc_id == "42"
+    assert response.status == DocumentStatus.CHUNKED.value
+    assert response.segment_count == 3
     assert repository.completed == []
+    assert lock.acquire_calls == []
 
 
 @pytest.mark.asyncio
@@ -169,7 +156,6 @@ async def test_chunk_workflow_rejects_converted_document_without_url():
     with pytest.raises(DocumentStateConflict):
         await _chunk_document(document_repository=repository)
 
-    assert repository.started == []
 
 
 @pytest.mark.asyncio
@@ -197,7 +183,6 @@ async def test_chunk_workflow_rejects_busy_lock_without_starting_chunking():
         await _chunk_document(document_repository=repository, lock=lock)
 
     assert lock.acquire_calls == [{"blocking": False}]
-    assert repository.started == []
 
 
 @pytest.mark.asyncio
@@ -218,11 +203,10 @@ async def test_chunk_workflow_success_persists_segments_and_returns_response():
     assert response.doc_id == "42"
     assert response.status == DocumentStatus.CHUNKED.value
     assert response.segment_count == 1
-    assert repository.started == [42]
     assert len(repository.completed) == 1
     assert repository.completed[0]["doc_id"] == 42
     assert len(repository.completed[0]["segment_drafts"]) == 1
-    assert repository.completed[0]["segment_drafts"][0].text == "# Guide\nshort content"
+    assert repository.completed[0]["segment_drafts"][0].text == "short content"
     assert storage.downloaded_keys == ["documents/42/converted/document.md"]
     assert lock.releases == 1
 
@@ -246,7 +230,7 @@ async def test_chunk_workflow_zero_segment_result_still_marks_chunked():
 
 
 @pytest.mark.asyncio
-async def test_chunk_workflow_maps_redis_unavailable_without_starting_chunking():
+async def test_chunk_workflow_maps_redis_unavailable_before_processing():
     from app.modules.document.errors import ChunkLockUnavailable
 
     repository = FakeRepository(_document())
@@ -257,11 +241,8 @@ async def test_chunk_workflow_maps_redis_unavailable_without_starting_chunking()
             lock=FakeLock(acquire_error=OSError("redis down")),
         )
 
-    assert repository.started == []
-
-
 @pytest.mark.asyncio
-async def test_chunk_workflow_rolls_back_markdown_download_failure():
+async def test_chunk_workflow_leaves_converted_on_markdown_download_failure():
     from app.modules.document.errors import ConvertedMarkdownUnavailable
 
     repository = FakeRepository(_document())
@@ -272,13 +253,11 @@ async def test_chunk_workflow_rolls_back_markdown_download_failure():
             storage=FakeStorage(download_error=OSError("minio down")),
         )
 
-    assert repository.started == [42]
-    assert repository.rollbacks == [42]
     assert repository.completed == []
 
 
 @pytest.mark.asyncio
-async def test_chunk_workflow_rolls_back_non_utf8_markdown():
+async def test_chunk_workflow_leaves_converted_on_non_utf8_markdown():
     from app.modules.document.errors import ConvertedMarkdownInvalid
 
     repository = FakeRepository(_document())
@@ -289,16 +268,15 @@ async def test_chunk_workflow_rolls_back_non_utf8_markdown():
             storage=FakeStorage(payload=b"\xff\xfe"),
         )
 
-    assert repository.rollbacks == [42]
     assert repository.completed == []
 
 
 @pytest.mark.asyncio
-async def test_chunk_workflow_maps_splitter_failure_and_rolls_back(monkeypatch):
+async def test_chunk_workflow_maps_splitter_failure_without_rollback(monkeypatch):
     from app.modules.document import workflow
     from app.modules.document.errors import ChunkSplittingFailed
 
-    def fail_splitter(markdown, *, chunk_size, overlap):
+    def fail_splitter(markdown, *, chunk_size, overlap, id_generator):
         raise RuntimeError("split failed")
 
     repository = FakeRepository(_document())
@@ -307,12 +285,11 @@ async def test_chunk_workflow_maps_splitter_failure_and_rolls_back(monkeypatch):
     with pytest.raises(ChunkSplittingFailed):
         await _chunk_document(document_repository=repository)
 
-    assert repository.rollbacks == [42]
     assert repository.completed == []
 
 
 @pytest.mark.asyncio
-async def test_chunk_workflow_rolls_back_persistence_failure():
+async def test_chunk_workflow_maps_persistence_failure_without_rollback():
     from app.modules.document.errors import ChunkPersistenceFailed
 
     repository = FailingCompleteRepository(_document())
@@ -321,20 +298,3 @@ async def test_chunk_workflow_rolls_back_persistence_failure():
         await _chunk_document(document_repository=repository)
 
     assert repository.completed
-    assert repository.rollbacks == [42]
-
-
-@pytest.mark.asyncio
-async def test_chunk_workflow_returns_rollback_failure_when_rollback_fails():
-    from app.modules.document.errors import ChunkRollbackFailed
-
-    repository = FailingRollbackRepository(_document())
-
-    with pytest.raises(ChunkRollbackFailed):
-        await _chunk_document(
-            document_repository=repository,
-            storage=FakeStorage(download_error=OSError("minio down")),
-        )
-
-    assert repository.started == [42]
-    assert repository.rollbacks == [42]

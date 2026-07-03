@@ -42,10 +42,11 @@ RECURSIVE_SEPARATORS = [
 class MarkdownSplitChunk:
     """Markdown splitter 产出的待持久化分段。"""
 
+    chunk_id: str
     text: str
     langchain_metadata: dict[str, Any]
     skip_embedding: bool
-    parent_index: int | None
+    parent_chunk_id: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,12 +133,13 @@ def split_markdown_into_chunks(
     *,
     chunk_size: int,
     overlap: int,
+    id_generator: Any,
 ) -> list[MarkdownSplitChunk]:
     """按 Markdown header 和递归字符长度切分 Markdown。"""
 
     header_splitter = MarkdownHeaderTextSplitter(
         headers_to_split_on=HEADERS_TO_SPLIT_ON,
-        strip_headers=False,
+        strip_headers=True,
         return_each_line=False,
     )
     chunks: list[MarkdownSplitChunk] = []
@@ -151,21 +153,23 @@ def split_markdown_into_chunks(
         if len(section_text) <= chunk_size:
             chunks.append(
                 MarkdownSplitChunk(
+                    chunk_id=str(id_generator.next_id()),
                     text=section_text,
                     langchain_metadata=metadata,
                     skip_embedding=False,
-                    parent_index=None,
+                    parent_chunk_id=None,
                 )
             )
             continue
 
-        parent_index = len(chunks)
+        parent_chunk_id = str(id_generator.next_id())
         chunks.append(
             MarkdownSplitChunk(
+                chunk_id=parent_chunk_id,
                 text=section_text,
                 langchain_metadata=metadata,
                 skip_embedding=True,
-                parent_index=None,
+                parent_chunk_id=None,
             )
         )
         recursive_splitter = RecursiveCharacterTextSplitter(
@@ -180,10 +184,11 @@ def split_markdown_into_chunks(
                 continue
             chunks.append(
                 MarkdownSplitChunk(
+                    chunk_id=str(id_generator.next_id()),
                     text=child_text,
                     langchain_metadata=metadata,
                     skip_embedding=False,
-                    parent_index=parent_index,
+                    parent_chunk_id=parent_chunk_id,
                 )
             )
 
@@ -201,12 +206,7 @@ def build_segment_drafts(
     drafts: list[SegmentDraft] = []
     for chunk_order, split_chunk in enumerate(split_chunks):
         row_id = id_generator.next_id()
-        chunk_id = str(id_generator.next_id())
-        parent_chunk_id = (
-            drafts[split_chunk.parent_index].chunk_id
-            if split_chunk.parent_index is not None
-            else None
-        )
+        chunk_id = split_chunk.chunk_id
         metadata = {
             "skipEmbedding": split_chunk.skip_embedding,
             "chunkId": chunk_id,
@@ -214,7 +214,7 @@ def build_segment_drafts(
             "fileName": document.doc_title,
             "url": document.converted_doc_url,
             "accessibleBy": document.accessible_by,
-            "parentChunkId": parent_chunk_id,
+            "parentChunkId": split_chunk.parent_chunk_id,
             "langchain": dict(split_chunk.langchain_metadata),
         }
         drafts.append(

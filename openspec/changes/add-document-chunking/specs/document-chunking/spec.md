@@ -42,10 +42,12 @@ The system SHALL only chunk existing documents that have completed conversion an
 - **AND** the response message SHALL be `document state conflict`
 - **AND** the system MUST NOT create `knowledge_segment` records
 
-#### Scenario: Already chunked document is rejected
+#### Scenario: Already chunked document returns existing result
 - **WHEN** a client requests chunking for a document whose status is `CHUNKED`
-- **THEN** the system SHALL return HTTP 409 with `APIResponse.code` equal to `409`
-- **AND** the response message SHALL be `document state conflict`
+- **THEN** the system SHALL return HTTP 200
+- **AND** the response body SHALL use the shared `APIResponse` success envelope
+- **AND** the response data SHALL include `status` equal to `CHUNKED`
+- **AND** the response data SHALL include `segment_count` equal to the number of persisted segments where `skip_embedding` is false
 - **AND** the system MUST NOT delete, replace, or append `knowledge_segment` records for that document
 
 #### Scenario: Converted document without converted URL is rejected
@@ -90,7 +92,7 @@ The system SHALL resolve `knowledge_document.converted_doc_url` to a validated M
 - **AND** the system MUST NOT create `knowledge_segment` records
 
 ### Requirement: Chunking concurrency control
-The system SHALL protect document chunking with a per-document Redis distributed lock and document lifecycle expected-state updates.
+The system SHALL protect document chunking with a per-document Redis distributed lock and a final document lifecycle expected-state update.
 
 #### Scenario: Chunk lock is acquired before chunking
 - **WHEN** the system starts chunking a document
@@ -109,17 +111,10 @@ The system SHALL protect document chunking with a per-document Redis distributed
 - **AND** the response message SHALL be `chunk lock unavailable`
 - **AND** the system MUST NOT create `knowledge_segment` records
 
-#### Scenario: Chunking starts with expected document state
-- **WHEN** the system has acquired the chunk lock
-- **AND** the persisted document status is `CONVERTED`
-- **THEN** the system SHALL transition the document status to `CHUNKING`
-
-#### Scenario: Expected-state conflict prevents chunking
-- **WHEN** the system attempts to transition a document from `CONVERTED` to `CHUNKING`
-- **AND** the persisted document status is not `CONVERTED`
-- **THEN** the system SHALL return HTTP 409 with `APIResponse.code` equal to `409`
-- **AND** the response message SHALL be `document state conflict`
-- **AND** the system MUST NOT create `knowledge_segment` records
+#### Scenario: Chunking keeps intermediate state in request scope
+- **WHEN** the system has acquired the chunk lock for a `CONVERTED` document
+- **THEN** the system SHALL NOT persist a `CHUNKING` document status before downloading or splitting Markdown
+- **AND** the document SHALL remain `CONVERTED` until the final persistence transaction commits
 
 ### Requirement: Markdown chunk splitting
 The system SHALL split converted Markdown by Markdown headers first and by recursive character length second.
@@ -245,26 +240,20 @@ The system SHALL atomically persist generated segments and complete the document
 #### Scenario: Successful chunking commits segments and document state together
 - **WHEN** Markdown splitting completes successfully
 - **THEN** the system SHALL insert all generated `knowledge_segment` rows
-- **AND** the system SHALL update the document status from `CHUNKING` to `CHUNKED`
+- **AND** the system SHALL update the document status from `CONVERTED` to `CHUNKED`
 - **AND** those inserts and status update SHALL commit in one database transaction
 
 #### Scenario: Persistence failure rolls back segment writes
-- **WHEN** segment persistence or the `CHUNKING` to `CHUNKED` status update fails
+- **WHEN** segment persistence or the `CONVERTED` to `CHUNKED` status update fails
 - **THEN** the database transaction SHALL roll back
 - **AND** the system MUST NOT leave a partial set of `knowledge_segment` rows committed for that chunking attempt
 - **AND** the system SHALL return HTTP 500 with `APIResponse.code` equal to `500`
 - **AND** the response message SHALL be `chunk persistence failed`
 
-#### Scenario: Chunking failure restores converted state when possible
-- **WHEN** Markdown download, splitting, or persistence fails after the document has entered `CHUNKING`
-- **THEN** the system SHALL attempt to restore the document status to `CONVERTED`
+#### Scenario: Pre-persistence chunking failure leaves document converted
+- **WHEN** Markdown download or splitting fails before segment persistence
+- **THEN** the system SHALL leave the persisted document status as `CONVERTED`
 - **AND** the system SHALL return the stable error response for the original failure
-
-#### Scenario: Chunking rollback failure returns stable error
-- **WHEN** the system attempts to restore the document status to `CONVERTED`
-- **AND** that rollback update fails
-- **THEN** the system SHALL return HTTP 500 with `APIResponse.code` equal to `500`
-- **AND** the response message SHALL be `chunk rollback failed`
 
 ### Requirement: Chunking scope boundaries
 The system SHALL keep chunking separate from embedding, vector storage, and chunk versioning.

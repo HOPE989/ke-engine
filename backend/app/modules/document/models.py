@@ -17,7 +17,6 @@ class DocumentStatus(str, Enum):
     UPLOADED = "UPLOADED"
     CONVERTING = "CONVERTING"
     CONVERTED = "CONVERTED"
-    CHUNKING = "CHUNKING"
     CHUNKED = "CHUNKED"
 
 
@@ -27,7 +26,7 @@ class KnowledgeDocument(Base):
     __tablename__ = "knowledge_document"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('INIT', 'UPLOADED', 'CONVERTING', 'CONVERTED', 'CHUNKING', 'CHUNKED')",
+            "status IN ('INIT', 'UPLOADED', 'CONVERTING', 'CONVERTED', 'CHUNKED')",
             name="ck_knowledge_document_status",
         ),
     )

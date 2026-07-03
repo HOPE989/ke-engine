@@ -11,7 +11,7 @@ This change adds a first document chunking capability with user-provided chunk p
   - request body includes `chunk_size` and `overlap`
   - response returns `doc_id`, `status`, and `segment_count`
 - Add `knowledge_segment` persistence for Markdown-derived chunks.
-- Extend document lifecycle with `CHUNKING` and `CHUNKED`.
+- Extend document lifecycle with `CHUNKED`.
 - Use Redis distributed locking for per-document chunking concurrency control.
 - Use one database transaction to persist all generated segments and complete the document state transition.
 - Use `MarkdownHeaderTextSplitter` followed by `RecursiveCharacterTextSplitter` from `langchain-text-splitters`.
@@ -26,7 +26,7 @@ This change adds a first document chunking capability with user-provided chunk p
 
 ### Modified Capabilities
 
-- `document-upload`: Extend document lifecycle states after conversion to include chunking states.
+- `document-upload`: Extend document lifecycle states after conversion to include the chunked state.
 
 ## Impact
 

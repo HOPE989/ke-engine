@@ -147,7 +147,6 @@ async def test_chunk_endpoint_rejects_invalid_chunk_relationship(chunk_api_clien
         ("ConvertedMarkdownInvalid", 422, "converted markdown invalid"),
         ("ChunkSplittingFailed", 500, "chunk splitting failed"),
         ("ChunkPersistenceFailed", 500, "chunk persistence failed"),
-        ("ChunkRollbackFailed", 500, "chunk rollback failed"),
     ],
 )
 async def test_chunk_endpoint_maps_workflow_errors(

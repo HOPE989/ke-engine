@@ -9,7 +9,6 @@ from starlette.concurrency import run_in_threadpool
 
 from app.modules.document.errors import (
     ChunkPersistenceFailed,
-    ChunkRollbackFailed,
     ChunkSplittingFailed,
     ConvertedMarkdownInvalid,
     ConvertedMarkdownUnavailable,
@@ -181,51 +180,45 @@ async def chunk_document(
     document = await document_repository.get_document(doc_id)
     if document is None:
         raise DocumentNotFound()
+    if document.status == DocumentStatus.CHUNKED.value:
+        segment_count = await document_repository.count_embeddable_segments(doc_id=doc_id)
+        return DocumentChunkResponse(
+            doc_id=str(doc_id),
+            status=DocumentStatus.CHUNKED.value,
+            segment_count=segment_count,
+        )
     if document.status != DocumentStatus.CONVERTED.value:
         raise DocumentStateConflict()
     if not document.converted_doc_url:
         raise DocumentStateConflict()
 
     async def operation() -> DocumentChunkResponse:
-        await document_repository.start_chunking(doc_id=doc_id)
+        markdown = await load_converted_markdown(document=document, storage=storage)
         try:
-            markdown = await load_converted_markdown(document=document, storage=storage)
-            try:
-                split_chunks = await run_in_threadpool(
-                    split_markdown_into_chunks,
-                    markdown,
-                    chunk_size=chunk_size,
-                    overlap=overlap,
-                )
-            except Exception as exc:
-                raise ChunkSplittingFailed() from exc
-
-            segment_drafts = build_segment_drafts(
-                document=document,
-                split_chunks=split_chunks,
+            split_chunks = await run_in_threadpool(
+                split_markdown_into_chunks,
+                markdown,
+                chunk_size=chunk_size,
+                overlap=overlap,
                 id_generator=id_generator,
             )
-            try:
-                await document_repository.complete_chunking(
-                    doc_id=doc_id,
-                    segment_drafts=segment_drafts,
-                )
-            except ChunkPersistenceFailed:
-                raise
-            except Exception as exc:
-                raise ChunkPersistenceFailed() from exc
-        except (
-            DocumentStateConflict,
-            ConvertedMarkdownUnavailable,
-            ConvertedMarkdownInvalid,
-            ChunkSplittingFailed,
-            ChunkPersistenceFailed,
-        ):
-            await _rollback_to_converted(
-                document_repository=document_repository,
+        except Exception as exc:
+            raise ChunkSplittingFailed() from exc
+
+        segment_drafts = build_segment_drafts(
+            document=document,
+            split_chunks=split_chunks,
+            id_generator=id_generator,
+        )
+        try:
+            await document_repository.complete_chunking(
                 doc_id=doc_id,
+                segment_drafts=segment_drafts,
             )
+        except ChunkPersistenceFailed:
             raise
+        except Exception as exc:
+            raise ChunkPersistenceFailed() from exc
         return DocumentChunkResponse(
             doc_id=str(doc_id),
             status=DocumentStatus.CHUNKED.value,
@@ -233,12 +226,3 @@ async def chunk_document(
         )
 
     return await run_with_document_chunk_lock(lock=lock, operation=operation)
-
-
-async def _rollback_to_converted(*, document_repository: Any, doc_id: int) -> None:
-    try:
-        await document_repository.rollback_to_converted(doc_id=doc_id)
-    except ChunkRollbackFailed:
-        raise
-    except Exception as exc:
-        raise ChunkRollbackFailed() from exc

@@ -110,10 +110,9 @@ def _document_modules():
     return repository, DocumentStateConflict, DocumentStatus, KnowledgeDocument, KnowledgeSegment
 
 
-def test_knowledge_document_model_accepts_chunking_statuses_without_schema_drift():
+def test_knowledge_document_model_accepts_chunked_status_without_schema_drift():
     _, _, DocumentStatus, KnowledgeDocument, _ = _document_modules()
 
-    assert DocumentStatus.CHUNKING.value == "CHUNKING"
     assert DocumentStatus.CHUNKED.value == "CHUNKED"
 
     columns = KnowledgeDocument.__table__.columns
@@ -129,7 +128,6 @@ def test_knowledge_document_model_accepts_chunking_statuses_without_schema_drift
     ]
     assert len(constraints) == 1
     constraint_sql = str(constraints[0].sqltext)
-    assert "CHUNKING" in constraint_sql
     assert "CHUNKED" in constraint_sql
 
 
@@ -307,21 +305,6 @@ async def test_expected_state_update_raises_state_conflict_on_zero_rows():
     assert session.commits == 0
 
 
-@pytest.mark.asyncio
-async def test_start_chunking_moves_from_converted_to_chunking():
-    repository, _, DocumentStatus, _, _ = _document_modules()
-    session_factory = FakeSessionFactory()
-    document_repository = repository.DocumentRepository(session_factory)
-
-    await document_repository.start_chunking(doc_id=42)
-
-    session = session_factory.sessions[0]
-    statement = session.executed[0]
-    assert _statement_value(statement, "status") == DocumentStatus.CHUNKING.value
-    assert "knowledge_document.status = 'CONVERTED'" in _compiled_sql(statement)
-    assert session.commits == 1
-
-
 def _segment_draft(**overrides):
     from app.modules.document.chunking import SegmentDraft
 
@@ -373,7 +356,7 @@ async def test_complete_chunking_inserts_segments_and_marks_chunked_in_one_trans
 
     statement = session.executed[0]
     assert _statement_value(statement, "status") == DocumentStatus.CHUNKED.value
-    assert "knowledge_document.status = 'CHUNKING'" in _compiled_sql(statement)
+    assert "knowledge_document.status = 'CONVERTED'" in _compiled_sql(statement)
 
 
 @pytest.mark.asyncio
@@ -396,31 +379,3 @@ async def test_complete_chunking_failure_rolls_back_segment_inserts():
     assert session.transaction_rollbacks == 1
 
 
-@pytest.mark.asyncio
-async def test_rollback_to_converted_moves_from_chunking_to_converted():
-    repository, _, DocumentStatus, _, _ = _document_modules()
-    session_factory = FakeSessionFactory()
-    document_repository = repository.DocumentRepository(session_factory)
-
-    await document_repository.rollback_to_converted(doc_id=42)
-
-    session = session_factory.sessions[0]
-    statement = session.executed[0]
-    assert _statement_value(statement, "status") == DocumentStatus.CONVERTED.value
-    assert "knowledge_document.status = 'CHUNKING'" in _compiled_sql(statement)
-    assert session.commits == 1
-
-
-@pytest.mark.asyncio
-async def test_rollback_to_converted_failure_raises_chunk_rollback_failed():
-    from app.modules.document.errors import ChunkRollbackFailed
-
-    repository, _, _, _, _ = _document_modules()
-    session_factory = FakeSessionFactory(rowcounts=[0])
-    document_repository = repository.DocumentRepository(session_factory)
-
-    with pytest.raises(ChunkRollbackFailed):
-        await document_repository.rollback_to_converted(doc_id=42)
-
-    session = session_factory.sessions[0]
-    assert session.commits == 0

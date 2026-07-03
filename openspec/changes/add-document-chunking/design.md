@@ -50,9 +50,9 @@ The route can remain `async def` so existing async repository and storage bounda
 
 Alternative considered: Kafka-backed chunking with a polling API. That would fit long-running work but adds a second status API and operational complexity. Chunking is a user-initiated text-processing step and the caller needs `segment_count`, so synchronous semantics are simpler for the first version.
 
-### 2. Use `CONVERTED -> CHUNKING -> CHUNKED`
+### 2. Use synchronous `CONVERTED -> CHUNKED`
 
-`CHUNKING` is a short-lived lifecycle state used while the request owns the chunking operation. The endpoint accepts only `CONVERTED` documents. `CHUNKED` documents reject another chunk request with `409 document state conflict`.
+Chunking is a synchronous operation: the endpoint returns only after the document has either remained `CONVERTED` on failure or advanced to `CHUNKED` on success. The process does not persist a `CHUNKING` state because that state is only an in-request implementation detail covered by the Redis lock. The endpoint accepts `CONVERTED` documents for first-time chunking. `CHUNKED` documents return the existing embeddable segment count without deleting, replacing, or appending segment records.
 
 If chunking produces zero valid segments, the operation still succeeds and marks the document `CHUNKED` with `segment_count = 0`. A content-empty converted document is not a system failure.
 
@@ -64,11 +64,10 @@ The endpoint should acquire a Redis lock with a key shaped like:
 document:{doc_id}:chunk
 ```
 
-The lock prevents multiple API instances from chunking the same document at the same time. Database expected-state updates still guard correctness:
+The lock prevents multiple API instances from chunking the same document at the same time. Database expected-state updates still guard correctness during completion:
 
 ```text
-CONVERTED -> CHUNKING
-CHUNKING -> CHUNKED
+CONVERTED -> CHUNKED
 ```
 
 Both protections are useful. The lock avoids wasted duplicate splitting work; expected-state updates protect lifecycle correctness if a request races, retries, or loses the lock unexpectedly.
@@ -239,12 +238,11 @@ The API should keep processing failures testable by returning stable HTTP status
 | Converted Markdown bytes are not valid UTF-8 | `422` | `converted markdown invalid` |
 | LangChain splitting raises an unexpected error | `500` | `chunk splitting failed` |
 | Segment insertion or `CHUNKED` status update fails | `500` | `chunk persistence failed` |
-| Best-effort rollback from `CHUNKING` to `CONVERTED` fails | `500` | `chunk rollback failed` |
 
 ## Risks / Trade-offs
 
 - Long request duration for very large Markdown files -> The first version accepts synchronous behavior; if real usage hits gateway timeouts, a later change can move chunking behind Kafka and add status polling.
-- `CHUNKING` document left behind after process death -> No automatic repair in this change. Manual database repair or a later stale-state retry mechanism can address it.
+- Process death during chunking leaves the document at `CONVERTED` because the status is not advanced until the final database transaction commits.
 - Redis lock lost while a request is still running -> Database expected-state checks still protect lifecycle correctness.
 - JSONB ties the schema to PostgreSQL behavior -> The project already uses async PostgreSQL through `asyncpg`; JSONB is appropriate for queryable metadata.
 - Metadata duplication can drift from columns if updated later -> Segment rows are immutable for this first version after chunking, so drift risk is low.

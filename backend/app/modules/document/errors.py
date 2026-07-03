@@ -48,9 +48,5 @@ class ChunkSplittingFailed(Exception):
     """LangChain Markdown 分段失败时抛出。"""
 
 
-class ChunkRollbackFailed(Exception):
-    """切分失败后无法将文档状态回滚到 CONVERTED 时抛出。"""
-
-
 class ChunkLockUnavailable(Exception):
     """文档切分 Redis 锁基础设施不可用时抛出。"""

@@ -27,6 +27,14 @@ EXPECTED_SEPARATORS = [
 ]
 
 
+class FakeIdGenerator:
+    def __init__(self, ids):
+        self.ids = list(ids)
+
+    def next_id(self):
+        return self.ids.pop(0)
+
+
 def test_markdown_header_splitter_uses_stable_configuration(monkeypatch):
     from app.modules.document import chunking
 
@@ -48,12 +56,17 @@ def test_markdown_header_splitter_uses_stable_configuration(monkeypatch):
         raising=False,
     )
 
-    chunks = chunking.split_markdown_into_chunks("   ", chunk_size=100, overlap=0)
+    chunks = chunking.split_markdown_into_chunks(
+        "   ",
+        chunk_size=100,
+        overlap=0,
+        id_generator=FakeIdGenerator([]),
+    )
 
     assert chunks == []
     assert captured == {
         "headers_to_split_on": EXPECTED_HEADERS,
-        "strip_headers": False,
+        "strip_headers": True,
         "return_each_line": False,
     }
 
@@ -102,9 +115,18 @@ def test_recursive_splitter_uses_request_parameters_and_stable_separators(monkey
         raising=False,
     )
 
-    chunks = chunking.split_markdown_into_chunks("oversized", chunk_size=10, overlap=2)
+    chunks = chunking.split_markdown_into_chunks(
+        "oversized",
+        chunk_size=10,
+        overlap=2,
+        id_generator=FakeIdGenerator([10001, 10002]),
+    )
 
     assert [chunk.text for chunk in chunks] == ["x" * 20, "child"]
+    assert [(chunk.chunk_id, chunk.parent_chunk_id) for chunk in chunks] == [
+        ("10001", None),
+        ("10002", "10001"),
+    ]
     assert captured == {
         "chunk_size": 10,
         "chunk_overlap": 2,
@@ -117,12 +139,18 @@ def test_recursive_splitter_uses_request_parameters_and_stable_separators(monkey
 def test_splitter_returns_normal_section_when_within_chunk_size():
     from app.modules.document.chunking import split_markdown_into_chunks
 
-    chunks = split_markdown_into_chunks("# Guide\nshort content", chunk_size=100, overlap=0)
+    chunks = split_markdown_into_chunks(
+        "# Guide\nshort content",
+        chunk_size=100,
+        overlap=0,
+        id_generator=FakeIdGenerator([10001]),
+    )
 
     assert len(chunks) == 1
-    assert chunks[0].text == "# Guide\nshort content"
+    assert chunks[0].text == "short content"
     assert chunks[0].skip_embedding is False
-    assert chunks[0].parent_index is None
+    assert chunks[0].chunk_id == "10001"
+    assert chunks[0].parent_chunk_id is None
     assert chunks[0].langchain_metadata == {"Header 1": "Guide"}
 
 
@@ -131,18 +159,24 @@ def test_splitter_returns_parent_and_children_for_oversized_section():
 
     markdown = "# Guide\nalpha beta gamma delta epsilon zeta eta theta"
 
-    chunks = split_markdown_into_chunks(markdown, chunk_size=18, overlap=0)
+    chunks = split_markdown_into_chunks(
+        markdown,
+        chunk_size=18,
+        overlap=0,
+        id_generator=FakeIdGenerator(range(10001, 10020)),
+    )
 
-    assert chunks[0].text == markdown
+    assert chunks[0].text == "alpha beta gamma delta epsilon zeta eta theta"
     assert chunks[0].skip_embedding is True
-    assert chunks[0].parent_index is None
+    assert chunks[0].chunk_id == "10001"
+    assert chunks[0].parent_chunk_id is None
     assert chunks[0].langchain_metadata == {"Header 1": "Guide"}
     assert len(chunks) > 2
     for child in chunks[1:]:
         assert child.text.strip()
         assert len(child.text) <= 18
         assert child.skip_embedding is False
-        assert child.parent_index == 0
+        assert child.parent_chunk_id == "10001"
         assert child.langchain_metadata == {"Header 1": "Guide"}
 
 
@@ -166,7 +200,12 @@ def test_splitter_discards_empty_chunks(monkeypatch):
         raising=False,
     )
 
-    chunks = chunking.split_markdown_into_chunks("ignored", chunk_size=100, overlap=0)
+    chunks = chunking.split_markdown_into_chunks(
+        "ignored",
+        chunk_size=100,
+        overlap=0,
+        id_generator=FakeIdGenerator([10001]),
+    )
 
     assert [chunk.text for chunk in chunks] == ["usable"]
 
@@ -174,4 +213,12 @@ def test_splitter_discards_empty_chunks(monkeypatch):
 def test_splitter_returns_zero_segments_for_empty_markdown():
     from app.modules.document.chunking import split_markdown_into_chunks
 
-    assert split_markdown_into_chunks("   ", chunk_size=100, overlap=0) == []
+    assert (
+        split_markdown_into_chunks(
+            "   ",
+            chunk_size=100,
+            overlap=0,
+            id_generator=FakeIdGenerator([]),
+        )
+        == []
+    )

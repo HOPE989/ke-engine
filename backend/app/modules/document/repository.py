@@ -5,7 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.document.errors import (
     ChunkPersistenceFailed,
-    ChunkRollbackFailed,
     DocumentStateConflict,
 )
 from app.modules.document.models import DocumentStatus, KnowledgeDocument, KnowledgeSegment
@@ -85,6 +84,20 @@ class DocumentRepository:
             )
             return result.scalar_one_or_none()
 
+    async def count_embeddable_segments(self, *, doc_id: int) -> int:
+        """统计指定文档需要 embedding 的分段数量。"""
+
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(func.count())
+                .select_from(KnowledgeSegment)
+                .where(
+                    KnowledgeSegment.document_id == doc_id,
+                    KnowledgeSegment.skip_embedding.is_(False),
+                )
+            )
+            return int(result.scalar_one())
+
     async def _update_with_expected_status(
         self,
         *,
@@ -155,17 +168,8 @@ class DocumentRepository:
             values={"status": DocumentStatus.UPLOADED.value},
         )
 
-    async def start_chunking(self, *, doc_id: int) -> None:
-        """将 CONVERTED 文档推进到 CHUNKING。"""
-
-        await self._update_with_expected_status(
-            doc_id=doc_id,
-            expected_status=DocumentStatus.CONVERTED,
-            values={"status": DocumentStatus.CHUNKING.value},
-        )
-
     async def complete_chunking(self, *, doc_id: int, segment_drafts: list) -> None:
-        """在一个事务中写入 segment 并将 CHUNKING 文档推进到 CHUNKED。"""
+        """在一个事务中写入 segment 并将 CONVERTED 文档推进到 CHUNKED。"""
 
         async with self._session_factory() as session:
             try:
@@ -190,7 +194,7 @@ class DocumentRepository:
                         update(KnowledgeDocument)
                         .where(
                             KnowledgeDocument.doc_id == doc_id,
-                            KnowledgeDocument.status == DocumentStatus.CHUNKING.value,
+                            KnowledgeDocument.status == DocumentStatus.CONVERTED.value,
                         )
                         .values(status=DocumentStatus.CHUNKED.value, updated_at=func.now())
                     )
@@ -201,15 +205,3 @@ class DocumentRepository:
                 raise
             except Exception as exc:
                 raise ChunkPersistenceFailed() from exc
-
-    async def rollback_to_converted(self, *, doc_id: int) -> None:
-        """切分失败后将 CHUNKING 文档回滚到 CONVERTED。"""
-
-        try:
-            await self._update_with_expected_status(
-                doc_id=doc_id,
-                expected_status=DocumentStatus.CHUNKING,
-                values={"status": DocumentStatus.CONVERTED.value},
-            )
-        except Exception as exc:
-            raise ChunkRollbackFailed() from exc

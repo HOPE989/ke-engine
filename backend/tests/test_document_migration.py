@@ -111,8 +111,9 @@ def test_knowledge_document_migration_constrains_status(monkeypatch):
 
     assert len(constraints) == 1
     constraint_sql = str(constraints[0].sqltext)
-    for status in ["INIT", "UPLOADED", "CONVERTING", "CONVERTED", "CHUNKING", "CHUNKED"]:
+    for status in ["INIT", "UPLOADED", "CONVERTING", "CONVERTED", "CHUNKED"]:
         assert status in constraint_sql
+    assert "CHUNKING" not in constraint_sql
 
 
 def test_knowledge_document_migration_adds_lookup_indexes(monkeypatch):

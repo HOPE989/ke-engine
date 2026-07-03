@@ -19,7 +19,6 @@ from app.infrastructure.redis_lock import document_chunking_lock
 from app.modules.document.errors import (
     ChunkLockUnavailable,
     ChunkPersistenceFailed,
-    ChunkRollbackFailed,
     ChunkSplittingFailed,
     ConvertedMarkdownInvalid,
     ConvertedMarkdownUnavailable,
@@ -135,9 +134,6 @@ async def chunk_document_endpoint(
         raise AppException("chunk splitting failed", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
     except ChunkPersistenceFailed as exc:
         raise AppException("chunk persistence failed", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
-    except ChunkRollbackFailed as exc:
-        raise AppException("chunk rollback failed", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
-
     return success_response(response)
 
 
