@@ -18,6 +18,7 @@ class DocumentStatus(str, Enum):
     CONVERTING = "CONVERTING"
     CONVERTED = "CONVERTED"
     CHUNKED = "CHUNKED"
+    VECTOR_STORED = "VECTOR_STORED"
 
 
 class KnowledgeDocument(Base):
@@ -26,7 +27,10 @@ class KnowledgeDocument(Base):
     __tablename__ = "knowledge_document"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('INIT', 'UPLOADED', 'CONVERTING', 'CONVERTED', 'CHUNKED')",
+            (
+                "status IN ('INIT', 'UPLOADED', 'CONVERTING', 'CONVERTED', "
+                "'CHUNKED', 'VECTOR_STORED')"
+            ),
             name="ck_knowledge_document_status",
         ),
     )
@@ -78,8 +82,8 @@ class KnowledgeSegment(Base):
     status: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        default="INIT",
-        server_default="INIT",
+        default="STORED",
+        server_default="STORED",
         index=True,
     )
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False)

@@ -1,8 +1,8 @@
 ## 1. Schema, Dependencies, and Settings
 
-- [ ] 1.1 RED: Add focused tests for `langchain-elasticsearch` dependency availability, `elasticsearch_url`, `elasticsearch_index`, `embedding_dimensions`, `EMBEDDING_DIMENSIONS`, `VECTOR_STORED`, and segment default `STORED`.
-- [ ] 1.2 GREEN: Add the dependency, settings fields, config defaults, ORM status updates, and Alembic migration for document/segment status changes.
-- [ ] 1.3 VERIFY: Run the focused config, migration, and persistence tests that fail in 1.1.
+- [x] 1.1 RED: Add focused tests for `langchain-elasticsearch` dependency availability, `elasticsearch_url`, `elasticsearch_index`, `embedding_dimensions`, `EMBEDDING_DIMENSIONS`, `VECTOR_STORED`, and segment default `STORED`.
+- [x] 1.2 GREEN: Add the dependency, settings fields, config defaults, ORM status updates, and Alembic migration for document/segment status changes.
+- [x] 1.3 VERIFY: Run the focused config, migration, and persistence tests that fail in 1.1.
 
 ## 2. Typed Event and Dispatch Triggers
 

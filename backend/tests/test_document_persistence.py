@@ -118,6 +118,7 @@ def test_knowledge_document_model_accepts_chunked_status_without_schema_drift():
     _, _, DocumentStatus, KnowledgeDocument, _ = _document_modules()
 
     assert DocumentStatus.CHUNKED.value == "CHUNKED"
+    assert DocumentStatus.VECTOR_STORED.value == "VECTOR_STORED"
 
     columns = KnowledgeDocument.__table__.columns
     assert columns["doc_id"].primary_key is True
@@ -133,6 +134,7 @@ def test_knowledge_document_model_accepts_chunked_status_without_schema_drift():
     assert len(constraints) == 1
     constraint_sql = str(constraints[0].sqltext)
     assert "CHUNKED" in constraint_sql
+    assert "VECTOR_STORED" in constraint_sql
 
 
 def test_knowledge_segment_model_defines_schema():
@@ -160,7 +162,7 @@ def test_knowledge_segment_model_defines_schema():
 
     assert columns["status"].type.length == 255
     assert columns["status"].nullable is False
-    assert str(columns["status"].server_default.arg).strip("'") == "INIT"
+    assert str(columns["status"].server_default.arg).strip("'") == "STORED"
 
     assert isinstance(columns["metadata"].type, postgresql.JSONB)
     assert columns["metadata"].nullable is False
@@ -319,7 +321,7 @@ def _segment_draft(**overrides):
         "document_id": 42,
         "chunk_order": 0,
         "embedding_id": None,
-        "status": "INIT",
+        "status": "STORED",
         "metadata": {"chunkId": "10001", "docId": "42"},
         "skip_embedding": False,
     }
@@ -353,6 +355,7 @@ async def test_complete_chunking_inserts_segments_and_marks_chunked_in_one_trans
     assert len(session.added) == 2
     assert all(isinstance(segment, KnowledgeSegment) for segment in session.added)
     assert [segment.chunk_id for segment in session.added] == ["10001", "10002"]
+    assert [segment.status for segment in session.added] == ["STORED", "STORED"]
     assert [segment.metadata_ for segment in session.added] == [
         {"chunkId": "10001", "docId": "42"},
         {"chunkId": "10002", "docId": "42"},

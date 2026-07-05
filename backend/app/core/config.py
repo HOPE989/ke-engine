@@ -127,6 +127,21 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openai_base_url: str | None = Field(default=None, validation_alias="OPENAI_BASE_URL")
     openai_model: str | None = Field(default=None, validation_alias="OPENAI_MODEL")
+    elasticsearch_url: str = Field(
+        default="http://localhost:9200",
+        validation_alias="ELASTICSEARCH_URL",
+        description="startup-only: Elasticsearch vector store client is configured during process startup.",
+    )
+    elasticsearch_index: str = Field(
+        default="ke-engine-vector",
+        validation_alias="ELASTICSEARCH_INDEX",
+        description="startup-only: Elasticsearch vector index is fixed for vector-storage workers.",
+    )
+    embedding_dimensions: int = Field(
+        default=1536,
+        validation_alias="EMBEDDING_DIMENSIONS",
+        description="startup-only: embedding dimensions must match the vector index mapping.",
+    )
 
     model_config = SettingsConfigDict(
         env_prefix="KE_ENGINE_",
@@ -172,6 +187,9 @@ STARTUP_ONLY_SETTINGS = {
     "kafka_bootstrap_servers",
     "document_convert_lock_expire_seconds",
     "snowflake_worker_id",
+    "elasticsearch_url",
+    "elasticsearch_index",
+    "embedding_dimensions",
 }
 REQUEST_TIME_SETTINGS = {"max_upload_size_mb"}
 

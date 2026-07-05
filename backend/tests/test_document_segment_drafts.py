@@ -53,6 +53,7 @@ def test_segment_drafts_allocate_snowflake_id_and_reuse_string_chunk_id():
         (9001, "10001"),
         (9002, "10002"),
     ]
+    assert [draft.status for draft in drafts] == ["STORED", "STORED"]
 
 
 def test_segment_drafts_assign_zero_based_order_including_parent_rows():

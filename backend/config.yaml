@@ -19,3 +19,6 @@ document_convert_lock_expire_seconds: 120
 snowflake_worker_id: 1
 openai_base_url:
 openai_model: gpt-4o-mini
+elasticsearch_url: http://127.0.0.1:9200
+elasticsearch_index: ke-engine-vector
+embedding_dimensions: 1536

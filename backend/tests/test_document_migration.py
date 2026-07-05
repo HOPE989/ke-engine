@@ -12,6 +12,10 @@ class MigrationRecorder:
     def __init__(self):
         self.tables = {}
         self.indexes = []
+        self.dropped_constraints = []
+        self.check_constraints = []
+        self.altered_columns = []
+        self.executed_sql = []
 
     def create_table(self, name, *elements, **kwargs):
         self.tables[name] = elements
@@ -26,18 +30,65 @@ class MigrationRecorder:
             }
         )
 
+    def drop_constraint(self, name, table_name, **kwargs):
+        self.dropped_constraints.append(
+            {
+                "name": name,
+                "table_name": table_name,
+                "kwargs": kwargs,
+            }
+        )
+
+    def create_check_constraint(self, name, table_name, condition, **kwargs):
+        self.check_constraints.append(
+            {
+                "name": name,
+                "table_name": table_name,
+                "condition": condition,
+                "kwargs": kwargs,
+            }
+        )
+
+    def alter_column(self, table_name, column_name, **kwargs):
+        self.altered_columns.append(
+            {
+                "table_name": table_name,
+                "column_name": column_name,
+                "kwargs": kwargs,
+            }
+        )
+
+    def execute(self, statement):
+        self.executed_sql.append(statement)
+
 
 def _load_knowledge_document_migration(monkeypatch):
     versions_dir = BACKEND_DIR / "alembic" / "versions"
-    migration_files = [
-        path
-        for path in versions_dir.glob("*.py")
-        if "knowledge_document" in path.read_text(encoding="utf-8")
-    ]
-    assert len(migration_files) == 1
+    migration_file = versions_dir / "202607010001_create_knowledge_document.py"
+    assert migration_file.exists()
 
     spec = importlib.util.spec_from_file_location(
         "knowledge_document_migration",
+        migration_file,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    recorder = MigrationRecorder()
+    monkeypatch.setattr(module, "op", recorder)
+    module.upgrade()
+    return recorder
+
+
+def _load_vector_storage_status_migration(monkeypatch):
+    versions_dir = BACKEND_DIR / "alembic" / "versions"
+    migration_files = list(versions_dir.glob("*add_document_vector_storage_status.py"))
+    assert len(migration_files) == 1
+
+    spec = importlib.util.spec_from_file_location(
+        "document_vector_storage_status_migration",
         migration_files[0],
     )
     assert spec is not None
@@ -111,7 +162,14 @@ def test_knowledge_document_migration_constrains_status(monkeypatch):
 
     assert len(constraints) == 1
     constraint_sql = str(constraints[0].sqltext)
-    for status in ["INIT", "UPLOADED", "CONVERTING", "CONVERTED", "CHUNKED"]:
+    for status in [
+        "INIT",
+        "UPLOADED",
+        "CONVERTING",
+        "CONVERTED",
+        "CHUNKED",
+        "VECTOR_STORED",
+    ]:
         assert status in constraint_sql
     assert "CHUNKING" not in constraint_sql
 
@@ -166,7 +224,7 @@ def test_knowledge_segment_migration_defines_columns_and_foreign_key(monkeypatch
     assert isinstance(columns["status"].type, sa.String)
     assert columns["status"].type.length == 255
     assert columns["status"].nullable is False
-    assert str(columns["status"].server_default.arg).strip("'") == "INIT"
+    assert str(columns["status"].server_default.arg).strip("'") == "STORED"
 
     assert isinstance(columns["metadata"].type, postgresql.JSONB)
     assert columns["metadata"].nullable is False
@@ -187,3 +245,32 @@ def test_knowledge_segment_migration_adds_lookup_indexes(monkeypatch):
     assert indexes_by_columns[("knowledge_segment", ("chunk_id",))]
     assert indexes_by_columns[("knowledge_segment", ("status",))]
     assert indexes_by_columns[("knowledge_segment", ("chunk_order",))]
+
+
+def test_vector_storage_status_migration_updates_existing_schema(monkeypatch):
+    recorder = _load_vector_storage_status_migration(monkeypatch)
+
+    assert recorder.dropped_constraints == [
+        {
+            "name": "ck_knowledge_document_status",
+            "table_name": "knowledge_document",
+            "kwargs": {"type_": "check"},
+        }
+    ]
+    assert recorder.check_constraints == [
+        {
+            "name": "ck_knowledge_document_status",
+            "table_name": "knowledge_document",
+            "condition": (
+                "status IN ('INIT', 'UPLOADED', 'CONVERTING', 'CONVERTED', "
+                "'CHUNKED', 'VECTOR_STORED')"
+            ),
+            "kwargs": {},
+        }
+    ]
+    assert recorder.altered_columns[0]["table_name"] == "knowledge_segment"
+    assert recorder.altered_columns[0]["column_name"] == "status"
+    assert str(recorder.altered_columns[0]["kwargs"]["server_default"]).strip("'") == "STORED"
+    assert recorder.executed_sql == [
+        "UPDATE knowledge_segment SET status = 'STORED' WHERE status = 'INIT'"
+    ]

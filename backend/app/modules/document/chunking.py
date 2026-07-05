@@ -241,7 +241,7 @@ def build_segment_drafts(
                 document_id=document.doc_id,
                 chunk_order=chunk_order,
                 embedding_id=None,
-                status="INIT",
+                status="STORED",
                 metadata=metadata,
                 skip_embedding=split_chunk.skip_embedding,
             )

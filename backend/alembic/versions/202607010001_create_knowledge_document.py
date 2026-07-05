@@ -40,7 +40,10 @@ def upgrade() -> None:
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
         sa.CheckConstraint(
-            "status IN ('INIT', 'UPLOADED', 'CONVERTING', 'CONVERTED', 'CHUNKED')",
+            (
+                "status IN ('INIT', 'UPLOADED', 'CONVERTING', 'CONVERTED', "
+                "'CHUNKED', 'VECTOR_STORED')"
+            ),
             name="ck_knowledge_document_status",
         ),
     )
@@ -60,7 +63,7 @@ def upgrade() -> None:
         ),
         sa.Column("chunk_order", sa.Integer(), nullable=False),
         sa.Column("embedding_id", sa.String(length=255), nullable=True),
-        sa.Column("status", sa.String(length=255), nullable=False, server_default=sa.text("'INIT'")),
+        sa.Column("status", sa.String(length=255), nullable=False, server_default=sa.text("'STORED'")),
         sa.Column("metadata", postgresql.JSONB(), nullable=False),
         sa.Column("skip_embedding", sa.Boolean(), nullable=False),
     )

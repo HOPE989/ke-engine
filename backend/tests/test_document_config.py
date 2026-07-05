@@ -11,6 +11,7 @@ DOCUMENT_ENV_LINES = [
     "MINIO_SECRET_KEY=minio-secret",
     "MINERU_API_KEY=mineru-key",
     "OPENAI_API_KEY=openai-key",
+    "EMBEDDING_DIMENSIONS=2048",
 ]
 
 
@@ -32,6 +33,9 @@ document_convert_lock_expire_seconds: 180
 snowflake_worker_id: 7
 openai_base_url: https://openai.example.com/v1
 openai_model: test-model
+elasticsearch_url: http://elasticsearch.example:9200
+elasticsearch_index: custom-vector-index
+embedding_dimensions: 768
 """
 
 
@@ -67,6 +71,9 @@ def test_document_settings_load_from_env_and_config_yaml(tmp_path, monkeypatch):
     assert settings.openai_api_key == "openai-key"
     assert settings.openai_base_url == "https://openai.example.com/v1"
     assert settings.openai_model == "test-model"
+    assert settings.elasticsearch_url == "http://elasticsearch.example:9200"
+    assert settings.elasticsearch_index == "custom-vector-index"
+    assert settings.embedding_dimensions == 2048
 
 
 def test_process_environment_overrides_config_yaml(tmp_path, monkeypatch):
@@ -109,6 +116,9 @@ def test_env_example_documents_user_required_and_secret_configuration_names():
         "SNOWFLAKE_WORKER_ID",
         "OPENAI_BASE_URL",
         "OPENAI_MODEL",
+        "ELASTICSEARCH_URL",
+        "ELASTICSEARCH_INDEX",
+        "EMBEDDING_DIMENSIONS",
     ]:
         assert f"{name}=" not in env_example
 
@@ -134,6 +144,9 @@ def test_config_yaml_documents_non_secret_runtime_defaults():
         "snowflake_worker_id",
         "openai_base_url",
         "openai_model",
+        "elasticsearch_url",
+        "elasticsearch_index",
+        "embedding_dimensions",
     ]:
         assert f"{name}:" in config_yaml
 
@@ -170,6 +183,18 @@ def test_document_chunking_dependencies_are_available():
     assert RecursiveCharacterTextSplitter.__name__ == "RecursiveCharacterTextSplitter"
 
 
+def test_document_vector_storage_dependencies_are_available():
+    assert importlib.util.find_spec("langchain_elasticsearch") is not None
+
+
+def test_document_vector_storage_settings_defaults():
+    settings = config.create_settings()
+
+    assert settings.elasticsearch_url == "http://127.0.0.1:9200"
+    assert settings.elasticsearch_index == "ke-engine-vector"
+    assert settings.embedding_dimensions == 1536
+
+
 def test_settings_document_startup_and_request_time_boundaries():
     assert config.STARTUP_ONLY_SETTINGS == {
         "database_url",
@@ -190,6 +215,9 @@ def test_settings_document_startup_and_request_time_boundaries():
         "kafka_bootstrap_servers",
         "document_convert_lock_expire_seconds",
         "snowflake_worker_id",
+        "elasticsearch_url",
+        "elasticsearch_index",
+        "embedding_dimensions",
     }
     assert config.REQUEST_TIME_SETTINGS == {"max_upload_size_mb"}
 
