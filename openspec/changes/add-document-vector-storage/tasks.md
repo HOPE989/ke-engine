@@ -19,10 +19,10 @@
 
 ## 4. Repository Operations
 
-- [ ] 4.1 RED: Add repository tests for selecting the first 100 pending embeddable segments ordered by `chunk_order` then `id`, without offset pagination.
-- [ ] 4.2 RED: Add repository tests for batch `embedding_id` updates, `VECTOR_STORED` segment status updates, remaining-pending double-check count, and document `CHUNKED -> VECTOR_STORED` completion inside an existing transaction.
-- [ ] 4.3 GREEN: Implement repository methods required by the vector-storage workflow.
-- [ ] 4.4 VERIFY: Run focused repository tests from 4.1 and 4.2.
+- [x] 4.1 RED: Add repository tests for selecting the first 100 pending embeddable segments ordered by `chunk_order` then `id`, without offset pagination.
+- [x] 4.2 RED: Add repository tests for batch `embedding_id` updates, `VECTOR_STORED` segment status updates, remaining-pending double-check count, and document `CHUNKED -> VECTOR_STORED` completion inside an existing transaction.
+- [x] 4.3 GREEN: Implement repository methods required by the vector-storage workflow.
+- [x] 4.4 VERIFY: Run focused repository tests from 4.1 and 4.2.
 
 ## 5. Vector Storage Workflow
 

@@ -98,6 +98,87 @@ class DocumentRepository:
             )
             return int(result.scalar_one())
 
+    async def list_pending_embeddable_segments(
+        self,
+        *,
+        session: AsyncSession,
+        doc_id: int,
+        limit: int = 100,
+    ) -> list[KnowledgeSegment]:
+        """在已有事务中按固定第一页读取待向量化分段。"""
+
+        result = await session.execute(
+            select(KnowledgeSegment)
+            .where(
+                KnowledgeSegment.document_id == doc_id,
+                KnowledgeSegment.status == "STORED",
+                KnowledgeSegment.skip_embedding.is_(False),
+                KnowledgeSegment.embedding_id.is_(None),
+            )
+            .order_by(KnowledgeSegment.chunk_order.asc(), KnowledgeSegment.id.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def mark_segments_vector_stored(
+        self,
+        *,
+        session: AsyncSession,
+        segment_embedding_ids: dict[int, str],
+    ) -> None:
+        """在已有事务中写回分段 vector ID 并推进分段状态。"""
+
+        for segment_id, embedding_id in segment_embedding_ids.items():
+            result = await session.execute(
+                update(KnowledgeSegment)
+                .where(KnowledgeSegment.id == segment_id)
+                .values(
+                    embedding_id=embedding_id,
+                    status=DocumentStatus.VECTOR_STORED.value,
+                )
+            )
+            if result.rowcount != 1:
+                raise DocumentStateConflict()
+
+    async def count_pending_embeddable_segments(
+        self,
+        *,
+        session: AsyncSession,
+        doc_id: int,
+    ) -> int:
+        """在已有事务中 double-check 仍待向量化的分段数。"""
+
+        result = await session.execute(
+            select(func.count())
+            .select_from(KnowledgeSegment)
+            .where(
+                KnowledgeSegment.document_id == doc_id,
+                KnowledgeSegment.status == "STORED",
+                KnowledgeSegment.skip_embedding.is_(False),
+                KnowledgeSegment.embedding_id.is_(None),
+            )
+        )
+        return int(result.scalar_one())
+
+    async def mark_document_vector_stored(
+        self,
+        *,
+        session: AsyncSession,
+        doc_id: int,
+    ) -> None:
+        """在已有事务中将 CHUNKED 文档推进到 VECTOR_STORED。"""
+
+        result = await session.execute(
+            update(KnowledgeDocument)
+            .where(
+                KnowledgeDocument.doc_id == doc_id,
+                KnowledgeDocument.status == DocumentStatus.CHUNKED.value,
+            )
+            .values(status=DocumentStatus.VECTOR_STORED.value, updated_at=func.now())
+        )
+        if result.rowcount != 1:
+            raise DocumentStateConflict()
+
     async def _update_with_expected_status(
         self,
         *,

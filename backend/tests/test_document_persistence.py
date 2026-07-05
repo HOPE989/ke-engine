@@ -26,7 +26,7 @@ class FakeTransaction:
 
 
 class FakeAsyncSession:
-    def __init__(self, *, rowcounts=None, scalar_result=None):
+    def __init__(self, *, rowcounts=None, scalar_result=None, scalars_result=None):
         self.added = []
         self.commits = 0
         self.begins = 0
@@ -36,6 +36,7 @@ class FakeAsyncSession:
         self.executed = []
         self._rowcounts = list(rowcounts or [1])
         self._scalar_result = scalar_result
+        self._scalars_result = scalars_result
 
     def add(self, instance):
         self.added.append(instance)
@@ -55,12 +56,19 @@ class FakeAsyncSession:
 
     async def execute(self, statement):
         self.executed.append(statement)
+        rowcount = self._rowcounts.pop(0) if self._rowcounts else 1
         if self._scalar_result is not None:
             return SimpleNamespace(
-                rowcount=self._rowcounts.pop(0),
+                rowcount=rowcount,
                 scalar_one_or_none=lambda: self._scalar_result,
+                scalar_one=lambda: self._scalar_result,
             )
-        return SimpleNamespace(rowcount=self._rowcounts.pop(0))
+        if self._scalars_result is not None:
+            return SimpleNamespace(
+                rowcount=rowcount,
+                scalars=lambda: SimpleNamespace(all=lambda: self._scalars_result),
+            )
+        return SimpleNamespace(rowcount=rowcount)
 
 
 class FakeSessionContext:
@@ -75,15 +83,17 @@ class FakeSessionContext:
 
 
 class FakeSessionFactory:
-    def __init__(self, *, rowcounts=None, scalar_result=None):
+    def __init__(self, *, rowcounts=None, scalar_result=None, scalars_result=None):
         self.rowcounts = rowcounts
         self.scalar_result = scalar_result
+        self.scalars_result = scalars_result
         self.sessions = []
 
     def __call__(self):
         session = FakeAsyncSession(
             rowcounts=self.rowcounts,
             scalar_result=self.scalar_result,
+            scalars_result=self.scalars_result,
         )
         self.sessions.append(session)
         return FakeSessionContext(session)
@@ -461,5 +471,90 @@ async def test_complete_chunking_rolls_back_inserted_segments_on_postgres_stale_
         async with cleanup_engine.begin() as connection:
             await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
         await cleanup_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_list_pending_embeddable_segments_uses_fixed_first_page_ordering():
+    repository, _, _, _, _ = _document_modules()
+    segments = [SimpleNamespace(id=9001), SimpleNamespace(id=9002)]
+    session = FakeAsyncSession(scalars_result=segments)
+    document_repository = repository.DocumentRepository(FakeSessionFactory())
+
+    result = await document_repository.list_pending_embeddable_segments(
+        session=session,
+        doc_id=42,
+    )
+
+    statement = session.executed[0]
+    sql = _compiled_sql(statement)
+    assert result == segments
+    assert "knowledge_segment.document_id = 42" in sql
+    assert "knowledge_segment.status = 'STORED'" in sql
+    assert "knowledge_segment.skip_embedding IS false" in sql
+    assert "knowledge_segment.embedding_id IS NULL" in sql
+    assert "ORDER BY knowledge_segment.chunk_order ASC, knowledge_segment.id ASC" in sql
+    assert "LIMIT 100" in sql
+    assert "OFFSET" not in sql
+
+
+@pytest.mark.asyncio
+async def test_mark_segments_vector_stored_updates_embedding_ids_and_status_without_commit():
+    repository, _, DocumentStatus, _, _ = _document_modules()
+    session = FakeAsyncSession(rowcounts=[1, 1])
+    document_repository = repository.DocumentRepository(FakeSessionFactory())
+
+    await document_repository.mark_segments_vector_stored(
+        session=session,
+        segment_embedding_ids={9001: "es-id-1", 9002: "es-id-2"},
+    )
+
+    assert len(session.executed) == 2
+    assert [_statement_value(statement, "embedding_id") for statement in session.executed] == [
+        "es-id-1",
+        "es-id-2",
+    ]
+    assert [_statement_value(statement, "status") for statement in session.executed] == [
+        DocumentStatus.VECTOR_STORED.value,
+        DocumentStatus.VECTOR_STORED.value,
+    ]
+    assert "knowledge_segment.id = 9001" in _compiled_sql(session.executed[0])
+    assert "knowledge_segment.id = 9002" in _compiled_sql(session.executed[1])
+    assert session.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_count_pending_embeddable_segments_double_checks_remaining_rows():
+    repository, _, _, _, _ = _document_modules()
+    session = FakeAsyncSession(scalar_result=3)
+    document_repository = repository.DocumentRepository(FakeSessionFactory())
+
+    count = await document_repository.count_pending_embeddable_segments(
+        session=session,
+        doc_id=42,
+    )
+
+    sql = _compiled_sql(session.executed[0])
+    assert count == 3
+    assert "knowledge_segment.document_id = 42" in sql
+    assert "knowledge_segment.status = 'STORED'" in sql
+    assert "knowledge_segment.skip_embedding IS false" in sql
+    assert "knowledge_segment.embedding_id IS NULL" in sql
+    assert session.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_mark_document_vector_stored_completes_chunked_document_without_commit():
+    repository, _, DocumentStatus, _, _ = _document_modules()
+    session = FakeAsyncSession()
+    document_repository = repository.DocumentRepository(FakeSessionFactory())
+
+    await document_repository.mark_document_vector_stored(session=session, doc_id=42)
+
+    statement = session.executed[0]
+    assert _statement_value(statement, "status") == DocumentStatus.VECTOR_STORED.value
+    sql = _compiled_sql(statement)
+    assert "knowledge_document.doc_id = 42" in sql
+    assert "knowledge_document.status = 'CHUNKED'" in sql
+    assert session.commits == 0
 
 
