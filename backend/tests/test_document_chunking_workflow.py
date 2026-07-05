@@ -110,6 +110,7 @@ async def _chunk_document(**overrides):
         "lock": FakeLock(),
         "chunk_size": 100,
         "overlap": 0,
+        "embed_store_dispatcher": None,
     }
     values.update(overrides)
     return await chunk_document(**values)
@@ -242,6 +243,48 @@ async def test_chunk_workflow_success_persists_segments_and_returns_response():
     assert repository.completed[0]["segment_drafts"][0].text == "short content"
     assert storage.downloaded_keys == ["documents/42/converted/document.md"]
     assert lock.releases == 1
+
+
+@pytest.mark.asyncio
+async def test_chunk_workflow_dispatches_vector_storage_after_persistence():
+    calls = []
+
+    class RecordingRepository(FakeRepository):
+        async def complete_chunking(self, *, doc_id, segment_drafts):
+            calls.append(("persist", doc_id))
+            await super().complete_chunking(doc_id=doc_id, segment_drafts=segment_drafts)
+
+    class RecordingDispatcher:
+        async def dispatch(self, doc_id):
+            calls.append(("dispatch", doc_id))
+
+    response = await _chunk_document(
+        document_repository=RecordingRepository(_document()),
+        storage=FakeStorage(payload=b"# Guide\nshort content"),
+        embed_store_dispatcher=RecordingDispatcher(),
+    )
+
+    assert response.status == DocumentStatus.CHUNKED.value
+    assert calls == [("persist", 42), ("dispatch", 42)]
+
+
+@pytest.mark.asyncio
+async def test_chunk_workflow_does_not_dispatch_vector_storage_when_persistence_fails():
+    calls = []
+
+    class RecordingDispatcher:
+        async def dispatch(self, doc_id):
+            calls.append(("dispatch", doc_id))
+
+    from app.modules.document.errors import ChunkPersistenceFailed
+
+    with pytest.raises(ChunkPersistenceFailed):
+        await _chunk_document(
+            document_repository=FailingCompleteRepository(_document()),
+            embed_store_dispatcher=RecordingDispatcher(),
+        )
+
+    assert calls == []
 
 
 @pytest.mark.asyncio

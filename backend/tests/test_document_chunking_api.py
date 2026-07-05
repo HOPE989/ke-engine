@@ -6,6 +6,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core import config
 from app.main import create_app
+from app.modules.document.models import DocumentStatus
 from app.modules.document.schemas import DocumentChunkResponse
 
 
@@ -66,6 +67,7 @@ async def chunk_api_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncCl
         file_detector=object(),
         id_generator="id-generator",
         conversion_dispatcher=object(),
+        embed_store_dispatcher=object(),
         redis_client="redis-client",
     )
 
@@ -167,3 +169,102 @@ async def test_chunk_endpoint_maps_workflow_errors(
 
     assert_error_response(response, status_code, message)
     assert len(calls["workflow"]) == 1
+
+
+@pytest.fixture
+async def embed_store_api_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncClient, dict]]:
+    env_file = tmp_path / ".env"
+    env_file.write_text(DOCUMENT_ENV, encoding="utf-8")
+    monkeypatch.setattr(config, "DEFAULT_ENV_FILE", env_file)
+    for line in DOCUMENT_ENV.splitlines():
+        monkeypatch.delenv(line.split("=", 1)[0], raising=False)
+    config.get_settings.cache_clear()
+
+    app = create_app()
+    calls = {
+        "document": SimpleNamespace(doc_id=42, status=DocumentStatus.CHUNKED.value),
+        "dispatches": [],
+        "dispatch_error": None,
+    }
+
+    class FakeRepository:
+        async def get_document(self, doc_id):
+            return calls["document"]
+
+    class FakeEmbedStoreDispatcher:
+        async def dispatch(self, doc_id):
+            calls["dispatches"].append(doc_id)
+            if calls["dispatch_error"] is not None:
+                raise calls["dispatch_error"]
+
+    app.state.document_runtime = SimpleNamespace(
+        repository=FakeRepository(),
+        storage="storage",
+        file_detector=object(),
+        id_generator="id-generator",
+        conversion_dispatcher=object(),
+        embed_store_dispatcher=FakeEmbedStoreDispatcher(),
+        redis_client="redis-client",
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client, calls
+
+    config.get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_embed_store_endpoint_dispatches_for_chunked_document(embed_store_api_client):
+    client, calls = embed_store_api_client
+
+    response = await client.post("/api/v1/document/42/embed-store")
+
+    assert response.status_code == 200
+    assert response.json() == {"code": 0, "message": "success", "data": None}
+    assert calls["dispatches"] == [42]
+
+
+@pytest.mark.asyncio
+async def test_embed_store_endpoint_reports_dispatch_failure(embed_store_api_client):
+    client, calls = embed_store_api_client
+    calls["dispatch_error"] = RuntimeError("kafka unavailable")
+
+    response = await client.post("/api/v1/document/42/embed-store")
+
+    assert_error_response(response, 503, "vector storage dispatch failed")
+    assert calls["dispatches"] == [42]
+
+
+@pytest.mark.asyncio
+async def test_embed_store_endpoint_rejects_missing_document(embed_store_api_client):
+    client, calls = embed_store_api_client
+    calls["document"] = None
+
+    response = await client.post("/api/v1/document/42/embed-store")
+
+    assert_error_response(response, 404, "document not found")
+    assert calls["dispatches"] == []
+
+
+@pytest.mark.asyncio
+async def test_embed_store_endpoint_rejects_non_chunked_document(embed_store_api_client):
+    client, calls = embed_store_api_client
+    calls["document"] = SimpleNamespace(doc_id=42, status=DocumentStatus.CONVERTED.value)
+
+    response = await client.post("/api/v1/document/42/embed-store")
+
+    assert_error_response(response, 409, "document state conflict")
+    assert calls["dispatches"] == []
+
+
+@pytest.mark.asyncio
+async def test_embed_store_endpoint_is_idempotent_for_vector_stored_document(embed_store_api_client):
+    client, calls = embed_store_api_client
+    calls["document"] = SimpleNamespace(doc_id=42, status=DocumentStatus.VECTOR_STORED.value)
+
+    response = await client.post("/api/v1/document/42/embed-store")
+
+    assert response.status_code == 200
+    assert response.json() == {"code": 0, "message": "success", "data": None}
+    assert calls["dispatches"] == []

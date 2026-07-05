@@ -20,6 +20,25 @@ def test_document_convert_requested_serializes_doc_id_as_string():
     assert DOCUMENT_CONVERT_REQUESTED_TOPIC == "document.convert.requested"
 
 
+def test_document_embed_store_requested_serializes_doc_id_as_string():
+    from app.modules.document.events import (
+        DOCUMENT_EMBED_STORE_REQUESTED_TOPIC,
+        DocumentEmbedStoreRequested,
+    )
+
+    event = DocumentEmbedStoreRequested.create(doc_id=42)
+
+    payload = json.loads(event.to_json())
+    parsed = DocumentEmbedStoreRequested.from_json(event.to_json())
+
+    assert payload["event_type"] == "document.embed_store.requested"
+    assert payload["doc_id"] == "42"
+    assert payload["event_id"]
+    assert payload["occurred_at"].endswith("Z")
+    assert parsed.doc_id_int() == 42
+    assert DOCUMENT_EMBED_STORE_REQUESTED_TOPIC == "document.embed_store.requested"
+
+
 def test_document_convert_requested_rejects_wrong_event_type():
     from app.modules.document.events import DocumentConvertRequested
 

@@ -50,3 +50,7 @@ class ChunkSplittingFailed(Exception):
 
 class ChunkLockUnavailable(Exception):
     """文档切分 Redis 锁基础设施不可用时抛出。"""
+
+
+class DocumentVectorStorageDispatchFailed(Exception):
+    """文档向量存储事件派发失败时抛出。"""

@@ -6,9 +6,9 @@
 
 ## 2. Typed Event and Dispatch Triggers
 
-- [ ] 2.1 RED: Add tests for `DocumentEmbedStoreRequested` serialization, dispatcher topic/key/flush behavior, chunk-success dispatch after persistence, manual API dispatch success, and manual API Kafka dispatch failure returning `vector storage dispatch failed`.
-- [ ] 2.2 GREEN: Implement the vector-storage event type, dispatcher, runtime wiring, chunking success dispatch, and manual `POST /api/v1/document/{doc_id}/embed-store` endpoint.
-- [ ] 2.3 VERIFY: Run focused event, dispatcher, chunking workflow, and API tests from 2.1.
+- [x] 2.1 RED: Add tests for `DocumentEmbedStoreRequested` serialization, dispatcher topic/key/flush behavior, chunk-success dispatch after persistence, manual API dispatch success, and manual API Kafka dispatch failure returning `vector storage dispatch failed`.
+- [x] 2.2 GREEN: Implement the vector-storage event type, dispatcher, runtime wiring, chunking success dispatch, and manual `POST /api/v1/document/{doc_id}/embed-store` endpoint.
+- [x] 2.3 VERIFY: Run focused event, dispatcher, chunking workflow, and API tests from 2.1.
 
 ## 3. Vector Store Adapter
 

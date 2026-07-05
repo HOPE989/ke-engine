@@ -43,7 +43,10 @@ async def document_runtime(
     from app.infrastructure.minio import ensure_minio_bucket, get_minio_client
     from app.infrastructure.redis_lock import create_redis_client
     from app.infrastructure.snowflake import SnowflakeIdGenerator
-    from app.modules.document.dispatcher import KafkaDocumentConversionDispatcher
+    from app.modules.document.dispatcher import (
+        KafkaDocumentConversionDispatcher,
+        KafkaDocumentEmbedStoreDispatcher,
+    )
     from app.modules.document.repository import DocumentRepository
     from app.modules.document.storage import DocumentObjectStorage
 
@@ -62,14 +65,15 @@ async def document_runtime(
             public_base_url=settings.minio_public_base_url,
         )
 
+        kafka_producer = create_kafka_producer(settings.kafka_bootstrap_servers)
+
         application.state.document_runtime = DocumentRuntime(
             repository=DocumentRepository(get_session_factory()),
             storage=storage,
             file_detector=get_magika_client(),
             id_generator=SnowflakeIdGenerator(worker_id=settings.snowflake_worker_id),
-            conversion_dispatcher=KafkaDocumentConversionDispatcher(
-                create_kafka_producer(settings.kafka_bootstrap_servers),
-            ),
+            conversion_dispatcher=KafkaDocumentConversionDispatcher(kafka_producer),
+            embed_store_dispatcher=KafkaDocumentEmbedStoreDispatcher(kafka_producer),
             redis_client=redis_client,
         )
         stack.callback(_discard_app_state_attr, application, "document_runtime")

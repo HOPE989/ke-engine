@@ -13,4 +13,5 @@ class DocumentRuntime:
     file_detector: Any
     id_generator: Any
     conversion_dispatcher: Any
+    embed_store_dispatcher: Any
     redis_client: Any

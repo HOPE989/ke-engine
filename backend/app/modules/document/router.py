@@ -25,6 +25,7 @@ from app.modules.document.errors import (
     DocumentNotFound,
     DocumentStateConflict,
     DocumentStorageFailed,
+    DocumentVectorStorageDispatchFailed,
 )
 from app.modules.document.runtime import DocumentRuntime
 from app.modules.document.schemas import (
@@ -38,7 +39,7 @@ from app.modules.document.schemas import (
     validate_document_chunk_request,
     validate_document_upload,
 )
-from app.modules.document.workflow import chunk_document, upload_document
+from app.modules.document.workflow import chunk_document, request_document_vector_storage, upload_document
 
 router = APIRouter()
 
@@ -119,6 +120,7 @@ async def chunk_document_endpoint(
             lock=lock,
             chunk_size=validated_request.chunk_size,
             overlap=validated_request.overlap,
+            embed_store_dispatcher=document_runtime.embed_store_dispatcher,
         )
     except DocumentNotFound as exc:
         raise AppException("document not found", status.HTTP_404_NOT_FOUND) from exc
@@ -135,6 +137,31 @@ async def chunk_document_endpoint(
     except ChunkPersistenceFailed as exc:
         raise AppException("chunk persistence failed", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
     return success_response(response)
+
+
+@router.post("/{doc_id}/embed-store", response_model=APIResponse[None])
+async def embed_store_document_endpoint(
+    doc_id: int,
+    document_runtime: Annotated[DocumentRuntime, Depends(get_document_runtime)],
+) -> APIResponse[None]:
+    """派发一个已切分文档的向量存储任务。"""
+
+    try:
+        await request_document_vector_storage(
+            doc_id=doc_id,
+            document_repository=document_runtime.repository,
+            embed_store_dispatcher=document_runtime.embed_store_dispatcher,
+        )
+    except DocumentNotFound as exc:
+        raise AppException("document not found", status.HTTP_404_NOT_FOUND) from exc
+    except DocumentStateConflict as exc:
+        raise AppException("document state conflict", status.HTTP_409_CONFLICT) from exc
+    except DocumentVectorStorageDispatchFailed as exc:
+        raise AppException(
+            "vector storage dispatch failed",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        ) from exc
+    return success_response(None)
 
 
 @router.get("/{doc_id}", response_model=APIResponse[DocumentMetadata])

@@ -167,6 +167,7 @@ def test_document_runtime_groups_all_document_module_runtime_resources():
         "file_detector",
         "id_generator",
         "conversion_dispatcher",
+        "embed_store_dispatcher",
         "redis_client",
     ]
 
@@ -200,6 +201,7 @@ def test_api_deps_own_document_runtime_initialization_layer():
     assert "get_magika_client()" in source
     assert "SnowflakeIdGenerator(worker_id=settings.snowflake_worker_id)" in source
     assert "KafkaDocumentConversionDispatcher(" in source
+    assert "KafkaDocumentEmbedStoreDispatcher(" in source
     assert "create_kafka_producer(" in source
     assert "create_redis_client(" in source
     assert "push_async_callback(close_engine)" in source
@@ -299,6 +301,10 @@ async def test_document_runtime_ensures_storage_bucket_before_serving(monkeypatc
         def __init__(self, producer):
             calls.append(("create_dispatcher", producer))
 
+    class FakeKafkaDocumentEmbedStoreDispatcher:
+        def __init__(self, producer):
+            calls.append(("create_embed_store_dispatcher", producer))
+
     class FakeRedisClient:
         def close(self):
             calls.append(("redis_close", None))
@@ -332,6 +338,10 @@ async def test_document_runtime_ensures_storage_bucket_before_serving(monkeypatc
         "app.modules.document.dispatcher.KafkaDocumentConversionDispatcher",
         FakeKafkaDocumentConversionDispatcher,
     )
+    monkeypatch.setattr(
+        "app.modules.document.dispatcher.KafkaDocumentEmbedStoreDispatcher",
+        FakeKafkaDocumentEmbedStoreDispatcher,
+    )
 
     app = SimpleNamespace(state=SimpleNamespace())
     settings = SimpleNamespace(
@@ -353,8 +363,10 @@ async def test_document_runtime_ensures_storage_bucket_before_serving(monkeypatc
             ("create_storage", "documents"),
             ("create_id_generator", 7),
             ("create_dispatcher", "producer"),
+            ("create_embed_store_dispatcher", "producer"),
         ]
         assert app.state.document_runtime.storage.bucket == "documents"
+        assert app.state.document_runtime.embed_store_dispatcher is not None
         assert app.state.document_runtime.redis_client is not None
 
 

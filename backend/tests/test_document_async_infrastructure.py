@@ -52,6 +52,38 @@ async def test_conversion_dispatcher_produces_kafka_event():
     assert calls[1] == ("flush", None)
 
 
+@pytest.mark.asyncio
+async def test_embed_store_dispatcher_produces_kafka_event():
+    from app.modules.document import dispatcher
+
+    calls = []
+
+    class FakeProducer:
+        def __init__(self):
+            self.delivery = None
+
+        async def produce(self, *, topic, key, value):
+            calls.append(("produce", topic, key, value))
+            delivery = asyncio.Future()
+            self.delivery = delivery
+            return delivery
+
+        async def flush(self):
+            calls.append(("flush", None))
+            self.delivery.set_result(SimpleNamespace(topic="document.embed_store.requested"))
+
+    await asyncio.wait_for(
+        dispatcher.KafkaDocumentEmbedStoreDispatcher(FakeProducer()).dispatch(42),
+        timeout=0.1,
+    )
+
+    assert calls[0][0] == "produce"
+    assert calls[0][1] == "document.embed_store.requested"
+    assert calls[0][2] == b"42"
+    assert b'"event_type":"document.embed_store.requested"' in calls[0][3]
+    assert calls[1] == ("flush", None)
+
+
 class FakeRedisClient:
     def __init__(self, calls):
         self.calls = calls

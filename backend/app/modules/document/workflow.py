@@ -16,6 +16,7 @@ from app.modules.document.errors import (
     DocumentNotFound,
     DocumentStateConflict,
     DocumentStorageFailed,
+    DocumentVectorStorageDispatchFailed,
 )
 from app.modules.document.chunking import (
     build_segment_drafts,
@@ -237,6 +238,7 @@ async def chunk_document(
     lock: Any,
     chunk_size: int,
     overlap: int,
+    embed_store_dispatcher: Any | None = None,
 ) -> Any:
     """执行单个已转换文档的手动切分工作流。"""
 
@@ -282,6 +284,8 @@ async def chunk_document(
             raise
         except Exception as exc:
             raise ChunkPersistenceFailed() from exc
+        if embed_store_dispatcher is not None:
+            await embed_store_dispatcher.dispatch(doc_id)
         return DocumentChunkResponse(
             doc_id=str(doc_id),
             status=DocumentStatus.CHUNKED.value,
@@ -289,3 +293,25 @@ async def chunk_document(
         )
 
     return await run_with_document_chunk_lock(lock=lock, operation=operation)
+
+
+async def request_document_vector_storage(
+    *,
+    doc_id: int,
+    document_repository: Any,
+    embed_store_dispatcher: Any,
+) -> None:
+    """Validate one document and dispatch vector-storage work to Kafka."""
+
+    document = await document_repository.get_document(doc_id)
+    if document is None:
+        raise DocumentNotFound()
+    if document.status == DocumentStatus.VECTOR_STORED.value:
+        return
+    if document.status != DocumentStatus.CHUNKED.value:
+        raise DocumentStateConflict()
+
+    try:
+        await embed_store_dispatcher.dispatch(doc_id)
+    except Exception as exc:
+        raise DocumentVectorStorageDispatchFailed() from exc
