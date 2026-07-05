@@ -41,6 +41,7 @@ db-init:
 
 kafka-topics-init:
 	docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --create --if-not-exists --topic document.convert.requested --partitions 1 --replication-factor 1
+	docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --create --if-not-exists --topic document.embed_store.requested --partitions 1 --replication-factor 1
 
 kafka-topics-list:
 	docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --list

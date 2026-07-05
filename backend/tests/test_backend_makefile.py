@@ -18,6 +18,7 @@ def test_root_makefile_exposes_backend_dev_targets():
     assert "--create" in content
     assert "--if-not-exists" in content
     assert "--topic document.convert.requested" in content
+    assert "--topic document.embed_store.requested" in content
 
 
 def test_root_makefile_exposes_database_init_target():
