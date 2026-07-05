@@ -19,6 +19,10 @@ TEXT_FIELD = "text"
 class VectorStoreIdCountMismatch(Exception):
     """Raised when Elasticsearch returns a different ID count than stored segments."""
 
+    def __init__(self, *, returned_ids: list[str] | None = None) -> None:
+        self.returned_ids = list(returned_ids or [])
+        super().__init__("vector store returned ID count mismatch")
+
 
 class VectorIndexDimensionMismatch(Exception):
     """Raised when an existing vector index has incompatible dimensions."""
@@ -113,7 +117,7 @@ class ElasticsearchVectorStoreAdapter:
         ]
         ids = await self._store.aadd_documents(documents)
         if len(ids) != len(segments):
-            raise VectorStoreIdCountMismatch()
+            raise VectorStoreIdCountMismatch(returned_ids=ids)
         return ids
 
     async def delete_by_ids(self, ids: list[str]) -> None:

@@ -26,10 +26,10 @@
 
 ## 5. Vector Storage Workflow
 
-- [ ] 5.1 RED: Add workflow tests for success with multiple DB pages, zero embeddable segments, skipped parent segments, fixed first-page scanning, final double-check, and document completion.
-- [ ] 5.2 RED: Add workflow tests for Redis lock busy, OpenAI failure, Elasticsearch failure, returned-ID count mismatch, DB update failure, double-check failure, DB rollback, pre-run ES cleanup by `docId`, and failure cleanup by returned IDs plus `docId`.
-- [ ] 5.3 GREEN: Implement the vector-storage workflow with Redis lock, pre-run cleanup, one long DB transaction, model/vector-store calls inside the transaction, batch scanning, double-check, rollback, and cleanup compensation.
-- [ ] 5.4 VERIFY: Run focused vector-storage workflow tests from 5.1 and 5.2.
+- [x] 5.1 RED: Add workflow tests for success with multiple DB pages, zero embeddable segments, skipped parent segments, fixed first-page scanning, final double-check, and document completion.
+- [x] 5.2 RED: Add workflow tests for Redis lock busy, OpenAI failure, Elasticsearch failure, returned-ID count mismatch, DB update failure, double-check failure, DB rollback, pre-run ES cleanup by `docId`, and failure cleanup by returned IDs plus `docId`.
+- [x] 5.3 GREEN: Implement the vector-storage workflow with Redis lock, pre-run cleanup, one long DB transaction, model/vector-store calls inside the transaction, batch scanning, double-check, rollback, and cleanup compensation.
+- [x] 5.4 VERIFY: Run focused vector-storage workflow tests from 5.1 and 5.2.
 
 ## 6. Kafka Worker Commit Semantics
 

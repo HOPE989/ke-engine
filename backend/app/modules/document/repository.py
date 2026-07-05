@@ -51,6 +51,11 @@ class DocumentRepository:
 
         self._session_factory = session_factory
 
+    def session(self):
+        """打开一个由调用方控制事务边界的数据库 session。"""
+
+        return self._session_factory()
+
     async def create_init_document(
         self,
         *,
