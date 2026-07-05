@@ -2,7 +2,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_start_worker_consumers_runs_document_convert(monkeypatch):
+async def test_start_worker_consumers_runs_document_workers(monkeypatch):
     from app.workers import kafka_worker
 
     calls = []
@@ -21,12 +21,20 @@ async def test_start_worker_consumers_runs_document_convert(monkeypatch):
     async def fake_document_consumer():
         return None
 
+    async def fake_vector_storage_consumer():
+        return None
+
     monkeypatch.setattr(kafka_worker.asyncio, "TaskGroup", FakeTaskGroup)
     monkeypatch.setattr(kafka_worker, "run_document_conversion_consumer", fake_document_consumer)
+    monkeypatch.setattr(
+        kafka_worker,
+        "run_document_vector_storage_consumer",
+        fake_vector_storage_consumer,
+    )
 
     await kafka_worker.start_worker_consumers()
 
-    assert len(calls) == 1
+    assert len(calls) == 2
 
 
 @pytest.mark.asyncio

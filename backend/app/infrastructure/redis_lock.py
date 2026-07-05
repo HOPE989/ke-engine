@@ -42,3 +42,19 @@ def document_chunking_lock(
         expire=expire_seconds,
         auto_renewal=True,
     )
+
+
+def document_embed_store_lock(
+    *,
+    redis_client: Any,
+    doc_id: int,
+    expire_seconds: int,
+):
+    """创建单文档向量存储锁。"""
+
+    return redis_lock.Lock(
+        redis_client,
+        name=f"document:{doc_id}:embed-store",
+        expire=expire_seconds,
+        auto_renewal=True,
+    )

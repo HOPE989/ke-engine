@@ -33,10 +33,10 @@
 
 ## 6. Kafka Worker Commit Semantics
 
-- [ ] 6.1 RED: Add worker tests for topic subscription, consumer group id, commit after successful completion, commit for missing document, commit for already `VECTOR_STORED`, and commit for non-`CHUNKED` business state.
-- [ ] 6.2 RED: Add worker tests for no commit on busy lock, OpenAI/ES/DB infrastructure failure, vector ID count mismatch, and double-check failure.
-- [ ] 6.3 GREEN: Implement the vector-storage Kafka consumer loop and message handler with explicit terminal-vs-retryable commit rules.
-- [ ] 6.4 VERIFY: Run focused Kafka worker tests from 6.1 and 6.2.
+- [x] 6.1 RED: Add worker tests for topic subscription, consumer group id, commit after successful completion, commit for missing document, commit for already `VECTOR_STORED`, and commit for non-`CHUNKED` business state.
+- [x] 6.2 RED: Add worker tests for no commit on busy lock, OpenAI/ES/DB infrastructure failure, vector ID count mismatch, and double-check failure.
+- [x] 6.3 GREEN: Implement the vector-storage Kafka consumer loop and message handler with explicit terminal-vs-retryable commit rules.
+- [x] 6.4 VERIFY: Run focused Kafka worker tests from 6.1 and 6.2.
 
 ## 7. Full Verification
 
