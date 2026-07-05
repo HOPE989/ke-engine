@@ -40,5 +40,5 @@
 
 ## 7. Full Verification
 
-- [ ] 7.1 Run `cd backend && uv run python -m pytest`.
-- [ ] 7.2 Run `openspec validate add-document-vector-storage --strict`.
+- [x] 7.1 Run `cd backend && uv run python -m pytest`.
+- [x] 7.2 Run `openspec validate add-document-vector-storage --strict`.
