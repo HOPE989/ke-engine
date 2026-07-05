@@ -12,10 +12,10 @@
 
 ## 3. Vector Store Adapter
 
-- [ ] 3.1 RED: Add adapter tests for `OpenAIEmbeddings(model="text-embedding-v4", chunk_size=9, dimensions=settings.embedding_dimensions, check_embedding_ctx_length=False)`.
-- [ ] 3.2 RED: Add adapter tests proving `segment.text` becomes page content, `segment.metadata` becomes metadata, returned Elasticsearch IDs are preserved in order, returned-ID count mismatch fails, and cleanup can delete by IDs and by metadata `docId`.
-- [ ] 3.3 GREEN: Implement the minimal Elasticsearch vector-store adapter and minimal index ensure/validate for configured dimensions.
-- [ ] 3.4 VERIFY: Run focused vector-store adapter tests from 3.1 and 3.2.
+- [x] 3.1 RED: Add adapter tests for `OpenAIEmbeddings(model="text-embedding-v4", chunk_size=9, dimensions=settings.embedding_dimensions, check_embedding_ctx_length=False)`.
+- [x] 3.2 RED: Add adapter tests proving `segment.text` becomes page content, `segment.metadata` becomes metadata, returned Elasticsearch IDs are preserved in order, returned-ID count mismatch fails, and cleanup can delete by IDs and by metadata `docId`.
+- [x] 3.3 GREEN: Implement the minimal Elasticsearch vector-store adapter and minimal index ensure/validate for configured dimensions.
+- [x] 3.4 VERIFY: Run focused vector-store adapter tests from 3.1 and 3.2.
 
 ## 4. Repository Operations
 
