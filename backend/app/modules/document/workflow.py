@@ -240,7 +240,12 @@ async def chunk_document(
     overlap: int,
     embed_store_dispatcher: Any | None = None,
 ) -> Any:
-    """执行单个已转换文档的手动切分工作流。"""
+    """执行单个已转换文档的手动切分工作流。
+
+    切分流程只负责把 converted Markdown 拆成数据库 segment，并把文档推进到 `CHUNKED`。
+    当 `embed_store_dispatcher` 存在时，成功持久化后再派发向量存储事件；派发发生在
+    `complete_chunking` 返回之后，避免 chunk 持久化失败时产生无法处理的向量存储消息。
+    """
 
     async def operation() -> DocumentChunkResponse:
         document = await document_repository.get_document(doc_id)
@@ -284,6 +289,7 @@ async def chunk_document(
             raise
         except Exception as exc:
             raise ChunkPersistenceFailed() from exc
+        # 只有 segment 和文档状态已经成功落库后，才触发下一阶段向量存储。
         if embed_store_dispatcher is not None:
             await embed_store_dispatcher.dispatch(doc_id)
         return DocumentChunkResponse(
@@ -301,17 +307,26 @@ async def request_document_vector_storage(
     document_repository: Any,
     embed_store_dispatcher: Any,
 ) -> None:
-    """Validate one document and dispatch vector-storage work to Kafka."""
+    """校验文档状态并手动派发向量存储事件。
 
+    该函数服务于手动 API 触发：它不会调用 embedding model，也不会写 Elasticsearch。
+    它只负责判断文档是否存在、是否已经完成、是否处于可处理的 `CHUNKED` 状态，然后派发
+    与自动 chunk-success path 相同的 Kafka 事件。
+    """
+
+    # 1. 找不到文档时，不派发 Kafka，交由 router 映射为 404。
     document = await document_repository.get_document(doc_id)
     if document is None:
         raise DocumentNotFound()
+    # 2. 已完成文档保持幂等成功，不重复派发向量存储事件。
     if document.status == DocumentStatus.VECTOR_STORED.value:
         return
+    # 3. 只有 CHUNKED 文档允许进入向量存储阶段。
     if document.status != DocumentStatus.CHUNKED.value:
         raise DocumentStateConflict()
 
     try:
+        # 4. 手动入口和自动入口共用同一事件类型，避免两套 worker 逻辑。
         await embed_store_dispatcher.dispatch(doc_id)
     except Exception as exc:
         raise DocumentVectorStorageDispatchFailed() from exc

@@ -130,17 +130,26 @@ class Settings(BaseSettings):
     elasticsearch_url: str = Field(
         default="http://localhost:9200",
         validation_alias="ELASTICSEARCH_URL",
-        description="startup-only: Elasticsearch vector store client is configured during process startup.",
+        description=(
+            "startup-only: Elasticsearch vector store client is configured during "
+            "vector-storage worker startup."
+        ),
     )
     elasticsearch_index: str = Field(
         default="ke-engine-vector",
         validation_alias="ELASTICSEARCH_INDEX",
-        description="startup-only: Elasticsearch vector index is fixed for vector-storage workers.",
+        description=(
+            "startup-only: vector-storage workers write all segment vectors to this "
+            "Elasticsearch index."
+        ),
     )
     embedding_dimensions: int = Field(
         default=1536,
         validation_alias="EMBEDDING_DIMENSIONS",
-        description="startup-only: embedding dimensions must match the vector index mapping.",
+        description=(
+            "startup-only: embedding dimensions must match OpenAIEmbeddings and the "
+            "Elasticsearch dense_vector mapping."
+        ),
     )
 
     model_config = SettingsConfigDict(

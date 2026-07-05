@@ -144,9 +144,14 @@ async def embed_store_document_endpoint(
     doc_id: int,
     document_runtime: Annotated[DocumentRuntime, Depends(get_document_runtime)],
 ) -> APIResponse[None]:
-    """派发一个已切分文档的向量存储任务。"""
+    """手动派发一个已切分文档的向量存储任务。
+
+    HTTP 层只做依赖注入和错误映射。实际状态校验与 Kafka 派发由 workflow 完成，确保这个
+    endpoint 不会在请求线程里执行 embedding 或 Elasticsearch 写入。
+    """
 
     try:
+        # 1. workflow 负责判断缺失、非 CHUNKED、已 VECTOR_STORED 等业务状态。
         await request_document_vector_storage(
             doc_id=doc_id,
             document_repository=document_runtime.repository,

@@ -50,7 +50,11 @@ def document_embed_store_lock(
     doc_id: int,
     expire_seconds: int,
 ):
-    """创建单文档向量存储锁。"""
+    """创建单文档向量存储锁。
+
+    锁名固定为 `document:{doc_id}:embed-store`，与转换锁、切分锁区分开。该锁只保护
+    同一个文档的向量存储阶段，避免多个 worker 同时对同一批 segment 调 OpenAI/ES。
+    """
 
     return redis_lock.Lock(
         redis_client,

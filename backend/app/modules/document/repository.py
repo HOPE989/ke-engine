@@ -52,7 +52,11 @@ class DocumentRepository:
         self._session_factory = session_factory
 
     def session(self):
-        """打开一个由调用方控制事务边界的数据库 session。"""
+        """打开一个由调用方控制事务边界的数据库 session。
+
+        普通上传/转换方法在 repository 内部提交事务；向量存储 workflow 需要一个跨多批
+        segment 更新和文档完成更新的长事务，所以暴露 session context 给 workflow 管理。
+        """
 
         return self._session_factory()
 
@@ -110,9 +114,19 @@ class DocumentRepository:
         doc_id: int,
         limit: int = 100,
     ) -> list[KnowledgeSegment]:
-        """在已有事务中按固定第一页读取待向量化分段。"""
+        """在已有事务中按固定第一页读取待向量化 segment。
+
+        查询条件只选择仍在 DB 中、尚未写入向量的子分段：
+        - `status = STORED`
+        - `skip_embedding = false`
+        - `embedding_id IS NULL`
+
+        每次都按 `chunk_order, id` 读取第一页，不使用 offset。因为成功处理一批后状态会变
+        为 `VECTOR_STORED`，offset pagination 会跳过原本排在后一页的剩余行。
+        """
 
         result = await session.execute(
+            # 固定第一页扫描：每批更新后再查第一页，直到没有剩余待处理行。
             select(KnowledgeSegment)
             .where(
                 KnowledgeSegment.document_id == doc_id,
@@ -131,9 +145,14 @@ class DocumentRepository:
         session: AsyncSession,
         segment_embedding_ids: dict[int, str],
     ) -> None:
-        """在已有事务中写回分段 vector ID 并推进分段状态。"""
+        """在已有事务中写回 Elasticsearch ID，并推进 segment 到 `VECTOR_STORED`。
+
+        这里不调用 `commit()`，由向量存储 workflow 的外层事务统一提交或回滚。任一 segment
+        未按预期更新到一行，都视为并发状态冲突并让整个文档级事务失败。
+        """
 
         for segment_id, embedding_id in segment_embedding_ids.items():
+            # 逐行更新便于精确校验 rowcount，保证每个返回的 vector ID 都落到一个 segment。
             result = await session.execute(
                 update(KnowledgeSegment)
                 .where(KnowledgeSegment.id == segment_id)
@@ -151,7 +170,11 @@ class DocumentRepository:
         session: AsyncSession,
         doc_id: int,
     ) -> int:
-        """在已有事务中 double-check 仍待向量化的分段数。"""
+        """在已有事务中 double-check 仍待向量化的 segment 数量。
+
+        这是文档完成前的最后一道 gate。只有返回 0，workflow 才允许把 document 状态推进到
+        `VECTOR_STORED`；否则事务回滚，Kafka 消息保持可重试。
+        """
 
         result = await session.execute(
             select(func.count())
@@ -171,7 +194,11 @@ class DocumentRepository:
         session: AsyncSession,
         doc_id: int,
     ) -> None:
-        """在已有事务中将 CHUNKED 文档推进到 VECTOR_STORED。"""
+        """在已有事务中将 `CHUNKED` 文档推进到 `VECTOR_STORED`。
+
+        WHERE 同时约束 `doc_id` 和当前状态，避免并发或陈旧状态把非 CHUNKED 文档错误推进。
+        该方法也不提交事务，由 workflow 在 segment 写回和 double-check 全部完成后统一提交。
+        """
 
         result = await session.execute(
             update(KnowledgeDocument)
