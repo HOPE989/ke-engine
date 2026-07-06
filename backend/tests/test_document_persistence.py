@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -233,6 +234,26 @@ async def test_get_document_selects_by_doc_id():
     statement = session.executed[0]
     assert "WHERE knowledge_document.doc_id = 42" in _compiled_sql(statement)
     assert result is document
+
+
+@pytest.mark.asyncio
+async def test_list_stale_chunked_document_ids_filters_by_status_cutoff_and_orders():
+    repository, _, _, _, _ = _document_modules()
+    session_factory = FakeSessionFactory(scalars_result=[1001, 1002])
+    document_repository = repository.DocumentRepository(session_factory)
+
+    result = await document_repository.list_stale_chunked_document_ids(
+        older_than=timedelta(minutes=5)
+    )
+
+    session = session_factory.sessions[0]
+    statement = session.executed[0]
+    sql = _compiled_sql(statement)
+    assert result == [1001, 1002]
+    assert "SELECT knowledge_document.doc_id" in sql
+    assert "knowledge_document.status = 'CHUNKED'" in sql
+    assert "knowledge_document.updated_at <" in sql
+    assert "ORDER BY knowledge_document.updated_at ASC, knowledge_document.doc_id ASC" in sql
 
 
 @pytest.mark.asyncio

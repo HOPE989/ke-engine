@@ -1,5 +1,7 @@
 """knowledge_document 的持久化 repository。"""
 
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -92,6 +94,21 @@ class DocumentRepository:
                 select(KnowledgeDocument).where(KnowledgeDocument.doc_id == doc_id)
             )
             return result.scalar_one_or_none()
+
+    async def list_stale_chunked_document_ids(self, *, older_than: timedelta) -> list[int]:
+        """Return stale CHUNKED document IDs ordered for deterministic compensation."""
+
+        cutoff = datetime.now(UTC) - older_than
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(KnowledgeDocument.doc_id)
+                .where(
+                    KnowledgeDocument.status == DocumentStatus.CHUNKED.value,
+                    KnowledgeDocument.updated_at < cutoff,
+                )
+                .order_by(KnowledgeDocument.updated_at.asc(), KnowledgeDocument.doc_id.asc())
+            )
+            return list(result.scalars().all())
 
     async def count_embeddable_segments(self, *, doc_id: int) -> int:
         """统计指定文档需要 embedding 的分段数量。"""
