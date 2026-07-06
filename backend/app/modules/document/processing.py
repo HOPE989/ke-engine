@@ -7,17 +7,8 @@ from app.modules.document.errors import (
     DocumentStateConflict,
     DocumentStateRollbackFailed,
 )
-from app.modules.document.file_types import DocumentFileType
+from app.modules.document.converters import default_document_converter_factory
 from app.modules.document.models import DocumentStatus
-from app.modules.document.schemas import ValidatedDocumentUpload
-from app.modules.document.storage import original_object_key
-from app.modules.document.workflow import convert_pdf_document
-
-
-def _file_type_value(file_type: DocumentFileType | str) -> str:
-    if isinstance(file_type, DocumentFileType):
-        return file_type.value
-    return str(file_type)
 
 
 async def convert_uploaded_document(
@@ -92,36 +83,8 @@ async def _convert_document_content(
     mineru_client: Any,
     image_describer: Any | None = None,
 ) -> str:
-    file_type = _file_type_value(document.file_type)
-    if file_type == DocumentFileType.PLAIN_TEXT.value:
-        if not document.doc_url:
-            raise DocumentConversionFailed()
-        return document.doc_url
-
-    if file_type != DocumentFileType.PDF.value:
-        raise DocumentConversionFailed()
-
-    object_key = original_object_key(
-        doc_id=document.doc_id,
-        safe_filename=document.doc_title,
-    )
-    try:
-        content = await storage.download_bytes(object_key=object_key)
-    except Exception as exc:
-        raise DocumentConversionFailed() from exc
-
-    upload = ValidatedDocumentUpload(
-        doc_title=document.doc_title,
-        safe_filename=document.doc_title,
-        upload_user=document.upload_user,
-        accessible_by=document.accessible_by,
-        content_type="application/pdf",
-        content=content,
-        size_bytes=len(content),
-    )
-    return await convert_pdf_document(
-        doc_id=document.doc_id,
-        upload=upload,
+    return await default_document_converter_factory.convert_document(
+        document=document,
         storage=storage,
         mineru_client=mineru_client,
         image_describer=image_describer,

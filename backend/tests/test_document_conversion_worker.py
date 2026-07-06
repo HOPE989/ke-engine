@@ -185,6 +185,70 @@ def _document(*, file_type, status=DocumentStatus.UPLOADED.value):
 
 
 @pytest.mark.asyncio
+async def test_convert_document_content_delegates_to_default_converter_factory(monkeypatch):
+    from app.modules.document import processing
+
+    document = _document(file_type=DocumentFileType.PLAIN_TEXT.value)
+    storage = object()
+    mineru_client = object()
+    image_describer = object()
+    calls = []
+
+    class FakeConverterFactory:
+        async def convert_document(
+            self,
+            *,
+            document,
+            storage,
+            mineru_client,
+            image_describer=None,
+        ):
+            calls.append(
+                {
+                    "document": document,
+                    "storage": storage,
+                    "mineru_client": mineru_client,
+                    "image_describer": image_describer,
+                }
+            )
+            return "https://files.example.com/documents/documents/42/converted/factory.md"
+
+    monkeypatch.setattr(
+        processing,
+        "default_document_converter_factory",
+        FakeConverterFactory(),
+    )
+
+    converted_url = await processing._convert_document_content(
+        document=document,
+        storage=storage,
+        mineru_client=mineru_client,
+        image_describer=image_describer,
+    )
+
+    assert converted_url == "https://files.example.com/documents/documents/42/converted/factory.md"
+    assert calls == [
+        {
+            "document": document,
+            "storage": storage,
+            "mineru_client": mineru_client,
+            "image_describer": image_describer,
+        }
+    ]
+
+
+def test_convert_document_content_has_no_hardcoded_pdf_conversion_details():
+    from app.modules.document import processing
+
+    source = inspect.getsource(processing._convert_document_content)
+
+    assert "default_document_converter_factory.convert_document" in source
+    assert "convert_pdf_document" not in source
+    assert "DocumentFileType.PDF" not in source
+    assert "original_object_key" not in source
+
+
+@pytest.mark.asyncio
 async def test_worker_converts_plain_text_document_without_downloading_original():
     from app.modules.document.processing import convert_uploaded_document
 
