@@ -13,7 +13,6 @@ from app.modules.document.errors import (
 )
 
 SUPPORTED_TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
-SUPPORTED_WORD_EXTENSIONS = {".doc", ".docx"}
 TEXT_LABELS = {"markdown", "md", "txt", "text", "plain text"}
 TEXT_MIME_TYPES = {"text/markdown", "text/x-markdown", "text/plain"}
 WORD_LABELS = {"doc", "docx", "word"}
@@ -67,11 +66,11 @@ def detect_document_file_type(
     ):
         return DocumentFileType.PDF
 
-    # 2. Word 需要明确 MIME，或 Magika 标签配合 Word 扩展名；不靠扩展名单独放行。
+    # 2. Word 需要明确 MIME 或 Magika 内容标签；不靠扩展名单独放行。
     if (
         upload_mime_type in WORD_MIME_TYPES
         or detected_mime_type in WORD_MIME_TYPES
-        or (suffix in SUPPORTED_WORD_EXTENSIONS and ct_label in WORD_LABELS)
+        or ct_label in WORD_LABELS
     ):
         return DocumentFileType.WORD
 

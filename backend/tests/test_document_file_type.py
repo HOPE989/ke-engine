@@ -132,6 +132,7 @@ def test_word_upload_mime_is_accepted_even_when_magika_is_generic(
         ("guide.doc", FakeMagikaResult(ct_label="doc", mime_type="application/octet-stream")),
         ("guide.docx", FakeMagikaResult(ct_label="docx", mime_type="application/octet-stream")),
         ("guide.docx", FakeMagikaResult(ct_label="word", mime_type="application/octet-stream")),
+        ("upload.bin", FakeMagikaResult(ct_label="docx", mime_type="application/octet-stream")),
         ("guide.doc", FakeMagikaResult(ct_label="unknown", mime_type="application/msword")),
         (
             "guide.docx",
