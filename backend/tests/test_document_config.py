@@ -185,6 +185,7 @@ def test_document_chunking_dependencies_are_available():
 
 def test_document_vector_storage_dependencies_are_available():
     assert importlib.util.find_spec("langchain_elasticsearch") is not None
+    assert importlib.util.find_spec("celery") is not None
 
 
 def test_document_vector_storage_settings_defaults():
