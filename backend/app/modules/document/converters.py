@@ -124,12 +124,12 @@ class PdfDocumentConverter(MinerUDocumentConverter):
 
 
 class WordDocumentConverter(MinerUDocumentConverter):
-    supported_file_type = "word"
+    supported_file_type = DocumentFileType.WORD
 
 
 class ExcelConverter(BaseDocumentConverter):
     def supports(self, file_type: DocumentFileType | str) -> bool:
-        return _file_type_value(file_type) == "excel"
+        return _file_type_value(file_type) == DocumentFileType.EXCEL.value
 
     async def convert_document(
         self,

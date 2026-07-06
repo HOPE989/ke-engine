@@ -158,10 +158,10 @@ async def test_pdf_converter_downloads_original_calls_mineru_and_uploads_markdow
 
 
 @pytest.mark.asyncio
-async def test_word_converter_supports_string_type_and_calls_mineru_for_docx_original():
+async def test_word_converter_supports_enum_type_and_calls_mineru_for_docx_original():
     converters = load_converters_module()
     converter = converters.WordDocumentConverter()
-    document = make_document(file_type="word", doc_title="guide.docx")
+    document = make_document(file_type=DocumentFileType.WORD, doc_title="guide.docx")
     storage = RecordingStorage(
         downloads={"documents/42/original/guide.docx": b"docx-bytes"},
     )
@@ -173,6 +173,7 @@ async def test_word_converter_supports_string_type_and_calls_mineru_for_docx_ori
         mineru_client=mineru_client,
     )
 
+    assert converter.supports(DocumentFileType.WORD)
     assert converter.supports("word")
     assert storage.download_calls == ["documents/42/original/guide.docx"]
     assert mineru_client.calls == [{"filename": "guide.docx", "content": b"docx-bytes"}]
@@ -197,8 +198,9 @@ async def test_mineru_converter_wraps_original_download_failure():
 async def test_excel_converter_supports_excel_but_conversion_is_not_implemented():
     converters = load_converters_module()
     converter = converters.ExcelConverter()
-    document = make_document(file_type="excel", doc_title="sheet.xlsx")
+    document = make_document(file_type=DocumentFileType.EXCEL, doc_title="sheet.xlsx")
 
+    assert converter.supports(DocumentFileType.EXCEL)
     assert converter.supports("excel")
     with pytest.raises(DocumentConversionFailed):
         await converter.convert_document(
@@ -215,6 +217,7 @@ def test_document_converter_factory_selects_supported_converter_and_rejects_unkn
     factory = converters.DocumentConverterFactory([excel_converter, plain_text_converter])
 
     assert factory.converter_for(DocumentFileType.PLAIN_TEXT) is plain_text_converter
+    assert factory.converter_for(DocumentFileType.EXCEL) is excel_converter
     assert factory.converter_for("excel") is excel_converter
 
     with pytest.raises(DocumentConversionFailed):
@@ -227,5 +230,7 @@ def test_default_document_converter_factory_registers_known_converters():
 
     assert isinstance(factory.converter_for(DocumentFileType.PLAIN_TEXT), converters.PlainTextConverter)
     assert isinstance(factory.converter_for(DocumentFileType.PDF), converters.PdfDocumentConverter)
+    assert isinstance(factory.converter_for(DocumentFileType.WORD), converters.WordDocumentConverter)
+    assert isinstance(factory.converter_for(DocumentFileType.EXCEL), converters.ExcelConverter)
     assert isinstance(factory.converter_for("word"), converters.WordDocumentConverter)
     assert isinstance(factory.converter_for("excel"), converters.ExcelConverter)

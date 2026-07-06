@@ -1,6 +1,6 @@
 """基于 Magika 的文档文件类型识别。
 
-只接受 PDF、Markdown，以及带受支持扩展名的通用文本文件。
+只接受 PDF、Word、Markdown，以及带受支持扩展名的通用文本文件。
 """
 
 from enum import Enum
@@ -13,8 +13,14 @@ from app.modules.document.errors import (
 )
 
 SUPPORTED_TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
+SUPPORTED_WORD_EXTENSIONS = {".doc", ".docx"}
 TEXT_LABELS = {"markdown", "md", "txt", "text", "plain text"}
 TEXT_MIME_TYPES = {"text/markdown", "text/x-markdown", "text/plain"}
+WORD_LABELS = {"doc", "docx", "word"}
+WORD_MIME_TYPES = {
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 
 
 class DocumentFileType(str, Enum):
@@ -22,6 +28,8 @@ class DocumentFileType(str, Enum):
 
     PDF = "pdf"
     PLAIN_TEXT = "plain_text"
+    WORD = "word"
+    EXCEL = "excel"
 
 
 def _normalized_output_value(output: Any, name: str) -> str:
@@ -59,17 +67,25 @@ def detect_document_file_type(
     ):
         return DocumentFileType.PDF
 
-    # 2. Markdown MIME 被业务上归为 plain text，因为无需 PDF 转换。
+    # 2. Word 需要明确 MIME，或 Magika 标签配合 Word 扩展名；不靠扩展名单独放行。
+    if (
+        upload_mime_type in WORD_MIME_TYPES
+        or detected_mime_type in WORD_MIME_TYPES
+        or (suffix in SUPPORTED_WORD_EXTENSIONS and ct_label in WORD_LABELS)
+    ):
+        return DocumentFileType.WORD
+
+    # 3. Markdown MIME 被业务上归为 plain text，因为无需 PDF 转换。
     if upload_mime_type in {"text/markdown", "text/x-markdown"}:
         return DocumentFileType.PLAIN_TEXT
 
-    # 3. 通用上传文本 MIME 需要配合明确受支持的扩展名。
+    # 4. 通用上传文本 MIME 需要配合明确受支持的扩展名。
     if suffix in SUPPORTED_TEXT_EXTENSIONS and (
         upload_mime_type in TEXT_MIME_TYPES or upload_mime_type.startswith("text/")
     ):
         return DocumentFileType.PLAIN_TEXT
 
-    # 4. 保留 Magika 明确文本结论的兼容路径。
+    # 5. 保留 Magika 明确文本结论的兼容路径。
     if ct_label in {"markdown", "md"} or detected_mime_type in {
         "text/markdown",
         "text/x-markdown",

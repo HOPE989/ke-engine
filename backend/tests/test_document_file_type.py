@@ -98,6 +98,109 @@ def test_upload_mime_markdown_is_accepted_even_when_magika_misclassifies():
     assert detected == DocumentFileType.PLAIN_TEXT
 
 
+@pytest.mark.parametrize(
+    "filename,upload_content_type",
+    [
+        ("guide.doc", "application/msword"),
+        (
+            "guide.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ),
+    ],
+)
+def test_word_upload_mime_is_accepted_even_when_magika_is_generic(
+    filename,
+    upload_content_type,
+):
+    detect_document_file_type, DocumentFileType, _, _ = _file_type_modules()
+
+    detected = detect_document_file_type(
+        filename=filename,
+        content=b"word-bytes",
+        upload_content_type=upload_content_type,
+        magika_client=FakeMagikaClient(
+            result=FakeMagikaResult(ct_label="unknown", mime_type="application/octet-stream")
+        ),
+    )
+
+    assert detected == DocumentFileType.WORD
+
+
+@pytest.mark.parametrize(
+    "filename,result",
+    [
+        ("guide.doc", FakeMagikaResult(ct_label="doc", mime_type="application/octet-stream")),
+        ("guide.docx", FakeMagikaResult(ct_label="docx", mime_type="application/octet-stream")),
+        ("guide.docx", FakeMagikaResult(ct_label="word", mime_type="application/octet-stream")),
+        ("guide.doc", FakeMagikaResult(ct_label="unknown", mime_type="application/msword")),
+        (
+            "guide.docx",
+            FakeMagikaResult(
+                ct_label="unknown",
+                mime_type=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ),
+            ),
+        ),
+    ],
+)
+def test_magika_word_detection_is_accepted(filename, result):
+    detect_document_file_type, DocumentFileType, _, _ = _file_type_modules()
+
+    detected = detect_document_file_type(
+        filename=filename,
+        content=b"word-bytes",
+        upload_content_type="application/octet-stream",
+        magika_client=FakeMagikaClient(result=result),
+    )
+
+    assert detected == DocumentFileType.WORD
+
+
+def test_docx_extension_without_word_evidence_is_rejected():
+    detect_document_file_type, _, _, UnsupportedDocumentFileType = _file_type_modules()
+
+    with pytest.raises(UnsupportedDocumentFileType):
+        detect_document_file_type(
+            filename="guide.docx",
+            content=b"\x89PNG",
+            upload_content_type="image/png",
+            magika_client=FakeMagikaClient(
+                result=FakeMagikaResult(ct_label="png", mime_type="image/png")
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "filename,upload_content_type,result",
+    [
+        (
+            "sheet.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            FakeMagikaResult(
+                ct_label="xlsx",
+                mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        ),
+        (
+            "sheet.xls",
+            "application/vnd.ms-excel",
+            FakeMagikaResult(ct_label="xls", mime_type="application/vnd.ms-excel"),
+        ),
+    ],
+)
+def test_excel_files_are_still_rejected(filename, upload_content_type, result):
+    detect_document_file_type, _, _, UnsupportedDocumentFileType = _file_type_modules()
+
+    with pytest.raises(UnsupportedDocumentFileType):
+        detect_document_file_type(
+            filename=filename,
+            content=b"excel-bytes",
+            upload_content_type=upload_content_type,
+            magika_client=FakeMagikaClient(result=result),
+        )
+
+
 @pytest.mark.parametrize("filename", ["guide.md", "guide.markdown", "notes.txt"])
 def test_generic_text_with_supported_extension_is_accepted(filename):
     detect_document_file_type, DocumentFileType, _, _ = _file_type_modules()
