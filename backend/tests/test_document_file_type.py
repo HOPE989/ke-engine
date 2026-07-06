@@ -202,6 +202,33 @@ def test_excel_files_are_still_rejected(filename, upload_content_type, result):
         )
 
 
+@pytest.mark.parametrize(
+    "result",
+    [
+        FakeMagikaResult(ct_label="xls", mime_type="application/octet-stream"),
+        FakeMagikaResult(ct_label="xlsx", mime_type="application/octet-stream"),
+        FakeMagikaResult(ct_label="excel", mime_type="application/octet-stream"),
+        FakeMagikaResult(ct_label="unknown", mime_type="application/vnd.ms-excel"),
+        FakeMagikaResult(
+            ct_label="unknown",
+            mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+    ],
+)
+def test_excel_content_with_word_upload_mime_is_rejected(result):
+    detect_document_file_type, _, _, UnsupportedDocumentFileType = _file_type_modules()
+
+    with pytest.raises(UnsupportedDocumentFileType):
+        detect_document_file_type(
+            filename="sheet.xlsx",
+            content=b"excel-bytes",
+            upload_content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            magika_client=FakeMagikaClient(result=result),
+        )
+
+
 @pytest.mark.parametrize("filename", ["guide.md", "guide.markdown", "notes.txt"])
 def test_generic_text_with_supported_extension_is_accepted(filename):
     detect_document_file_type, DocumentFileType, _, _ = _file_type_modules()
