@@ -5,6 +5,7 @@ DB_USER ?= ke_engine
 
 API_HOST ?= 127.0.0.1
 API_PORT ?= 8000
+CELERY_BEAT_SCHEDULE ?= .runtime/celerybeat-schedule
 
 .DEFAULT_GOAL := help
 
@@ -58,7 +59,8 @@ dev-celery-worker:
 	cd $(BACKEND_DIR) && $(UV) run celery -A app.workers.celery_worker.celery_app worker -l INFO --pool=solo
 
 dev-celery-beat:
-	cd $(BACKEND_DIR) && $(UV) run celery -A app.workers.celery_worker.celery_app beat -l INFO
+	cd $(BACKEND_DIR) && $(UV) run python -c "from pathlib import Path; Path('$(CELERY_BEAT_SCHEDULE)').parent.mkdir(parents=True, exist_ok=True)"
+	cd $(BACKEND_DIR) && $(UV) run celery -A app.workers.celery_worker.celery_app beat -l INFO --schedule $(CELERY_BEAT_SCHEDULE)
 
 dev:
 	$(MAKE) -j 2 dev-api dev-worker

@@ -43,7 +43,24 @@ def test_root_makefile_exposes_celery_compensation_targets():
 
     content = makefile.read_text(encoding="utf-8")
 
+    assert "CELERY_BEAT_SCHEDULE ?= .runtime/celerybeat-schedule" in content
     assert "dev-celery-worker:" in content
     assert "dev-celery-beat:" in content
     assert "celery -A app.workers.celery_worker.celery_app worker -l INFO --pool=solo" in content
-    assert "celery -A app.workers.celery_worker.celery_app beat -l INFO" in content
+    assert "mkdir -p" not in content
+    assert (
+        "Path('$(CELERY_BEAT_SCHEDULE)').parent.mkdir(parents=True, exist_ok=True)"
+    ) in content
+    assert (
+        "celery -A app.workers.celery_worker.celery_app beat -l INFO "
+        "--schedule $(CELERY_BEAT_SCHEDULE)"
+    ) in content
+
+
+def test_root_gitignore_excludes_celery_runtime_state():
+    gitignore = Path(__file__).resolve().parents[2] / ".gitignore"
+
+    content = gitignore.read_text(encoding="utf-8")
+
+    assert "backend/.runtime/" in content
+    assert "backend/celerybeat-schedule*" in content
