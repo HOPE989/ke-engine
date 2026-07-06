@@ -189,13 +189,13 @@ The system SHALL persist document chunks in `knowledge_segment` with stable iden
 - **AND** `document_id` SHALL be a `BIGINT NOT NULL` foreign key to `knowledge_document.doc_id`
 - **AND** `chunk_order` SHALL be an `INT NOT NULL`
 - **AND** `embedding_id` SHALL be a `VARCHAR(255) NULL`
-- **AND** `status` SHALL be a `VARCHAR(255) NOT NULL DEFAULT 'INIT'`
+- **AND** `status` SHALL be a `VARCHAR(255) NOT NULL DEFAULT 'STORED'`
 - **AND** `metadata` SHALL be a PostgreSQL `JSONB NOT NULL` column
 - **AND** `skip_embedding` SHALL be a `BOOLEAN NOT NULL`
 
 #### Scenario: Knowledge segment status is initialized
-- **WHEN** a `knowledge_segment` record is persisted
-- **THEN** `status` SHALL be `INIT`
+- **WHEN** a `knowledge_segment` record is persisted by document chunking
+- **THEN** `status` SHALL be `STORED`
 
 #### Scenario: Knowledge segment indexes are present
 - **WHEN** migrations are applied
@@ -289,7 +289,7 @@ The system SHALL keep chunking separate from embedding, vector storage, and chun
 - **THEN** the system SHALL NOT create embeddings
 - **AND** the system SHALL NOT write vectors or text chunks to Elasticsearch
 - **AND** every persisted segment SHALL have `embedding_id` set to `null`
-- **AND** every persisted segment SHALL have `status` set to `INIT`
+- **AND** every persisted segment SHALL have `status` set to `STORED`
 
 #### Scenario: Chunking is one-to-one with the current document record
 - **WHEN** a document has already reached `CHUNKED`

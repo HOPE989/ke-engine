@@ -130,7 +130,7 @@ The system SHALL persist document metadata in `knowledge_document` with precise 
 
 #### Scenario: Knowledge document status is constrained
 - **WHEN** a `knowledge_document` record is persisted
-- **THEN** `status` SHALL be one of `INIT`, `UPLOADED`, `CONVERTING`, `CONVERTED`, or `CHUNKED`
+- **THEN** `status` SHALL be one of `INIT`, `UPLOADED`, `CONVERTING`, `CONVERTED`, `CHUNKED`, or `VECTOR_STORED`
 
 #### Scenario: Knowledge document indexes are present
 - **WHEN** migrations are applied
