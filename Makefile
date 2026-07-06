@@ -8,7 +8,7 @@ API_PORT ?= 8000
 
 .DEFAULT_GOAL := help
 
-.PHONY: help backend-sync dev dev-api dev-worker dev-infra dev-all-infra db-init kafka-topics-init kafka-topics-list test-backend
+.PHONY: help backend-sync dev dev-api dev-worker dev-celery-worker dev-celery-beat dev-infra dev-all-infra db-init kafka-topics-init kafka-topics-list test-backend
 
 help:
 	@echo "Available targets:"
@@ -20,6 +20,8 @@ help:
 	@echo "  make kafka-topics-list List local Kafka topics"
 	@echo "  make dev-api          Start FastAPI backend on API_HOST/API_PORT"
 	@echo "  make dev-worker       Start Kafka document conversion worker"
+	@echo "  make dev-celery-worker Start Celery worker for scheduled compensation tasks"
+	@echo "  make dev-celery-beat  Start Celery beat scheduler"
 	@echo "  make dev              Start API and worker in parallel"
 	@echo "  make test-backend     Run backend pytest suite"
 
@@ -51,6 +53,12 @@ dev-api:
 
 dev-worker:
 	cd $(BACKEND_DIR) && $(UV) run python -m app.workers.kafka_worker
+
+dev-celery-worker:
+	cd $(BACKEND_DIR) && $(UV) run celery -A app.workers.celery_worker.celery_app worker -l INFO --pool=solo
+
+dev-celery-beat:
+	cd $(BACKEND_DIR) && $(UV) run celery -A app.workers.celery_worker.celery_app beat -l INFO
 
 dev:
 	$(MAKE) -j 2 dev-api dev-worker

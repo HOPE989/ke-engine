@@ -36,3 +36,14 @@ def test_root_makefile_exposes_database_init_target():
     assert "DROP DATABASE IF EXISTS $(DB_NAME) WITH (FORCE)" in content
     assert "CREATE DATABASE $(DB_NAME) OWNER $(DB_USER)" in content
     assert "cd $(BACKEND_DIR) && $(UV) run alembic upgrade head" in content
+
+
+def test_root_makefile_exposes_celery_compensation_targets():
+    makefile = Path(__file__).resolve().parents[2] / "Makefile"
+
+    content = makefile.read_text(encoding="utf-8")
+
+    assert "dev-celery-worker:" in content
+    assert "dev-celery-beat:" in content
+    assert "celery -A app.workers.celery_worker.celery_app worker -l INFO --pool=solo" in content
+    assert "celery -A app.workers.celery_worker.celery_app beat -l INFO" in content
