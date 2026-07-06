@@ -1,4 +1,5 @@
 from io import BytesIO
+import inspect
 from types import SimpleNamespace
 from zipfile import ZipFile
 
@@ -131,6 +132,40 @@ class FakeLock:
         self.released = True
 
 
+@pytest.mark.asyncio
+async def test_conversion_consumer_subscribes_to_topic_and_group(monkeypatch):
+    from app.modules.document.workers import conversion as conversion_worker
+
+    calls = []
+    runtime = SimpleNamespace(settings=SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"))
+
+    class FakeKafkaConsumer:
+        async def subscribe(self, topics):
+            calls.append(("subscribe", topics))
+
+        async def poll(self, *, timeout):
+            calls.append(("poll", timeout))
+            raise RuntimeError("stop consumer")
+
+        async def close(self):
+            calls.append(("close", None))
+
+    def fake_create_kafka_consumer(*, bootstrap_servers, group_id):
+        calls.append(("create_consumer", bootstrap_servers, group_id))
+        return FakeKafkaConsumer()
+
+    monkeypatch.setattr(conversion_worker, "create_kafka_consumer", fake_create_kafka_consumer)
+
+    with pytest.raises(RuntimeError, match="stop consumer"):
+        await conversion_worker.run_document_conversion_consumer(runtime)
+
+    assert calls[:3] == [
+        ("create_consumer", "kafka.example:9092", "ke-engine-document-converter"),
+        ("subscribe", ["document.convert.requested"]),
+        ("poll", 1.0),
+    ]
+
+
 def _document(*, file_type, status=DocumentStatus.UPLOADED.value):
     return SimpleNamespace(
         doc_id=42,
@@ -236,68 +271,159 @@ async def test_worker_converts_pdf_from_original_object_and_uploads_markdown():
 
 
 @pytest.mark.asyncio
-async def test_locked_worker_injects_image_describer(monkeypatch):
-    from app.db import session as session_module
+async def test_locked_worker_uses_kafka_runtime_resources(monkeypatch):
     from app.modules.document import processing as processing_module
-    from app.modules.document import repository as repository_module
     from app.modules.document.workers import conversion as conversion_worker
 
     calls = []
 
-    async def fake_init_engine(database_url):
-        calls.append({"action": "init_engine", "database_url": database_url})
-
-    async def fake_close_engine():
-        calls.append({"action": "close_engine"})
-
-    def fake_get_session_factory():
-        return "session-factory"
-
-    class FakeDocumentRepository:
-        def __init__(self, session_factory):
-            self.session_factory = session_factory
-
-    class FakeLazyStorage:
-        def __init__(self, settings):
-            self.settings = settings
-
-    class FakeLazyMinerUClient:
-        def __init__(self, settings):
-            self.settings = settings
-
-        async def aclose(self):
-            calls.append({"action": "mineru_close"})
-
-    class FakeLazyImageDescriber:
-        def __init__(self, settings):
-            self.settings = settings
-
     async def fake_convert_uploaded_document(**kwargs):
         calls.append({"action": "convert_uploaded_document", "kwargs": kwargs})
 
-    monkeypatch.setattr(session_module, "init_engine", fake_init_engine)
-    monkeypatch.setattr(session_module, "close_engine", fake_close_engine)
-    monkeypatch.setattr(session_module, "get_session_factory", fake_get_session_factory)
-    monkeypatch.setattr(repository_module, "DocumentRepository", FakeDocumentRepository)
     monkeypatch.setattr(processing_module, "convert_uploaded_document", fake_convert_uploaded_document)
-    monkeypatch.setattr(conversion_worker, "_LazyDocumentStorage", FakeLazyStorage)
-    monkeypatch.setattr(conversion_worker, "_LazyMinerUClient", FakeLazyMinerUClient)
-    monkeypatch.setattr(conversion_worker, "_LazyImageDescriber", FakeLazyImageDescriber, raising=False)
 
-    settings = SimpleNamespace(database_url="postgresql://db")
+    repository = object()
+    storage = object()
+    mineru_client = object()
+    image_describer = object()
+    runtime = SimpleNamespace(
+        conversion=SimpleNamespace(
+            repository=repository,
+            storage=storage,
+            mineru_client=mineru_client,
+            image_describer=image_describer,
+        ),
+    )
 
-    await conversion_worker.run_locked_document_conversion(doc_id=42, settings=settings)
+    await conversion_worker.run_locked_document_conversion(doc_id=42, runtime=runtime)
 
     convert_call = next(call for call in calls if call["action"] == "convert_uploaded_document")
-    assert isinstance(convert_call["kwargs"]["image_describer"], FakeLazyImageDescriber)
-    assert convert_call["kwargs"]["image_describer"].settings is settings
+    assert convert_call["kwargs"] == {
+        "doc_id": 42,
+        "document_repository": repository,
+        "storage": storage,
+        "mineru_client": mineru_client,
+        "image_describer": image_describer,
+    }
+
+
+@pytest.mark.asyncio
+async def test_conversion_uses_runtime_redis_client_and_per_document_lock(monkeypatch):
+    from app.modules.document.workers import conversion as conversion_worker
+
+    calls = []
+    redis_client = object()
+
+    class FakeLock:
+        def acquire(self, *, blocking):
+            calls.append(("acquire", blocking))
+            return True
+
+        def release(self):
+            calls.append(("release", None))
+
+    def fake_document_conversion_lock(*, redis_client, doc_id, expire_seconds):
+        calls.append(("lock", redis_client, doc_id, expire_seconds))
+        return FakeLock()
+
+    async def fake_run_locked_document_conversion(*, doc_id, runtime):
+        calls.append(("run_locked", doc_id, runtime))
+
+    monkeypatch.setattr(
+        "app.infrastructure.redis_lock.document_conversion_lock",
+        fake_document_conversion_lock,
+    )
+    monkeypatch.setattr(
+        conversion_worker,
+        "run_locked_document_conversion",
+        fake_run_locked_document_conversion,
+    )
+    runtime = SimpleNamespace(
+        conversion=SimpleNamespace(
+            redis_client=redis_client,
+            lock_expire_seconds=180,
+        ),
+    )
+
+    await conversion_worker.run_document_conversion(doc_id=42, runtime=runtime)
+
+    assert calls == [
+        ("lock", redis_client, 42, 180),
+        ("acquire", False),
+        ("run_locked", 42, runtime),
+        ("release", None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_conversion_message_does_not_initialize_or_close_runtime_owned_resources(
+    monkeypatch,
+):
+    from app.db import session as session_module
+    from app.modules.document.workers import conversion as conversion_worker
+
+    async def fail_db_lifecycle(*args, **kwargs):
+        raise AssertionError("conversion hot path must not own DB engine lifecycle")
+
+    class BusyLock:
+        def acquire(self, *, blocking):
+            return False
+
+    monkeypatch.setattr(session_module, "init_engine", fail_db_lifecycle)
+    monkeypatch.setattr(session_module, "close_engine", fail_db_lifecycle)
+    monkeypatch.setattr(
+        "app.infrastructure.redis_lock.document_conversion_lock",
+        lambda **kwargs: BusyLock(),
+    )
+    runtime = SimpleNamespace(
+        conversion=SimpleNamespace(
+            redis_client=object(),
+            lock_expire_seconds=180,
+        ),
+    )
+
+    await conversion_worker.run_document_conversion(doc_id=42, runtime=runtime)
+
+
+def test_conversion_hot_path_uses_runtime_repository_without_db_lifecycle():
+    from app.modules.document.workers import conversion as conversion_worker
+
+    source = inspect.getsource(conversion_worker.run_locked_document_conversion)
+
+    assert "conversion_context.repository" in source
+    assert "init_engine" not in source
+    assert "close_engine" not in source
+    assert "get_session_factory" not in source
+
+
+def test_conversion_hot_path_uses_runtime_owned_external_resources():
+    from app.modules.document.workers import conversion as conversion_worker
+
+    source = inspect.getsource(conversion_worker.run_locked_document_conversion)
+
+    assert "conversion_context.storage" in source
+    assert "conversion_context.mineru_client" in source
+    assert "conversion_context.image_describer" in source
+    assert "_LazyDocumentStorage" not in source
+    assert "_LazyMinerUClient" not in source
+    assert "_LazyImageDescriber" not in source
+
+
+def test_conversion_worker_removes_legacy_lazy_runtime_resource_helpers():
+    from app.modules.document.workers import conversion as conversion_worker
+
+    source = inspect.getsource(conversion_worker)
+
+    assert "_LazyDocumentStorage" not in source
+    assert "_LazyMinerUClient" not in source
+    assert "_LazyImageDescriber" not in source
 
 
 @pytest.mark.asyncio
 async def test_image_describer_invokes_langchain_with_human_message():
     from langchain_core.messages import HumanMessage
 
-    from app.modules.document.workers.conversion import _LazyImageDescriber
+    from app.workers.kafka_worker import RuntimeImageDescriber
 
     class FakeModel:
         def __init__(self):
@@ -308,14 +434,7 @@ async def test_image_describer_invokes_langchain_with_human_message():
             return SimpleNamespace(content="描述结果")
 
     model = FakeModel()
-    describer = _LazyImageDescriber(
-        SimpleNamespace(
-            openai_api_key="test-key",
-            openai_base_url=None,
-            openai_model=None,
-        )
-    )
-    describer._model = model
+    describer = RuntimeImageDescriber(model=model)
 
     result = await describer.describe_image(
         filename="page-1.png",

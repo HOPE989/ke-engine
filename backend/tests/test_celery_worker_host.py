@@ -1,4 +1,5 @@
 import importlib
+import inspect
 import sys
 
 
@@ -43,3 +44,14 @@ def test_celery_worker_parent_package_import_uses_real_app_after_fake_import():
     from app.workers import celery_worker
 
     assert celery_worker.celery_app.main == "ke_engine"
+
+
+def test_celery_worker_host_owns_runtime_lifecycle_hooks():
+    from app.workers import celery_worker
+
+    source = inspect.getsource(celery_worker)
+
+    assert "worker_process_init.connect" in source
+    assert "worker_process_shutdown.connect" in source
+    assert "start_celery_worker_runtime" in source
+    assert "shutdown_celery_worker_runtime" in source

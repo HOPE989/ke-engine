@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.deps import document_runtime
+from app.api.deps import application_lifespan_resources
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
@@ -17,7 +17,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     """启动期初始化共享基础设施，关闭期统一释放资源。"""
 
     startup_settings = get_settings()
-    async with document_runtime(application, startup_settings):
+    async with application_lifespan_resources(application, startup_settings):
         yield
 
 

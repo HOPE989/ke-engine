@@ -142,11 +142,6 @@ async def test_worker_skips_runtime_initialization_when_document_lock_is_busy(mo
     from app.modules.document.workers import conversion
 
     calls = []
-    monkeypatch.setattr(conversion, "get_settings", _worker_settings)
-    monkeypatch.setattr(
-        "app.infrastructure.redis_lock.create_redis_client",
-        lambda redis_url: FakeRedisClient(calls),
-    )
     monkeypatch.setattr(
         "app.infrastructure.redis_lock.document_conversion_lock",
         lambda **kwargs: FakeLock(calls, acquired=False),
@@ -169,12 +164,17 @@ async def test_worker_skips_runtime_initialization_when_document_lock_is_busy(mo
         ),
     )
 
-    await conversion.run_document_conversion(doc_id=42)
+    await conversion.run_document_conversion(
+        doc_id=42,
+        runtime=SimpleNamespace(
+            conversion=SimpleNamespace(
+                redis_client=FakeRedisClient(calls),
+                lock_expire_seconds=_worker_settings().document_convert_lock_expire_seconds,
+            ),
+        ),
+    )
 
-    assert calls == [
-        ("lock_acquire", False),
-        ("redis_close", None),
-    ]
+    assert calls == [("lock_acquire", False)]
 
 
 @pytest.mark.asyncio
@@ -182,11 +182,6 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
     from app.modules.document.workers import conversion
 
     calls = []
-    monkeypatch.setattr(conversion, "get_settings", _worker_settings)
-    monkeypatch.setattr(
-        "app.infrastructure.redis_lock.create_redis_client",
-        lambda redis_url: FakeRedisClient(calls),
-    )
     monkeypatch.setattr(
         "app.infrastructure.redis_lock.document_conversion_lock",
         lambda **kwargs: FakeLock(calls, acquired=True),
@@ -200,11 +195,6 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
 
     monkeypatch.setattr("app.db.session.init_engine", fake_init_engine)
     monkeypatch.setattr("app.db.session.close_engine", fake_close_engine)
-    monkeypatch.setattr("app.db.session.get_session_factory", lambda: object())
-    monkeypatch.setattr(
-        "app.modules.document.repository.DocumentRepository",
-        FakeTaskRepository,
-    )
     monkeypatch.setattr(
         "app.infrastructure.mineru.create_mineru_client",
         lambda settings: (_ for _ in ()).throw(
@@ -224,14 +214,23 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
         ),
     )
 
-    await conversion.run_document_conversion(doc_id=42)
+    await conversion.run_document_conversion(
+        doc_id=42,
+        runtime=SimpleNamespace(
+            conversion=SimpleNamespace(
+                redis_client=FakeRedisClient(calls),
+                lock_expire_seconds=_worker_settings().document_convert_lock_expire_seconds,
+                repository=FakeTaskRepository(object()),
+                storage=object(),
+                mineru_client=object(),
+                image_describer=object(),
+            ),
+        ),
+    )
 
     assert calls == [
         ("lock_acquire", False),
-        ("init_engine", "postgresql+asyncpg://user:pass@localhost:5432/app"),
-        ("close_engine", None),
         ("lock_release", None),
-        ("redis_close", None),
     ]
 
 
@@ -256,16 +255,12 @@ async def test_document_conversion_consumer_subscribes_without_managing_topics(m
         calls.append(("create_consumer", bootstrap_servers, group_id))
         return FakeConsumer()
 
-    monkeypatch.setattr(
-        conversion,
-        "get_settings",
-        lambda: SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"),
-    )
     monkeypatch.setattr(conversion, "create_kafka_consumer", fake_create_kafka_consumer)
+    runtime = SimpleNamespace(settings=SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"))
 
     with caplog.at_level(logging.INFO, logger="app.modules.document.workers.conversion"):
         with pytest.raises(RuntimeError, match="stop consumer"):
-            await conversion.run_document_conversion_consumer()
+            await conversion.run_document_conversion_consumer(runtime)
 
     assert calls[:3] == [
         ("create_consumer", "kafka.example:9092", "ke-engine-document-converter"),
@@ -306,16 +301,12 @@ async def test_document_conversion_consumer_logs_kafka_error_details(monkeypatch
         async def close(self):
             return None
 
-    monkeypatch.setattr(
-        conversion,
-        "get_settings",
-        lambda: SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"),
-    )
     monkeypatch.setattr(conversion, "create_kafka_consumer", lambda **kwargs: FakeConsumer())
+    runtime = SimpleNamespace(settings=SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"))
 
     with caplog.at_level(logging.WARNING, logger="app.modules.document.workers.conversion"):
         with pytest.raises(RuntimeError, match="stop consumer"):
-            await conversion.run_document_conversion_consumer()
+            await conversion.run_document_conversion_consumer(runtime)
 
     assert "UNKNOWN_TOPIC_OR_PART" in caplog.text
 
@@ -337,8 +328,10 @@ async def test_handle_document_conversion_event_commits_after_success(monkeypatc
         async def commit(self, message=None):
             calls.append(("commit", message))
 
-    async def fake_run_document_conversion(doc_id):
-        calls.append(("convert", doc_id))
+    runtime = object()
+
+    async def fake_run_document_conversion(*, doc_id, runtime):
+        calls.append(("convert", doc_id, runtime))
 
     monkeypatch.setattr(conversion, "run_document_conversion", fake_run_document_conversion)
     monotonic_times = iter([100.0, 100.125])
@@ -346,9 +339,13 @@ async def test_handle_document_conversion_event_commits_after_success(monkeypatc
 
     message = FakeMessage()
     with caplog.at_level(logging.INFO, logger="app.modules.document.workers.conversion"):
-        await conversion.handle_document_conversion_message(message=message, consumer=FakeConsumer())
+        await conversion.handle_document_conversion_message(
+            message=message,
+            consumer=FakeConsumer(),
+            runtime=runtime,
+        )
 
-    assert calls == [("convert", 42), ("commit", message)]
+    assert calls == [("convert", 42, runtime), ("commit", message)]
     assert "processing document conversion message doc_id=42" in caplog.text
     assert "committed document conversion message doc_id=42 elapsed_ms=125.00" in caplog.text
 
@@ -368,7 +365,9 @@ async def test_handle_document_conversion_event_does_not_commit_on_conversion_fa
         async def commit(self, message=None):
             raise AssertionError("must not commit failed conversion")
 
-    async def fail_conversion(doc_id):
+    runtime = object()
+
+    async def fail_conversion(*, doc_id, runtime):
         raise RuntimeError("conversion failed")
 
     monkeypatch.setattr(conversion, "run_document_conversion", fail_conversion)
@@ -377,6 +376,10 @@ async def test_handle_document_conversion_event_does_not_commit_on_conversion_fa
 
     with caplog.at_level(logging.ERROR, logger="app.modules.document.workers.conversion"):
         with pytest.raises(RuntimeError, match="conversion failed"):
-            await conversion.handle_document_conversion_message(message=FakeMessage(), consumer=FakeConsumer())
+            await conversion.handle_document_conversion_message(
+                message=FakeMessage(),
+                consumer=FakeConsumer(),
+                runtime=runtime,
+            )
 
     assert "failed to handle document conversion message doc_id=42 elapsed_ms=250.00" in caplog.text

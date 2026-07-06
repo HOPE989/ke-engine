@@ -11,7 +11,7 @@ from fastapi import (
     status,
 )
 
-from app.api.deps import get_config, get_document_runtime
+from app.api.deps import DocumentRuntime, get_config, get_document_runtime
 from app.common.response import APIResponse, success_response
 from app.core.config import Settings
 from app.core.exceptions import AppException
@@ -27,7 +27,6 @@ from app.modules.document.errors import (
     DocumentStorageFailed,
     DocumentVectorStorageDispatchFailed,
 )
-from app.modules.document.runtime import DocumentRuntime
 from app.modules.document.schemas import (
     DocumentChunkRequest,
     DocumentChunkResponse,

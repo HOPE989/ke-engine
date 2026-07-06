@@ -11,9 +11,8 @@ worker 只负责消费 `document.embed_store.requested` 事件，并把结果转
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from app.core.config import get_settings
 from app.infrastructure.kafka import create_kafka_consumer
 from app.modules.document.events import (
     DOCUMENT_EMBED_STORE_GROUP_ID,
@@ -23,20 +22,25 @@ from app.modules.document.events import (
 from app.modules.document.models import DocumentStatus
 from app.modules.document.vector_storage import VectorStorageLockBusy, store_document_vectors
 
+if TYPE_CHECKING:
+    # 仅用于类型检查：Kafka/Celery worker host 都会导入本业务模块执行业务入口。
+    # 这里避免运行时导入 host 模块，防止循环依赖和 worker 启动副作用。
+    from app.workers.celery_worker import CeleryWorkerRuntime
+    from app.workers.kafka_worker import DocumentVectorStorageContext, KafkaWorkerRuntime
+
 logger = logging.getLogger(__name__)
 
 
-async def run_document_vector_storage_consumer() -> None:
+async def run_document_vector_storage_consumer(runtime: KafkaWorkerRuntime) -> None:
     """启动长生命周期的向量存储 Kafka consumer。
 
     该 consumer 使用手动 commit。循环中只处理三件事：订阅 topic、忽略空 poll/consumer
     error、把有效 message 交给 `handle_document_vector_storage_message` 决定是否提交。
     """
 
-    settings = get_settings()
     # 1. consumer group 独立于转换 worker，避免两个阶段互相抢消息。
     consumer = create_kafka_consumer(
-        bootstrap_servers=settings.kafka_bootstrap_servers,
+        bootstrap_servers=runtime.settings.kafka_bootstrap_servers,
         group_id=DOCUMENT_EMBED_STORE_GROUP_ID,
     )
     # 2. topic 与事件类型保持一致，便于按业务阶段定位 Kafka 消息。
@@ -56,20 +60,32 @@ async def run_document_vector_storage_consumer() -> None:
             if error is not None:
                 logger.warning("kafka consumer error: %s", error)
                 continue
-            await handle_document_vector_storage_message(message=message, consumer=consumer)
+            await handle_document_vector_storage_message(
+                message=message,
+                consumer=consumer,
+                runtime=runtime,
+            )
     finally:
         await consumer.close()
 
 
-async def handle_document_vector_storage_message(*, message: Any, consumer: Any) -> None:
+async def handle_document_vector_storage_message(
+    *,
+    message: Any,
+    consumer: Any,
+    runtime: KafkaWorkerRuntime,
+) -> None:
     """处理一条 Kafka message，并只提交终端结果。
 
-    `run_document_vector_storage` 返回布尔值表达 commit 决策：`True` 表示该消息已经不需要
+    `run_document_vector_storage_with_runtime` 返回布尔值表达 commit 决策：`True` 表示该消息已经不需要
     重试，`False` 表示基础设施或业务处理仍可重试，必须保留 offset 未提交。
     """
 
     event = DocumentEmbedStoreRequested.from_json(message.value())
-    should_commit = await run_document_vector_storage(doc_id=event.doc_id_int())
+    should_commit = await run_document_vector_storage_with_runtime(
+        doc_id=event.doc_id_int(),
+        runtime=runtime,
+    )
     if should_commit:
         await consumer.commit(message=message)
 
@@ -116,59 +132,53 @@ async def handle_document_vector_storage_event(
     return True
 
 
-async def run_document_vector_storage(doc_id: int) -> bool:
-    """为一条向量存储事件创建运行时资源并执行处理。
+async def run_document_vector_storage_with_runtime(
+    *,
+    doc_id: int,
+    runtime: KafkaWorkerRuntime | CeleryWorkerRuntime,
+) -> bool:
+    """使用进程 runtime 为一个文档执行向量存储。
 
-    资源创建分阶段进行：先打开数据库读取文档状态，只有确认为 `CHUNKED` 后才创建 Redis
-    lock、embedding model 和 Elasticsearch store。这样缺失文档、已完成文档或非法业务状态
-    不会因为外部基础设施配置问题而阻塞 Kafka commit。
+    1. DB repository、Redis client、embedding model 和 Elasticsearch adapter 都由 worker
+       进程 runtime 在启动期创建；
+    2. 这里仍然为每个文档创建独立 Redis lock，保持短生命周期上下文不进入 runtime；
+    3. 返回值继续表达 Kafka commit 决策，Celery 调用方只复用业务结果而不触碰 offset。
     """
 
-    from app.db.session import close_engine, get_session_factory, init_engine
-    from app.infrastructure.redis_lock import create_redis_client, document_embed_store_lock
-    from app.modules.document.repository import DocumentRepository
-    from app.modules.document.vector_store import (
-        ElasticsearchVectorStoreAdapter,
-        create_elasticsearch_store,
-        create_embedding_model,
+    from app.infrastructure.redis_lock import document_embed_store_lock
+
+    vector_context = _get_vector_storage_context(runtime)
+    document = await vector_context.repository.get_document(doc_id)
+    if document is None:
+        return True
+    if document.status == DocumentStatus.VECTOR_STORED.value:
+        return True
+    if document.status != DocumentStatus.CHUNKED.value:
+        return True
+
+    lock = document_embed_store_lock(
+        redis_client=vector_context.redis_client,
+        doc_id=doc_id,
+        expire_seconds=vector_context.lock_expire_seconds,
+    )
+    return await handle_document_vector_storage_event(
+        doc_id=doc_id,
+        document_repository=vector_context.repository,
+        vector_store=vector_context.vector_store,
+        lock=lock,
     )
 
-    settings = get_settings()
-    # 1. 先初始化数据库，因为文档状态决定是否需要后续 Redis/OpenAI/ES 资源。
-    await init_engine(settings.database_url)
-    try:
-        repository = DocumentRepository(get_session_factory())
-        document = await repository.get_document(doc_id)
-        if document is None:
-            return True
-        if document.status == DocumentStatus.VECTOR_STORED.value:
-            return True
-        if document.status != DocumentStatus.CHUNKED.value:
-            return True
 
-        # 2. 只有 CHUNKED 文档才需要获取锁和创建外部服务 adapter。
-        redis_client = create_redis_client(settings.redis_url)
-        try:
-            lock = document_embed_store_lock(
-                redis_client=redis_client,
-                doc_id=doc_id,
-                expire_seconds=settings.document_convert_lock_expire_seconds,
-            )
-            # 3. 模型和 ES store 在 worker 侧构造，workflow 只接收抽象 adapter。
-            embedding_model = create_embedding_model(settings)
-            store = create_elasticsearch_store(settings=settings, embedding_model=embedding_model)
-            return await handle_document_vector_storage_event(
-                doc_id=doc_id,
-                document_repository=repository,
-                vector_store=ElasticsearchVectorStoreAdapter(
-                    store=store,
-                    client=getattr(store, "client", None),
-                    index_name=settings.elasticsearch_index,
-                ),
-                lock=lock,
-            )
-        finally:
-            redis_client.close()
-    finally:
-        # 4. 每条消息独立打开和关闭 DB engine，沿用现有 conversion worker 的资源模型。
-        await close_engine()
+def _get_vector_storage_context(
+    runtime: KafkaWorkerRuntime | CeleryWorkerRuntime,
+) -> DocumentVectorStorageContext:
+    """从进程 runtime 中取出向量写入 context。
+
+    Kafka worker 直接暴露 `vector_storage`；Celery worker 通过 `compensation.vector_storage`
+    暴露自己的补偿上下文。这里保持分派逻辑很薄，避免把 Kafka/Celery 差异藏进共享
+    runtime 构造器。
+    """
+
+    if hasattr(runtime, "vector_storage"):
+        return runtime.vector_storage
+    return runtime.compensation.vector_storage

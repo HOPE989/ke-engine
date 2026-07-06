@@ -61,7 +61,8 @@ async def chunk_api_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncCl
         lambda **kwargs: "chunk-lock",
         raising=False,
     )
-    app.state.document_runtime = SimpleNamespace(
+    app.state.settings = config.get_settings()
+    runtime = SimpleNamespace(
         repository="repository",
         storage="storage",
         file_detector=object(),
@@ -70,6 +71,7 @@ async def chunk_api_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncCl
         embed_store_dispatcher=object(),
         redis_client="redis-client",
     )
+    app.state.document_runtime = runtime
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -197,7 +199,8 @@ async def embed_store_api_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[A
             if calls["dispatch_error"] is not None:
                 raise calls["dispatch_error"]
 
-    app.state.document_runtime = SimpleNamespace(
+    app.state.settings = config.get_settings()
+    runtime = SimpleNamespace(
         repository=FakeRepository(),
         storage="storage",
         file_detector=object(),
@@ -206,6 +209,7 @@ async def embed_store_api_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[A
         embed_store_dispatcher=FakeEmbedStoreDispatcher(),
         redis_client="redis-client",
     )
+    app.state.document_runtime = runtime
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

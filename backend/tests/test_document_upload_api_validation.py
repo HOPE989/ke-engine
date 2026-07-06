@@ -37,13 +37,15 @@ def assert_error_response(response, status_code: int, message: str) -> None:
 def patch_router_dependencies(app, document_router, monkeypatch):
     from types import SimpleNamespace
 
-    app.state.document_runtime = SimpleNamespace(
+    app.state.settings = config.get_settings()
+    runtime = SimpleNamespace(
         repository=object(),
         storage=object(),
         file_detector=object(),
         id_generator=object(),
         conversion_dispatcher=object(),
     )
+    app.state.document_runtime = runtime
 
 
 @pytest.fixture

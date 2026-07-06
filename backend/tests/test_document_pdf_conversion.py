@@ -167,13 +167,15 @@ def patch_router_dependencies(
     conversion_dispatcher,
     file_detector=None,
 ):
-    app.state.document_runtime = SimpleNamespace(
+    app.state.settings = config.get_settings()
+    runtime = SimpleNamespace(
         repository=repository,
         storage=storage,
         file_detector=file_detector or object(),
         id_generator=id_generator,
         conversion_dispatcher=conversion_dispatcher,
     )
+    app.state.document_runtime = runtime
 
 
 @pytest.mark.asyncio

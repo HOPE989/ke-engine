@@ -231,9 +231,38 @@ def test_settings_document_startup_and_request_time_boundaries():
         assert description.startswith("request-time:")
 
 
-def test_api_get_config_uses_request_time_settings_loader():
+def test_api_get_config_reads_startup_settings_from_application_state():
     from app.api import deps
 
     source = inspect.getsource(deps.get_config)
 
-    assert "get_request_settings()" in source
+    assert "request: Request" in source
+    assert "request.app.state.settings" in source
+    assert "get_api_runtime" not in source
+    assert "get_request_settings()" not in source
+
+
+def test_api_get_config_does_not_call_full_request_settings_loader(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.api import deps
+    from app.core import config as config_module
+
+    startup_settings = SimpleNamespace(max_upload_size_mb=37)
+
+    def explode_request_settings():
+        raise AssertionError("request settings loader must not run")
+
+    monkeypatch.setattr(
+        config_module,
+        "get_request_settings",
+        explode_request_settings,
+        raising=False,
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(settings=startup_settings)
+        )
+    )
+
+    assert deps.get_config(request) is startup_settings

@@ -1,3 +1,4 @@
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -38,11 +39,24 @@ def _document(status):
     return SimpleNamespace(doc_id=42, status=status)
 
 
+def test_vector_storage_worker_exposes_runtime_injected_entrypoint():
+    from app.modules.document.workers import vector_storage
+
+    assert hasattr(vector_storage, "run_document_vector_storage_with_runtime")
+
+
+def test_vector_storage_worker_removes_legacy_non_injected_entrypoint():
+    from app.modules.document.workers import vector_storage
+
+    assert not hasattr(vector_storage, "run_document_vector_storage")
+
+
 @pytest.mark.asyncio
 async def test_vector_storage_consumer_subscribes_to_topic_and_group(monkeypatch):
     from app.modules.document.workers import vector_storage
 
     calls = []
+    runtime = SimpleNamespace(settings=SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"))
 
     class FakeKafkaConsumer:
         async def subscribe(self, topics):
@@ -59,15 +73,10 @@ async def test_vector_storage_consumer_subscribes_to_topic_and_group(monkeypatch
         calls.append(("create_consumer", bootstrap_servers, group_id))
         return FakeKafkaConsumer()
 
-    monkeypatch.setattr(
-        vector_storage,
-        "get_settings",
-        lambda: SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"),
-    )
     monkeypatch.setattr(vector_storage, "create_kafka_consumer", fake_create_kafka_consumer)
 
     with pytest.raises(RuntimeError, match="stop consumer"):
-        await vector_storage.run_document_vector_storage_consumer()
+        await vector_storage.run_document_vector_storage_consumer(runtime)
 
     assert calls[:3] == [
         ("create_consumer", "kafka.example:9092", "ke-engine-document-embed-store"),
@@ -81,15 +90,16 @@ async def test_handle_vector_storage_message_commits_after_success(monkeypatch):
     from app.modules.document.workers import vector_storage
 
     calls = []
+    runtime = object()
 
-    async def fake_run_document_vector_storage(doc_id):
-        calls.append(doc_id)
+    async def fake_run_document_vector_storage_with_runtime(*, doc_id, runtime):
+        calls.append((doc_id, runtime))
         return True
 
     monkeypatch.setattr(
         vector_storage,
-        "run_document_vector_storage",
-        fake_run_document_vector_storage,
+        "run_document_vector_storage_with_runtime",
+        fake_run_document_vector_storage_with_runtime,
     )
     consumer = FakeConsumer()
     message = FakeMessage()
@@ -97,9 +107,10 @@ async def test_handle_vector_storage_message_commits_after_success(monkeypatch):
     await vector_storage.handle_document_vector_storage_message(
         message=message,
         consumer=consumer,
+        runtime=runtime,
     )
 
-    assert calls == [42]
+    assert calls == [(42, runtime)]
     assert consumer.commits == [message]
 
 
@@ -107,22 +118,32 @@ async def test_handle_vector_storage_message_commits_after_success(monkeypatch):
 async def test_handle_vector_storage_message_does_not_commit_retryable_failure(monkeypatch):
     from app.modules.document.workers import vector_storage
 
-    async def fake_run_document_vector_storage(doc_id):
+    async def fake_run_document_vector_storage_with_runtime(*, doc_id, runtime):
         return False
 
     monkeypatch.setattr(
         vector_storage,
-        "run_document_vector_storage",
-        fake_run_document_vector_storage,
+        "run_document_vector_storage_with_runtime",
+        fake_run_document_vector_storage_with_runtime,
     )
     consumer = FakeConsumer()
+    runtime = object()
 
     await vector_storage.handle_document_vector_storage_message(
         message=FakeMessage(),
         consumer=consumer,
+        runtime=runtime,
     )
 
     assert consumer.commits == []
+
+
+def test_vector_storage_message_handler_calls_runtime_injected_entrypoint():
+    from app.modules.document.workers import vector_storage
+
+    source = inspect.getsource(vector_storage.handle_document_vector_storage_message)
+
+    assert "run_document_vector_storage_with_runtime(" in source
 
 
 @pytest.mark.asyncio
@@ -189,6 +210,74 @@ async def test_vector_storage_event_success_for_chunked_document_commits(monkeyp
             "lock": lock,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_injected_vector_storage_uses_runtime_resources_and_per_document_lock(
+    monkeypatch,
+):
+    from app.modules.document.workers import vector_storage
+
+    calls = []
+    redis_client = object()
+    vector_store = object()
+
+    def fake_document_embed_store_lock(*, redis_client, doc_id, expire_seconds):
+        calls.append(("lock", redis_client, doc_id, expire_seconds))
+        return "lock"
+
+    async def fake_handle_document_vector_storage_event(**kwargs):
+        calls.append(("handle", kwargs))
+        return True
+
+    monkeypatch.setattr(
+        "app.infrastructure.redis_lock.document_embed_store_lock",
+        fake_document_embed_store_lock,
+    )
+    monkeypatch.setattr(
+        vector_storage,
+        "handle_document_vector_storage_event",
+        fake_handle_document_vector_storage_event,
+    )
+    runtime = SimpleNamespace(
+        vector_storage=SimpleNamespace(
+            repository=FakeRepository(_document(DocumentStatus.CHUNKED.value)),
+            redis_client=redis_client,
+            vector_store=vector_store,
+            lock_expire_seconds=180,
+        ),
+    )
+
+    should_commit = await vector_storage.run_document_vector_storage_with_runtime(
+        doc_id=42,
+        runtime=runtime,
+    )
+
+    assert should_commit is True
+    assert calls == [
+        ("lock", redis_client, 42, 180),
+        (
+            "handle",
+            {
+                "doc_id": 42,
+                "document_repository": runtime.vector_storage.repository,
+                "vector_store": vector_store,
+                "lock": "lock",
+            },
+        ),
+    ]
+
+
+def test_runtime_injected_vector_storage_does_not_construct_runtime_owned_resources():
+    from app.modules.document.workers import vector_storage
+
+    source = inspect.getsource(vector_storage.run_document_vector_storage_with_runtime)
+
+    assert "vector_context.redis_client" in source
+    assert "vector_context.vector_store" in source
+    assert "create_redis_client" not in source
+    assert "create_embedding_model" not in source
+    assert "create_elasticsearch_store" not in source
 
 
 @pytest.mark.asyncio

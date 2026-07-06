@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from app.core.config import get_settings
 from app.infrastructure.kafka import create_kafka_consumer
 from app.modules.document.events import (
     DOCUMENT_CONVERT_GROUP_ID,
@@ -14,15 +13,23 @@ from app.modules.document.events import (
     DocumentConvertRequested,
 )
 
+if TYPE_CHECKING:
+    # 仅用于类型检查：Kafka worker host 会导入本业务模块注册 consumer handler。
+    # 这里避免运行时导入 host 模块，防止形成 worker host <-> handler 的循环依赖。
+    from app.workers.kafka_worker import KafkaWorkerRuntime
+
 logger = logging.getLogger(__name__)
 
 
-async def run_document_conversion_consumer() -> None:
-    """Run the long-lived document conversion Kafka consumer loop."""
+async def run_document_conversion_consumer(runtime: KafkaWorkerRuntime) -> None:
+    """启动长生命周期的文档转换 Kafka consumer。
 
-    settings = get_settings()
+    Kafka consumer 实例属于本消费循环；它只共享进程级 `KafkaWorkerRuntime` 里的基础设施
+    资源，不和向量存储 consumer 共享 topic/group/offset 状态。
+    """
+
     consumer = create_kafka_consumer(
-        bootstrap_servers=settings.kafka_bootstrap_servers,
+        bootstrap_servers=runtime.settings.kafka_bootstrap_servers,
         group_id=DOCUMENT_CONVERT_GROUP_ID,
     )
     await consumer.subscribe([DOCUMENT_CONVERT_REQUESTED_TOPIC])
@@ -40,20 +47,32 @@ async def run_document_conversion_consumer() -> None:
             if error is not None:
                 logger.warning("kafka consumer error: %s", error)
                 continue
-            await handle_document_conversion_message(message=message, consumer=consumer)
+            await handle_document_conversion_message(
+                message=message,
+                consumer=consumer,
+                runtime=runtime,
+            )
     finally:
         await consumer.close()
 
 
-async def handle_document_conversion_message(*, message: Any, consumer: Any) -> None:
-    """Handle and commit one document conversion Kafka message."""
+async def handle_document_conversion_message(
+    *,
+    message: Any,
+    consumer: Any,
+    runtime: KafkaWorkerRuntime,
+) -> None:
+    """处理并提交一条文档转换 Kafka message。
+
+    转换成功才提交 offset；异常继续向外抛出，保持原有 Kafka 重试语义。
+    """
 
     event = DocumentConvertRequested.from_json(message.value())
     doc_id = event.doc_id_int()
     started_at = time.perf_counter()
     logger.info("processing document conversion message doc_id=%s", doc_id)
     try:
-        await run_document_conversion(doc_id=doc_id)
+        await run_document_conversion(doc_id=doc_id, runtime=runtime)
         await consumer.commit(message=message)
     except Exception:
         elapsed_ms = (time.perf_counter() - started_at) * 1000
@@ -71,176 +90,49 @@ async def handle_document_conversion_message(*, message: Any, consumer: Any) -> 
     )
 
 
-async def run_document_conversion(doc_id: int) -> None:
-    """Create per-message resources and execute document conversion."""
+async def run_document_conversion(*, doc_id: int, runtime: KafkaWorkerRuntime) -> None:
+    """使用 Kafka 进程 runtime 执行一次文档转换。
 
-    from app.infrastructure.redis_lock import create_redis_client, document_conversion_lock
+    1. Redis client 和锁过期时间来自 `runtime.conversion` typed context；
+    2. 每个文档仍只创建自己的 Redis lock，避免把短生命周期锁对象放入 runtime；
+    3. 函数不负责打开或关闭 DB engine，数据库生命周期由 worker 进程 runtime 统一管理。
+    """
 
-    settings = get_settings()
-    redis_client = create_redis_client(settings.redis_url)
+    from app.infrastructure.redis_lock import document_conversion_lock
+
+    conversion_context = runtime.conversion
+    lock = document_conversion_lock(
+        redis_client=conversion_context.redis_client,
+        doc_id=doc_id,
+        expire_seconds=conversion_context.lock_expire_seconds,
+    )
+    if not lock.acquire(blocking=False):
+        return
     try:
-        lock = document_conversion_lock(
-            redis_client=redis_client,
-            doc_id=doc_id,
-            expire_seconds=settings.document_convert_lock_expire_seconds,
-        )
-        if not lock.acquire(blocking=False):
-            return
-        try:
-            await run_locked_document_conversion(doc_id=doc_id, settings=settings)
-        finally:
-            lock.release()
+        await run_locked_document_conversion(doc_id=doc_id, runtime=runtime)
     finally:
-        redis_client.close()
+        lock.release()
 
 
-async def run_locked_document_conversion(*, doc_id: int, settings: Any) -> None:
-    """Execute document conversion while holding the per-document lock."""
+async def run_locked_document_conversion(
+    *,
+    doc_id: int,
+    runtime: KafkaWorkerRuntime,
+) -> None:
+    """在已持有文档锁时执行转换业务。
 
-    from app.db.session import close_engine, get_session_factory, init_engine
+    这里是 Kafka message 的文档执行热路径，只消费 conversion context 暴露的长生命周期
+    资源视图：repository 负责短生命周期 DB session，storage/MinerU/image_describer
+    负责实际转换能力。
+    """
+
     from app.modules.document.processing import convert_uploaded_document
-    from app.modules.document.repository import DocumentRepository
 
-    await init_engine(settings.database_url)
-    mineru_client = _LazyMinerUClient(settings)
-    image_describer = _LazyImageDescriber(settings)
-    try:
-        await convert_uploaded_document(
-            doc_id=doc_id,
-            document_repository=DocumentRepository(get_session_factory()),
-            storage=_LazyDocumentStorage(settings),
-            mineru_client=mineru_client,
-            image_describer=image_describer,
-        )
-    finally:
-        await mineru_client.aclose()
-        await close_engine()
-
-
-class _LazyDocumentStorage:
-    """Create MinIO storage only when a PDF path needs object storage."""
-
-    def __init__(self, settings: Any) -> None:
-        self._settings = settings
-        self._storage: Any | None = None
-
-    def _get_storage(self) -> Any:
-        if self._storage is None:
-            from app.infrastructure.minio import get_minio_client
-            from app.modules.document.storage import DocumentObjectStorage
-
-            minio_client = get_minio_client()
-            self._storage = DocumentObjectStorage(
-                client=minio_client,
-                bucket=self._settings.minio_bucket,
-                public_base_url=self._settings.minio_public_base_url,
-            )
-        return self._storage
-
-    async def upload_bytes(
-        self,
-        *,
-        object_key: str,
-        content: bytes,
-        content_type: str,
-    ) -> str:
-        return await self._get_storage().upload_bytes(
-            object_key=object_key,
-            content=content,
-            content_type=content_type,
-        )
-
-    async def download_bytes(self, *, object_key: str) -> bytes:
-        return await self._get_storage().download_bytes(object_key=object_key)
-
-
-class _LazyMinerUClient:
-    """Create MinerU HTTP client only when a PDF path needs conversion."""
-
-    def __init__(self, settings: Any) -> None:
-        self._settings = settings
-        self._client: Any | None = None
-
-    def _get_client(self) -> Any:
-        if self._client is None:
-            from app.infrastructure.mineru import create_mineru_client
-
-            self._client = create_mineru_client(self._settings)
-        return self._client
-
-    async def request_zip(self, *, filename: str, content: bytes) -> bytes:
-        return await self._get_client().request_zip(filename=filename, content=content)
-
-    async def aclose(self) -> None:
-        if self._client is not None:
-            await self._client.aclose()
-
-
-class _LazyImageDescriber:
-    """Create an OpenAI vision-capable chat model for PDF image descriptions."""
-
-    def __init__(self, settings: Any) -> None:
-        self._settings = settings
-        self._model: Any | None = None
-        self._kwargs: dict[str, str] | None = None
-
-    def ensure_configured(self) -> None:
-        if self._kwargs is None:
-            self._kwargs = self._model_kwargs(self._settings)
-
-    def _model_kwargs(self, settings: Any) -> dict[str, str]:
-        api_key = _clean_value(getattr(settings, "openai_api_key", None))
-        if api_key is None:
-            raise RuntimeError("OPENAI_API_KEY is required for document image description")
-
-        kwargs: dict[str, str] = {
-            "api_key": api_key,
-            "model": "qwen3.6-flash"
-            # "model": _clean_value(getattr(settings, "openai_model", None)) or "gpt-4o-mini",
-        }
-        base_url = _clean_value(getattr(settings, "openai_base_url", None))
-        if base_url is not None:
-            kwargs["base_url"] = base_url
-        return kwargs
-
-    def _get_model(self) -> Any:
-        self.ensure_configured()
-        if self._model is None:
-            from langchain_openai import ChatOpenAI
-
-            assert self._kwargs is not None
-            self._model = ChatOpenAI(**self._kwargs)
-        return self._model
-
-    async def describe_image(self, *, filename: str, content: bytes, content_type: str) -> str:
-        import base64
-
-        from langchain_core.messages import HumanMessage
-
-        encoded = base64.b64encode(content).decode("ascii")
-        response = await self._get_model().ainvoke(
-            [
-                HumanMessage(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": f"请用一句简洁中文描述图片 {filename} 的主要内容。",
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{content_type};base64,{encoded}",
-                            },
-                        },
-                    ],
-                )
-            ]
-        )
-        return str(response.content)
-
-
-def _clean_value(value: str | None) -> str | None:
-    if value is None:
-        return None
-    cleaned = value.strip()
-    return cleaned or None
+    conversion_context = runtime.conversion
+    await convert_uploaded_document(
+        doc_id=doc_id,
+        document_repository=conversion_context.repository,
+        storage=conversion_context.storage,
+        mineru_client=conversion_context.mineru_client,
+        image_describer=conversion_context.image_describer,
+    )
