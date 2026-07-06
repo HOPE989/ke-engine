@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
 import pytest
+from elastic_transport import ApiResponseMeta, NodeConfig
+from elasticsearch import NotFoundError
 
 
 def _settings(**overrides):
@@ -29,6 +31,26 @@ def _segment(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def _index_not_found_error(index_name="custom-vector-index"):
+    return NotFoundError(
+        "index_not_found_exception",
+        meta=ApiResponseMeta(
+            status=404,
+            http_version="1.1",
+            headers={},
+            duration=0.0,
+            node=NodeConfig(scheme="http", host="localhost", port=9200),
+        ),
+        body={
+            "error": {
+                "type": "index_not_found_exception",
+                "reason": f"no such index [{index_name}]",
+            },
+            "status": 404,
+        },
+    )
 
 
 def test_embedding_model_uses_fixed_model_chunk_size_and_configured_dimensions(monkeypatch):
@@ -162,6 +184,37 @@ async def test_adapter_can_delete_vectors_by_ids_and_metadata_doc_id():
     await adapter.delete_by_doc_id(42)
 
     assert store.deleted_ids == [["es-id-1", "es-id-2"]]
+    assert client.delete_by_query_calls == [
+        {
+            "index": "custom-vector-index",
+            "query": {"term": {"metadata.docId": "42"}},
+            "conflicts": "proceed",
+            "refresh": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_adapter_treats_missing_index_as_no_vectors_to_delete_by_doc_id():
+    from app.modules.document.vector_store import ElasticsearchVectorStoreAdapter
+
+    class FakeClient:
+        def __init__(self):
+            self.delete_by_query_calls = []
+
+        def delete_by_query(self, **kwargs):
+            self.delete_by_query_calls.append(kwargs)
+            raise _index_not_found_error()
+
+    client = FakeClient()
+    adapter = ElasticsearchVectorStoreAdapter(
+        store=object(),
+        client=client,
+        index_name="custom-vector-index",
+    )
+
+    await adapter.delete_by_doc_id(42)
+
     assert client.delete_by_query_calls == [
         {
             "index": "custom-vector-index",

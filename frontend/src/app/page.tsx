@@ -129,6 +129,7 @@ export default function Home() {
     setError(null);
     setResponse(null);
     setRequestLog(null);
+    setDocId("");
 
     if (!file) {
       setError("请选择要上传的 PDF、Markdown 或文本文件。");
@@ -172,7 +173,7 @@ export default function Home() {
 
   async function handleQueryDocument() {
     if (!normalizedDocId) {
-      setError("请先填写 doc_id。");
+      setError("请先上传文档获取 doc_id，或手动填写 doc_id。");
       return;
     }
 
@@ -191,7 +192,7 @@ export default function Home() {
 
   async function handleChunkDocument() {
     if (!normalizedDocId) {
-      setError("请先填写 doc_id。");
+      setError("请先上传文档获取 doc_id，或手动填写 doc_id。");
       return;
     }
     if (!canChunkDocument) {
@@ -225,7 +226,7 @@ export default function Home() {
 
   async function handleEmbedStoreDocument() {
     if (!normalizedDocId) {
-      setError("请先填写 doc_id。");
+      setError("请先上传文档获取 doc_id，或手动填写 doc_id。");
       return;
     }
 
@@ -328,7 +329,7 @@ export default function Home() {
                   type="submit"
                   disabled={isUploading}
                 >
-                  {isUploading ? "上传中..." : "上传并生成 doc_id"}
+                  {isUploading ? "上传中..." : "上传并获取 doc_id"}
                 </button>
               </div>
             </form>
@@ -357,7 +358,7 @@ export default function Home() {
                     className="w-full rounded-md border border-gray-300 px-3 py-2.5 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                     value={docId}
                     onChange={(event) => setDocId(event.target.value)}
-                    placeholder="上传成功后自动填入，也可手动输入"
+                    placeholder="上传成功后自动填入，也可手动修改"
                   />
                 </label>
 
@@ -388,6 +389,18 @@ export default function Home() {
               </div>
 
               <div className="mt-5 grid gap-5 sm:grid-cols-2">
+                <label className="block sm:col-span-2">
+                  <span className="mb-2 block text-sm font-medium text-gray-800">
+                    doc_id
+                  </span>
+                  <input
+                    className="w-full rounded-md border border-gray-300 px-3 py-2.5 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                    value={docId}
+                    onChange={(event) => setDocId(event.target.value)}
+                    placeholder="上传成功后自动填入，也可手动修改"
+                  />
+                </label>
+
                 <label className="block">
                   <span className="mb-2 block text-sm font-medium text-gray-800">
                     chunk_size
@@ -446,6 +459,18 @@ export default function Home() {
                   POST
                 </span>
               </div>
+
+              <label className="mt-5 block">
+                <span className="mb-2 block text-sm font-medium text-gray-800">
+                  doc_id
+                </span>
+                <input
+                  className="w-full rounded-md border border-gray-300 px-3 py-2.5 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                  value={docId}
+                  onChange={(event) => setDocId(event.target.value)}
+                  placeholder="上传成功后自动填入，也可手动修改"
+                />
+              </label>
 
               <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
                 <button

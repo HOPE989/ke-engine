@@ -15,6 +15,7 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+from elasticsearch import NotFoundError
 from langchain_core.documents import Document
 from langchain_elasticsearch import ElasticsearchStore
 from langchain_openai import OpenAIEmbeddings
@@ -176,15 +177,20 @@ class ElasticsearchVectorStoreAdapter:
 
         if self._client is None or self._index_name is None:
             return
-        # delete_by_query 可能来自同步或异步 ES client；下面统一兼容两种返回值。
-        result = self._client.delete_by_query(
-            index=self._index_name,
-            query={"term": {"metadata.docId": str(doc_id)}},
-            conflicts="proceed",
-            refresh=True,
-        )
-        if inspect.isawaitable(result):
-            await result
+        try:
+            # delete_by_query 可能来自同步或异步 ES client；下面统一兼容两种返回值。
+            result = self._client.delete_by_query(
+                index=self._index_name,
+                query={"term": {"metadata.docId": str(doc_id)}},
+                conflicts="proceed",
+                refresh=True,
+            )
+            if inspect.isawaitable(result):
+                await result
+        except NotFoundError as exc:
+            if _is_index_not_found_error(exc):
+                return
+            raise
 
 
 def _segment_metadata(segment: Any) -> dict[str, Any]:
@@ -198,3 +204,14 @@ def _segment_metadata(segment: Any) -> dict[str, Any]:
     if metadata is None:
         metadata = getattr(segment, "metadata", {})
     return dict(metadata)
+
+
+def _is_index_not_found_error(exc: NotFoundError) -> bool:
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            return error.get("type") == "index_not_found_exception"
+        if isinstance(error, str):
+            return error == "index_not_found_exception"
+    return "index_not_found_exception" in str(exc)
