@@ -40,6 +40,10 @@ function chunkEndpoint(docId: string) {
   return `/api/v1/document/${docId}/chunk`;
 }
 
+function embedStoreEndpoint(docId: string) {
+  return `/api/v1/document/${docId}/embed-store`;
+}
+
 function formatFileSize(size: number) {
   if (size < 1024) {
     return `${size} B`;
@@ -76,8 +80,9 @@ export default function Home() {
   const [isUploading, setIsUploading] = useState(false);
   const [isQuerying, setIsQuerying] = useState(false);
   const [isChunking, setIsChunking] = useState(false);
+  const [isEmbedding, setIsEmbedding] = useState(false);
   const [response, setResponse] = useState<ApiResponse<
-    DocumentMetadata | DocumentChunkResponse
+    DocumentMetadata | DocumentChunkResponse | null
   > | null>(null);
   const [requestLog, setRequestLog] = useState<RequestLog | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +104,7 @@ export default function Home() {
     overlap >= 0 &&
     overlap < chunkSize &&
     !isChunking;
+  const canEmbedStoreDocument = normalizedDocId.length > 0 && !isEmbedding;
 
   function showResult<T>(
     label: string,
@@ -109,7 +115,7 @@ export default function Home() {
     status: number
   ) {
     setRequestLog({ label, endpoint, payload });
-    setResponse(result as ApiResponse<DocumentMetadata | DocumentChunkResponse>);
+    setResponse(result as ApiResponse<DocumentMetadata | DocumentChunkResponse | null>);
     if (!ok) {
       setError(result.message || `请求失败，HTTP ${status}`);
       return;
@@ -217,6 +223,27 @@ export default function Home() {
     }
   }
 
+  async function handleEmbedStoreDocument() {
+    if (!normalizedDocId) {
+      setError("请先填写 doc_id。");
+      return;
+    }
+
+    const endpoint = embedStoreEndpoint(normalizedDocId);
+    setIsEmbedding(true);
+    try {
+      const result = await fetch(endpoint, {
+        method: "POST"
+      });
+      const payload = await readApiResponse<null>(result);
+      showResult("触发向量入库", endpoint, null, payload, result.ok, result.status);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "向量入库请求失败。");
+    } finally {
+      setIsEmbedding(false);
+    }
+  }
+
   return (
     <main className="min-h-screen px-5 py-8 sm:px-8 lg:px-12">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
@@ -228,7 +255,7 @@ export default function Home() {
             文档端到端测试入口
           </h1>
           <p className="max-w-3xl text-sm leading-6 text-gray-600">
-            这页用于串起上传、状态查询和新增切分接口。同源{" "}
+            这页用于串起上传、状态查询、切分和向量入库任务派发。同源{" "}
             <code className="rounded bg-white/80 px-1.5 py-0.5 text-gray-900">
               /api/v1/*
             </code>{" "}
@@ -404,10 +431,40 @@ export default function Home() {
                 </p>
               </div>
             </section>
+
+            <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm lg:col-span-2 xl:col-span-1">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-950">
+                    4. 触发向量入库任务
+                  </h2>
+                  <p className="mt-1 text-xs text-gray-500">
+                    /api/v1/document/{"{doc_id}"}/embed-store
+                  </p>
+                </div>
+                <span className="rounded-md bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+                  POST
+                </span>
+              </div>
+
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+                <button
+                  className="inline-flex h-11 w-full items-center justify-center rounded-md bg-gray-950 px-4 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-400 sm:w-auto"
+                  type="button"
+                  onClick={handleEmbedStoreDocument}
+                  disabled={!canEmbedStoreDocument}
+                >
+                  {isEmbedding ? "派发中..." : "派发向量入库"}
+                </button>
+                <p className="text-xs leading-5 text-gray-500">
+                  后端要求文档已完成切分；如果返回 409，先确认切分接口成功后再重试。
+                </p>
+              </div>
+            </section>
           </div>
 
           <aside className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-semibold text-gray-950">端到端响应</h2>
+            <h2 className="text-base font-semibold text-gray-950">接口响应</h2>
             <div className="mt-4 space-y-3">
               {requestLog ? (
                 <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">

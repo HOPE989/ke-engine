@@ -1,6 +1,6 @@
 # Frontend
 
-Next.js + Tailwind 文档上传测试页，用于端到端调用后端上传接口。
+Next.js + Tailwind 文档测试页，用于手动端到端调用后端文档接口。
 
 ## 本地运行
 
@@ -15,10 +15,10 @@ npm run dev
 http://localhost:3000
 ```
 
-页面会请求同源 `/api/v1/document/upload`，Next.js rewrite 默认转发到：
+页面会请求同源 `/api/v1/document/*`，Next.js rewrite 默认转发到后端：
 
 ```text
-http://localhost:8000/api/v1/document/upload
+http://localhost:8000/api/v1/document/*
 ```
 
 如果后端地址不同，可以启动前设置：
