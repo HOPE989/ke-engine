@@ -100,10 +100,9 @@ and updated_at < now() - interval '<configured threshold>'
 首版默认值：
 
 - stale 阈值：5 分钟
-- 每轮最多处理：20 个文档
 - Celery Beat 间隔：5 分钟
 
-这些值需要进入后端配置，便于本地和生产环境独立调整。
+这些值作为首版代码常量保留，不新增 settings。首版不增加 doc 级扫描 limit。补偿任务扫描到的是候选文档集合，然后逐个调用 `run_document_vector_storage(doc_id)`。单个文档内部的 segment 分页继续由现有业务方法负责。
 
 ### 冲突处理
 
@@ -130,13 +129,9 @@ Celery compensation 看到 lock busy，或稍后看到非 CHUNKED 终态
 Celery compensation 记录跳过或失败，然后退出当前 doc
 ```
 
-首版应增加一个全局补偿任务 Redis 锁，避免多轮 Celery Beat 或多个 Celery worker 同时扫描同一批 stale 文档：
+补偿任务扫描得到的只是候选集，不代表这些文档在执行时仍然需要处理。每次真正执行时都以 `run_document_vector_storage(doc_id)` 内部读取到的实时 document 状态为准。如果某个文档已经被 Kafka worker 或前面的补偿调用推进到 `VECTOR_STORED`，后续调用会被幂等掉并返回成功。
 
-```text
-document:embed-store:compensation-job
-```
-
-即使全局补偿锁失效，文档级锁仍保证单文档正确性。全局锁主要用于降低重复扫描和日志噪音。
+首版不增加全局补偿任务锁。部署上保证只启动一个 Celery Beat；单文档正确性由已有文档级锁和状态幂等兜底。
 
 ### Celery 运行边界
 
@@ -168,7 +163,7 @@ backend/app/workers/celery_worker.py
 backend/app/modules/document/tasks/vector_storage_compensation.py
 ```
 
-Celery task 可以是同步 wrapper，通过 `asyncio.run()` 调用异步补偿函数。异步补偿函数负责扫描 stale 文档并调用 `run_document_vector_storage(doc_id)`。
+Celery task 可以是同步 wrapper，通过 `asyncio.run()` 调用异步补偿函数。异步补偿函数负责扫描所有 stale 文档并逐个调用 `run_document_vector_storage(doc_id)`。
 
 扫描阶段使用独立的短数据库 session，并在逐个处理文档前关闭。这样避免和 `run_document_vector_storage()` 的运行时生命周期相互影响；当前 `run_document_vector_storage()` 会为每个 doc 初始化并关闭运行时资源。
 
@@ -179,7 +174,7 @@ celery -A app.workers.celery_worker.celery_app worker -l INFO --pool=solo
 celery -A app.workers.celery_worker.celery_app beat -l INFO
 ```
 
-生产环境使用较低的固定并发。补偿任务内部也要限制单轮处理数量，避免压垮 embedding provider。
+生产环境使用较低的固定并发。首版不在补偿任务内部增加 doc 级分页或 limit；如果后续观察到大量失败文档导致任务时间不可控，再单独引入文档级扫描上限。
 
 ## 组件
 
@@ -225,7 +220,6 @@ celery_app = create_celery_app(
 职责：
 
 - 周期性运行。
-- 获取全局补偿任务锁。
 - 扫描 stale `CHUNKED` 文档。
 - 对每个候选文档调用 `run_document_vector_storage(doc_id)`。
 - 记录成功、跳过、失败和总数。
@@ -234,7 +228,6 @@ celery_app = create_celery_app(
 
 - `DocumentRepository` 的 stale 文档扫描方法。
 - 现有向量存储入口。
-- Redis 锁工具。
 
 ### Repository 扫描方法
 
@@ -242,7 +235,6 @@ celery_app = create_celery_app(
 
 - 返回 stale `CHUNKED` 文档 ID。
 - 按 `updated_at`、`doc_id` 稳定排序。
-- 支持调用方传入 limit。
 
 扫描 SQL 不应该散落在 Celery task 内，应放在 `DocumentRepository` 中。
 
@@ -265,12 +257,12 @@ celery_app = create_celery_app(
 5. Celery Worker 扫描 stale CHUNKED 文档。
 6. 对每个候选文档调用 run_document_vector_storage(doc_id)。
 7. 现有 workflow 获取锁、清理 ES 残留、写向量、回填 segment、double-check，并推进文档到 VECTOR_STORED。
-8. 延迟或重复到达的 Kafka 消息后续通过状态幂等变成无害消息，并正常 commit。
+8. 如果候选文档在执行前已被其他路径推进到 VECTOR_STORED，run_document_vector_storage 内部实时状态检查会幂等返回成功。
+9. 延迟或重复到达的 Kafka 消息后续通过状态幂等变成无害消息，并正常 commit。
 ```
 
 ## 错误处理
 
-- 全局补偿任务锁被占用时，任务记录 skip 并正常退出。
 - 文档级锁被占用时，`run_document_vector_storage()` 返回 retryable failure，补偿任务记录失败并继续处理后续文档。
 - OpenAI、Elasticsearch、Redis 或数据库异常继续由现有向量存储逻辑处理，文档保持可重试。
 - 文档在补偿处理前已经变成 `VECTOR_STORED` 时，现有幂等逻辑返回成功。
@@ -281,19 +273,19 @@ celery_app = create_celery_app(
 
 需要覆盖：
 
-- Repository scan 只返回 stale `CHUNKED` 文档，并验证 limit 和排序。
+- Repository scan 只返回 stale `CHUNKED` 文档，并验证排序。
 - 补偿任务会对 stale 候选文档调用 `run_document_vector_storage()`。
+- 补偿任务扫描到的候选文档如果在执行前已变为 `VECTOR_STORED`，由 `run_document_vector_storage()` 幂等返回成功。
 - 补偿任务把 `True` 结果计为成功。
 - 补偿任务把 `False` 结果计为失败或可重试，不因单文档失败抛出。
 - 补偿任务不会调用 Kafka consumer commit 相关代码。
-- 全局补偿锁被占用时，不扫描也不处理文档。
-- Celery app 注册了配置的周期任务。
+- Celery app 注册了固定周期的补偿任务。
 
 现有 worker/workflow 测试继续覆盖文档级锁、终态幂等、ES 清理、DB 回滚和 Kafka commit 语义。
 
 ## 上线步骤
 
-1. 增加 Celery 依赖和配置项。
+1. 增加 Celery 依赖和补偿任务代码常量。
 2. 增加 repository stale 文档扫描方法。
 3. 增加 Celery app 和文档补偿任务。
 4. 增加 `backend/app/workers/celery_worker.py` 作为统一 Celery 入口。
@@ -306,6 +298,8 @@ celery_app = create_celery_app(
 - 使用 Celery + Redis 做定时补偿。
 - 补偿任务直接调用 `run_document_vector_storage(doc_id)`。
 - 不补投 Kafka 消息。
-- 首版加入全局补偿任务锁。
+- 首版不加全局补偿任务锁。
+- 首版不加 doc 级扫描分页或 limit；补偿任务扫描所有 stale `CHUNKED` 候选文档并逐个处理。
+- 候选文档执行时以 `run_document_vector_storage(doc_id)` 内部实时状态和文档级锁为准。
 - 增加 `backend/app/workers/celery_worker.py` 作为进程级 Celery task 汇总入口。
 - 首版不抽独立 service 入口，等有更多调用方或语义变复杂时再整理。
