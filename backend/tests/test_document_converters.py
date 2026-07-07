@@ -224,9 +224,9 @@ def test_document_converter_factory_selects_supported_converter_and_rejects_unkn
         factory.converter_for("ppt")
 
 
-def test_default_document_converter_factory_registers_known_converters():
+def test_create_default_document_converter_factory_registers_known_converters():
     converters = load_converters_module()
-    factory = converters.default_document_converter_factory
+    factory = converters.create_default_document_converter_factory()
 
     assert isinstance(factory.converter_for(DocumentFileType.PLAIN_TEXT), converters.PlainTextConverter)
     assert isinstance(factory.converter_for(DocumentFileType.PDF), converters.PdfDocumentConverter)

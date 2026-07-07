@@ -7,7 +7,6 @@ from app.modules.document.errors import (
     DocumentStateConflict,
     DocumentStateRollbackFailed,
 )
-from app.modules.document.converters import default_document_converter_factory
 from app.modules.document.models import DocumentStatus
 
 
@@ -17,9 +16,14 @@ async def convert_uploaded_document(
     document_repository: Any,
     storage: Any,
     mineru_client: Any,
+    converter_factory: Any,
     image_describer: Any | None = None,
 ) -> None:
-    """把一个 UPLOADED 文档自动解析推进到 CONVERTED。"""
+    """把一个 UPLOADED 文档自动解析推进到 CONVERTED。
+
+    ``converter_factory`` 由 worker 进程启动期创建并注入，转换热路径只使用
+    已装配好的 factory，不负责初始化 converter 注册表。
+    """
 
     document = await document_repository.get_document(doc_id)
     if document is None or document.status != DocumentStatus.UPLOADED.value:
@@ -35,6 +39,7 @@ async def convert_uploaded_document(
             document=document,
             storage=storage,
             mineru_client=mineru_client,
+            converter_factory=converter_factory,
             image_describer=image_describer,
         )
     except DocumentConversionFailed:
@@ -57,6 +62,7 @@ async def convert_document_with_lock(
     document_repository: Any,
     storage: Any,
     mineru_client: Any,
+    converter_factory: Any,
     image_describer: Any | None = None,
     lock: Any,
 ) -> None:
@@ -70,6 +76,7 @@ async def convert_document_with_lock(
             document_repository=document_repository,
             storage=storage,
             mineru_client=mineru_client,
+            converter_factory=converter_factory,
             image_describer=image_describer,
         )
     finally:
@@ -81,9 +88,10 @@ async def _convert_document_content(
     document: Any,
     storage: Any,
     mineru_client: Any,
+    converter_factory: Any,
     image_describer: Any | None = None,
 ) -> str:
-    return await default_document_converter_factory.convert_document(
+    return await converter_factory.convert_document(
         document=document,
         storage=storage,
         mineru_client=mineru_client,

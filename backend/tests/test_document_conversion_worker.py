@@ -1,6 +1,8 @@
 from io import BytesIO
 import inspect
-from types import SimpleNamespace
+import importlib.util
+from types import ModuleType, SimpleNamespace
+import sys
 from zipfile import ZipFile
 
 import pytest
@@ -8,6 +10,38 @@ import pytest
 from app.modules.document.errors import DocumentConversionFailed, DocumentStateConflict
 from app.modules.document.file_types import DocumentFileType
 from app.modules.document.models import DocumentStatus
+
+
+def install_worker_dependency_stubs_if_missing():
+    if importlib.util.find_spec("confluent_kafka") is not None:
+        pass
+    else:
+        confluent_kafka_module = ModuleType("confluent_kafka")
+        aio_module = ModuleType("confluent_kafka.aio")
+        aio_module.AIOConsumer = type("AIOConsumer", (), {})
+        aio_module.AIOProducer = type("AIOProducer", (), {})
+        confluent_kafka_module.aio = aio_module
+        sys.modules.setdefault("confluent_kafka", confluent_kafka_module)
+        sys.modules.setdefault("confluent_kafka.aio", aio_module)
+
+    if importlib.util.find_spec("redis") is None:
+        redis_module = ModuleType("redis")
+
+        class Redis:
+            @classmethod
+            def from_url(cls, redis_url):
+                return cls()
+
+        redis_module.Redis = Redis
+        sys.modules.setdefault("redis", redis_module)
+
+    if importlib.util.find_spec("redis_lock") is None:
+        redis_lock_module = ModuleType("redis_lock")
+        redis_lock_module.Lock = type("Lock", (), {})
+        sys.modules.setdefault("redis_lock", redis_lock_module)
+
+
+install_worker_dependency_stubs_if_missing()
 
 
 def make_zip(entries: dict[str, bytes | str]) -> bytes:
@@ -132,6 +166,12 @@ class FakeLock:
         self.released = True
 
 
+def make_converter_factory():
+    from app.modules.document.converters import create_default_document_converter_factory
+
+    return create_default_document_converter_factory()
+
+
 @pytest.mark.asyncio
 async def test_conversion_consumer_subscribes_to_topic_and_group(monkeypatch):
     from app.modules.document.workers import conversion as conversion_worker
@@ -185,7 +225,7 @@ def _document(*, file_type, status=DocumentStatus.UPLOADED.value):
 
 
 @pytest.mark.asyncio
-async def test_convert_document_content_delegates_to_default_converter_factory(monkeypatch):
+async def test_convert_document_content_delegates_to_injected_converter_factory():
     from app.modules.document import processing
 
     document = _document(file_type=DocumentFileType.PLAIN_TEXT.value)
@@ -213,17 +253,12 @@ async def test_convert_document_content_delegates_to_default_converter_factory(m
             )
             return "https://files.example.com/documents/documents/42/converted/factory.md"
 
-    monkeypatch.setattr(
-        processing,
-        "default_document_converter_factory",
-        FakeConverterFactory(),
-    )
-
     converted_url = await processing._convert_document_content(
         document=document,
         storage=storage,
         mineru_client=mineru_client,
         image_describer=image_describer,
+        converter_factory=FakeConverterFactory(),
     )
 
     assert converted_url == "https://files.example.com/documents/documents/42/converted/factory.md"
@@ -242,7 +277,8 @@ def test_convert_document_content_has_no_hardcoded_pdf_conversion_details():
 
     source = inspect.getsource(processing._convert_document_content)
 
-    assert "default_document_converter_factory.convert_document" in source
+    assert "converter_factory.convert_document" in source
+    assert "default_document_converter_factory" not in source
     assert "convert_pdf_document" not in source
     assert "DocumentFileType.PDF" not in source
     assert "original_object_key" not in source
@@ -262,6 +298,7 @@ async def test_worker_converts_plain_text_document_without_downloading_original(
         document_repository=repository,
         storage=storage,
         mineru_client=mineru_client,
+        converter_factory=make_converter_factory(),
     )
 
     assert repository.events == [
@@ -306,6 +343,7 @@ async def test_worker_converts_pdf_from_original_object_and_uploads_markdown():
         storage=storage,
         mineru_client=mineru_client,
         image_describer=image_describer,
+        converter_factory=make_converter_factory(),
     )
 
     assert storage.download_calls == ["documents/42/original/guide.pdf"]
@@ -350,12 +388,14 @@ async def test_locked_worker_uses_kafka_runtime_resources(monkeypatch):
     storage = object()
     mineru_client = object()
     image_describer = object()
+    converter_factory = object()
     runtime = SimpleNamespace(
         conversion=SimpleNamespace(
             repository=repository,
             storage=storage,
             mineru_client=mineru_client,
             image_describer=image_describer,
+            converter_factory=converter_factory,
         ),
     )
 
@@ -368,6 +408,7 @@ async def test_locked_worker_uses_kafka_runtime_resources(monkeypatch):
         "storage": storage,
         "mineru_client": mineru_client,
         "image_describer": image_describer,
+        "converter_factory": converter_factory,
     }
 
 
@@ -468,6 +509,8 @@ def test_conversion_hot_path_uses_runtime_owned_external_resources():
     assert "conversion_context.storage" in source
     assert "conversion_context.mineru_client" in source
     assert "conversion_context.image_describer" in source
+    assert "conversion_context.converter_factory" in source
+    assert "default_document_converter_factory" not in source
     assert "_LazyDocumentStorage" not in source
     assert "_LazyMinerUClient" not in source
     assert "_LazyImageDescriber" not in source
@@ -525,6 +568,75 @@ async def test_image_describer_invokes_langchain_with_human_message():
 
 
 @pytest.mark.asyncio
+async def test_kafka_worker_runtime_initializes_converter_factory_at_startup(monkeypatch):
+    from app.workers import kafka_worker
+
+    converter_factory = object()
+    calls = []
+
+    async def fake_initialize_runtime_database(*, stack, settings):
+        return "session-factory"
+
+    async def fake_create_worker_document_storage(*, settings):
+        return "storage"
+
+    def fake_create_document_converter_factory():
+        calls.append("converter_factory")
+        return converter_factory
+
+    monkeypatch.setattr(
+        kafka_worker,
+        "initialize_runtime_database",
+        fake_initialize_runtime_database,
+    )
+    monkeypatch.setattr(kafka_worker, "_create_worker_repository", lambda session_factory: "repository")
+    monkeypatch.setattr(
+        kafka_worker,
+        "_create_worker_redis_client",
+        lambda *, stack, settings: "redis-client",
+    )
+    monkeypatch.setattr(
+        kafka_worker,
+        "_create_worker_document_storage",
+        fake_create_worker_document_storage,
+    )
+    monkeypatch.setattr(
+        kafka_worker,
+        "_create_worker_mineru_client",
+        lambda *, stack, settings: "mineru-client",
+    )
+    monkeypatch.setattr(
+        kafka_worker,
+        "_create_worker_image_describer",
+        lambda *, stack, settings: "image-describer",
+    )
+    monkeypatch.setattr(
+        kafka_worker,
+        "_create_worker_embedding_model",
+        lambda *, settings: "embedding-model",
+    )
+    monkeypatch.setattr(
+        kafka_worker,
+        "_create_worker_vector_store",
+        lambda *, stack, settings, embedding_model: "vector-store",
+    )
+    monkeypatch.setattr(
+        kafka_worker,
+        "_create_document_converter_factory",
+        fake_create_document_converter_factory,
+        raising=False,
+    )
+
+    runtime = await kafka_worker.create_kafka_worker_runtime(
+        stack=object(),
+        settings=SimpleNamespace(document_convert_lock_expire_seconds=180),
+    )
+
+    assert calls == ["converter_factory"]
+    assert runtime.conversion.converter_factory is converter_factory
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "storage_failure_key, mineru_failure",
     [
@@ -561,6 +673,7 @@ async def test_worker_rolls_back_to_uploaded_when_pdf_conversion_fails(
             document_repository=repository,
             storage=storage,
             mineru_client=mineru_client,
+            converter_factory=make_converter_factory(),
         )
 
     assert repository.events[-1] == {"action": "rollback_to_uploaded", "doc_id": 42}
@@ -592,6 +705,7 @@ async def test_worker_marks_converted_when_pdf_asset_upload_fails():
         document_repository=repository,
         storage=storage,
         mineru_client=mineru_client,
+        converter_factory=make_converter_factory(),
     )
 
     assert repository.events[-1] == {
@@ -625,6 +739,7 @@ async def test_worker_skips_conversion_when_state_transition_conflicts():
         document_repository=repository,
         storage=storage,
         mineru_client=mineru_client,
+        converter_factory=make_converter_factory(),
     )
 
     assert storage.download_calls == []
@@ -651,6 +766,7 @@ async def test_worker_lock_runs_conversion_once_and_releases_lock():
         storage=storage,
         mineru_client=mineru_client,
         lock=lock,
+        converter_factory=make_converter_factory(),
     )
 
     assert lock.acquire_calls == [{"blocking": False}]
@@ -676,6 +792,7 @@ async def test_worker_lock_skips_conversion_when_lock_is_busy():
         storage=FakeStorage(),
         mineru_client=FakeMinerUClient(),
         lock=lock,
+        converter_factory=make_converter_factory(),
     )
 
     assert lock.acquire_calls == [{"blocking": False}]
