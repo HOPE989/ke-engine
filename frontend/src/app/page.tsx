@@ -24,6 +24,8 @@ type DocumentChunkResponse = {
   segment_count: number;
 };
 
+type KnowledgeBaseType = "DOCUMENT_SEARCH" | "DATA_QUERY";
+
 type RequestLog = {
   label: string;
   endpoint: string;
@@ -31,6 +33,25 @@ type RequestLog = {
 };
 
 const uploadEndpoint = "/api/v1/document/upload";
+const supportedUploadAccept = [
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".md",
+  ".markdown",
+  ".txt",
+  ".xlsx",
+  ".xls",
+  ".csv",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/plain",
+  "text/markdown",
+  "text/csv"
+].join(",");
 
 function documentEndpoint(docId: string) {
   return `/api/v1/document/${docId}`;
@@ -74,6 +95,8 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [uploadUser, setUploadUser] = useState("local-tester");
   const [accessibleBy, setAccessibleBy] = useState("local");
+  const [knowledgeBaseType, setKnowledgeBaseType] =
+    useState<KnowledgeBaseType>("DOCUMENT_SEARCH");
   const [docId, setDocId] = useState("");
   const [chunkSize, setChunkSize] = useState(1000);
   const [overlap, setOverlap] = useState(100);
@@ -132,7 +155,7 @@ export default function Home() {
     setDocId("");
 
     if (!file) {
-      setError("请选择要上传的 PDF、Markdown 或文本文件。");
+      setError("请选择要上传的 PDF、Word、Markdown、文本、Excel 或 CSV 文件。");
       return;
     }
 
@@ -140,6 +163,7 @@ export default function Home() {
     formData.append("file", file);
     formData.append("upload_user", uploadUser);
     formData.append("accessible_by", accessibleBy);
+    formData.append("knowledgeBaseType", knowledgeBaseType);
 
     setIsUploading(true);
     try {
@@ -155,7 +179,8 @@ export default function Home() {
         {
           file: file.name,
           upload_user: uploadUser,
-          accessible_by: accessibleBy
+          accessible_by: accessibleBy,
+          knowledgeBaseType
         },
         payload,
         result.ok,
@@ -290,11 +315,14 @@ export default function Home() {
                   <input
                     className="block w-full cursor-pointer rounded-md border border-gray-300 bg-white text-sm text-gray-700 file:mr-4 file:border-0 file:bg-gray-900 file:px-4 file:py-2.5 file:text-sm file:font-medium file:text-white hover:file:bg-gray-700"
                     type="file"
-                    accept=".pdf,.md,.markdown,.txt,application/pdf,text/plain,text/markdown"
+                    accept={supportedUploadAccept}
                     onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                   />
                   <span className="mt-2 block text-xs text-gray-500">
                     {selectedFileLabel}
+                  </span>
+                  <span className="mt-1 block text-xs text-gray-500">
+                    支持 PDF、Word、Markdown、TXT、Excel、CSV。
                   </span>
                 </label>
 
@@ -322,6 +350,27 @@ export default function Home() {
                     placeholder="local"
                     required
                   />
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-gray-800">
+                    knowledgeBaseType
+                  </span>
+                  <select
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                    value={knowledgeBaseType}
+                    onChange={(event) =>
+                      setKnowledgeBaseType(event.target.value as KnowledgeBaseType)
+                    }
+                    required
+                  >
+                    <option value="DOCUMENT_SEARCH">DOCUMENT_SEARCH</option>
+                    <option value="DATA_QUERY">DATA_QUERY</option>
+                  </select>
+                  <span className="mt-2 block text-xs leading-5 text-gray-500">
+                    当前 Excel/CSV 文档搜索链路请选择 DOCUMENT_SEARCH；DATA_QUERY
+                    预留给后续结构化入库链路。
+                  </span>
                 </label>
 
                 <button
