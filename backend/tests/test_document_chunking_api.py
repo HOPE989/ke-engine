@@ -70,6 +70,7 @@ async def chunk_api_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncCl
         conversion_dispatcher=object(),
         embed_store_dispatcher=object(),
         redis_client="redis-client",
+        splitter_factory="splitter-factory",
     )
     app.state.document_runtime = runtime
 
@@ -99,6 +100,7 @@ async def test_chunk_endpoint_returns_success_api_response(chunk_api_client):
     assert calls["workflow"][0]["chunk_size"] == 100
     assert calls["workflow"][0]["overlap"] == 10
     assert calls["workflow"][0]["lock"] == "chunk-lock"
+    assert calls["workflow"][0]["splitter_factory"] == "splitter-factory"
 
 
 @pytest.mark.asyncio
@@ -208,6 +210,7 @@ async def embed_store_api_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[A
         conversion_dispatcher=object(),
         embed_store_dispatcher=FakeEmbedStoreDispatcher(),
         redis_client="redis-client",
+        splitter_factory=object(),
     )
     app.state.document_runtime = runtime
 

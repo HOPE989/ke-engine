@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.modules.document.file_types import DocumentFileType
+
 
 EXPECTED_HEADERS = [
     ("#", "Header 1"),
@@ -33,6 +35,62 @@ class FakeIdGenerator:
 
     def next_id(self):
         return self.ids.pop(0)
+
+
+def test_markdown_header_parent_splitter_extends_langchain_text_splitter():
+    from langchain_text_splitters.base import TextSplitter
+
+    from app.modules.document.chunking import MarkdownHeaderParentTextSplitter
+
+    splitter = MarkdownHeaderParentTextSplitter(chunk_size=100, overlap=0)
+
+    assert isinstance(splitter, TextSplitter)
+    assert splitter.split_text("# Guide\nshort content") == ["short content"]
+
+
+def test_document_splitter_factory_maps_file_type_to_single_splitter():
+    from app.modules.document import chunking
+
+    factory = chunking.create_default_document_splitter_factory()
+
+    assert isinstance(
+        factory.splitter_for(DocumentFileType.PLAIN_TEXT, chunk_size=100, overlap=0),
+        chunking.MarkdownHeaderParentTextSplitter,
+    )
+    assert isinstance(
+        factory.splitter_for(DocumentFileType.PDF, chunk_size=100, overlap=0),
+        chunking.MarkdownHeaderParentTextSplitter,
+    )
+    assert isinstance(
+        factory.splitter_for(DocumentFileType.WORD, chunk_size=100, overlap=0),
+        chunking.MarkdownHeaderParentTextSplitter,
+    )
+
+
+def test_document_splitter_factory_rejects_duplicate_file_type_mapping():
+    from app.modules.document import chunking
+
+    factory = chunking.DocumentSplitterFactory()
+    factory.register(
+        file_type=DocumentFileType.PLAIN_TEXT,
+        splitter_builder=chunking.MarkdownHeaderParentTextSplitter,
+    )
+
+    with pytest.raises(ValueError, match="already registered"):
+        factory.register(
+            file_type=DocumentFileType.PLAIN_TEXT,
+            splitter_builder=chunking.MarkdownHeaderParentTextSplitter,
+        )
+
+
+def test_document_splitter_factory_rejects_unregistered_file_type():
+    from app.modules.document import chunking
+    from app.modules.document.errors import ChunkSplittingFailed
+
+    factory = chunking.create_default_document_splitter_factory()
+
+    with pytest.raises(ChunkSplittingFailed):
+        factory.splitter_for(DocumentFileType.EXCEL, chunk_size=100, overlap=0)
 
 
 def test_markdown_header_splitter_uses_stable_configuration(monkeypatch):

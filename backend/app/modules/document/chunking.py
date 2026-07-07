@@ -7,13 +7,16 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters.base import TextSplitter
 
 from app.modules.document.errors import (
     ChunkLockUnavailable,
+    ChunkSplittingFailed,
     ConvertedMarkdownInvalid,
     ConvertedMarkdownUnavailable,
     DocumentStateConflict,
 )
+from app.modules.document.file_types import DocumentFileType
 from app.modules.document.markdown import parse_markdown_image_references
 
 HEADERS_TO_SPLIT_ON = [
@@ -42,6 +45,12 @@ RECURSIVE_SEPARATORS = [
 logger = logging.getLogger(__name__)
 
 
+def _file_type_value(file_type: DocumentFileType | str) -> str:
+    if isinstance(file_type, DocumentFileType):
+        return file_type.value
+    return str(file_type)
+
+
 @dataclass(frozen=True, slots=True)
 class MarkdownSplitChunk:
     """Markdown splitter 产出的待持久化分段。"""
@@ -66,6 +75,145 @@ class SegmentDraft:
     status: str
     metadata: dict[str, Any]
     skip_embedding: bool
+
+
+class _LocalIdGenerator:
+    def __init__(self) -> None:
+        self._next_value = 0
+
+    def next_id(self) -> int:
+        self._next_value += 1
+        return self._next_value
+
+
+class MarkdownHeaderParentTextSplitter(TextSplitter):
+    """按 Markdown 标题切父块，超长父块再按递归字符切子块。"""
+
+    def __init__(self, *, chunk_size: int, overlap: int) -> None:
+        super().__init__(
+            chunk_size=chunk_size,
+            chunk_overlap=overlap,
+            length_function=len,
+        )
+
+    def split_text(self, text: str) -> list[str]:
+        """返回 LangChain TextSplitter 兼容的文本切分结果。"""
+
+        return [
+            chunk.text
+            for chunk in self.split_chunks(
+                text,
+                id_generator=_LocalIdGenerator(),
+            )
+        ]
+
+    def split_chunks(self, text: str, *, id_generator: Any) -> list[MarkdownSplitChunk]:
+        """返回业务持久化需要的 parent/child chunk 结构。"""
+
+        header_splitter = MarkdownHeaderTextSplitter(
+            headers_to_split_on=HEADERS_TO_SPLIT_ON,
+            strip_headers=True,
+            return_each_line=False,
+        )
+        chunks: list[MarkdownSplitChunk] = []
+        recursive_splitter: RecursiveCharacterTextSplitter | None = None
+
+        for section in header_splitter.split_text(text):
+            section_text = section.page_content
+            if not section_text.strip():
+                continue
+
+            metadata = dict(section.metadata)
+            if len(section_text) <= self._chunk_size:
+                chunks.append(
+                    MarkdownSplitChunk(
+                        chunk_id=str(id_generator.next_id()),
+                        text=section_text,
+                        langchain_metadata=metadata,
+                        skip_embedding=False,
+                        parent_chunk_id=None,
+                    )
+                )
+                continue
+
+            if recursive_splitter is None:
+                recursive_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=self._chunk_size,
+                    chunk_overlap=self._chunk_overlap,
+                    length_function=len,
+                    is_separator_regex=False,
+                    separators=RECURSIVE_SEPARATORS,
+                )
+            parent_chunk_id = str(id_generator.next_id())
+            chunks.append(
+                MarkdownSplitChunk(
+                    chunk_id=parent_chunk_id,
+                    text=section_text,
+                    langchain_metadata=metadata,
+                    skip_embedding=True,
+                    parent_chunk_id=None,
+                )
+            )
+            for child_text in recursive_splitter.split_text(section_text):
+                if not child_text.strip():
+                    continue
+                chunks.append(
+                    MarkdownSplitChunk(
+                        chunk_id=str(id_generator.next_id()),
+                        text=child_text,
+                        langchain_metadata=metadata,
+                        skip_embedding=False,
+                        parent_chunk_id=parent_chunk_id,
+                    )
+                )
+
+        return chunks
+
+
+class DocumentSplitterFactory:
+    """按文件类型唯一选择文档切分器。"""
+
+    def __init__(self) -> None:
+        self._builders: dict[str, Callable[..., Any]] = {}
+
+    def register(
+        self,
+        *,
+        file_type: DocumentFileType | str,
+        splitter_builder: Callable[..., Any],
+    ) -> None:
+        normalized_file_type = _file_type_value(file_type)
+        if normalized_file_type in self._builders:
+            raise ValueError(f"splitter for file_type {normalized_file_type} already registered")
+        self._builders[normalized_file_type] = splitter_builder
+
+    def splitter_for(
+        self,
+        file_type: DocumentFileType | str,
+        *,
+        chunk_size: int,
+        overlap: int,
+    ) -> Any:
+        builder = self._builders.get(_file_type_value(file_type))
+        if builder is None:
+            raise ChunkSplittingFailed()
+        return builder(chunk_size=chunk_size, overlap=overlap)
+
+
+def create_default_document_splitter_factory() -> DocumentSplitterFactory:
+    """创建进程启动期使用的默认 splitter 注册表。"""
+
+    factory = DocumentSplitterFactory()
+    for file_type in (
+        DocumentFileType.PLAIN_TEXT,
+        DocumentFileType.PDF,
+        DocumentFileType.WORD,
+    ):
+        factory.register(
+            file_type=file_type,
+            splitter_builder=MarkdownHeaderParentTextSplitter,
+        )
+    return factory
 
 
 async def run_with_document_chunk_lock(
@@ -147,64 +295,10 @@ def split_markdown_into_chunks(
 ) -> list[MarkdownSplitChunk]:
     """按 Markdown header 和递归字符长度切分 Markdown。"""
 
-    header_splitter = MarkdownHeaderTextSplitter(
-        headers_to_split_on=HEADERS_TO_SPLIT_ON,
-        strip_headers=True,
-        return_each_line=False,
-    )
-    chunks: list[MarkdownSplitChunk] = []
-    recursive_splitter: RecursiveCharacterTextSplitter | None = None
-
-    for section in header_splitter.split_text(markdown):
-        section_text = section.page_content
-        if not section_text.strip():
-            continue
-
-        metadata = dict(section.metadata)
-        if len(section_text) <= chunk_size:
-            chunks.append(
-                MarkdownSplitChunk(
-                    chunk_id=str(id_generator.next_id()),
-                    text=section_text,
-                    langchain_metadata=metadata,
-                    skip_embedding=False,
-                    parent_chunk_id=None,
-                )
-            )
-            continue
-
-        if recursive_splitter is None:
-            recursive_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=chunk_size,
-                chunk_overlap=overlap,
-                length_function=len,
-                is_separator_regex=False,
-                separators=RECURSIVE_SEPARATORS,
-            )
-        parent_chunk_id = str(id_generator.next_id())
-        chunks.append(
-            MarkdownSplitChunk(
-                chunk_id=parent_chunk_id,
-                text=section_text,
-                langchain_metadata=metadata,
-                skip_embedding=True,
-                parent_chunk_id=None,
-            )
-        )
-        for child_text in recursive_splitter.split_text(section_text):
-            if not child_text.strip():
-                continue
-            chunks.append(
-                MarkdownSplitChunk(
-                    chunk_id=str(id_generator.next_id()),
-                    text=child_text,
-                    langchain_metadata=metadata,
-                    skip_embedding=False,
-                    parent_chunk_id=parent_chunk_id,
-                )
-            )
-
-    return chunks
+    return MarkdownHeaderParentTextSplitter(
+        chunk_size=chunk_size,
+        overlap=overlap,
+    ).split_chunks(markdown, id_generator=id_generator)
 
 
 def build_segment_drafts(

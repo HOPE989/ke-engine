@@ -22,7 +22,6 @@ from app.modules.document.chunking import (
     build_segment_drafts,
     load_converted_markdown,
     run_with_document_chunk_lock,
-    split_markdown_into_chunks,
 )
 from app.modules.document.file_types import detect_document_file_type
 from app.modules.document.markdown import (
@@ -259,6 +258,7 @@ async def chunk_document(
     lock: Any,
     chunk_size: int,
     overlap: int,
+    splitter_factory: Any,
     embed_store_dispatcher: Any | None = None,
 ) -> Any:
     """执行单个已转换文档的手动切分工作流。
@@ -286,11 +286,14 @@ async def chunk_document(
 
         markdown = await load_converted_markdown(document=document, storage=storage)
         try:
-            split_chunks = await run_in_threadpool(
-                split_markdown_into_chunks,
-                markdown,
+            splitter = splitter_factory.splitter_for(
+                document.file_type,
                 chunk_size=chunk_size,
                 overlap=overlap,
+            )
+            split_chunks = await run_in_threadpool(
+                splitter.split_chunks,
+                markdown,
                 id_generator=id_generator,
             )
         except Exception as exc:

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.modules.document.file_types import DocumentFileType
 from app.modules.document.models import DocumentStatus
 
 
@@ -85,6 +86,46 @@ class FakeIdGenerator:
         return self.next_value
 
 
+class RecordingSplitter:
+    def __init__(self):
+        self.calls = []
+
+    def split_chunks(self, text, *, id_generator):
+        from app.modules.document.chunking import MarkdownSplitChunk
+
+        self.calls.append({"text": text, "id_generator": id_generator})
+        return [
+            MarkdownSplitChunk(
+                chunk_id="10001",
+                text="split by injected factory",
+                langchain_metadata={"Header 1": "Guide"},
+                skip_embedding=False,
+                parent_chunk_id=None,
+            )
+        ]
+
+
+class RecordingSplitterFactory:
+    def __init__(self, splitter):
+        self.splitter = splitter
+        self.calls = []
+
+    def splitter_for(self, file_type, *, chunk_size, overlap):
+        self.calls.append(
+            {
+                "file_type": file_type,
+                "chunk_size": chunk_size,
+                "overlap": overlap,
+            }
+        )
+        return self.splitter
+
+
+class FailingSplitterFactory:
+    def splitter_for(self, file_type, *, chunk_size, overlap):
+        raise RuntimeError("split failed")
+
+
 def _document(**overrides):
     values = {
         "doc_id": 42,
@@ -94,12 +135,14 @@ def _document(**overrides):
             "https://files.example.com/documents/documents/42/converted/document.md"
         ),
         "accessible_by": "team-a",
+        "file_type": DocumentFileType.PLAIN_TEXT.value,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
 
 
 async def _chunk_document(**overrides):
+    from app.modules.document.chunking import create_default_document_splitter_factory
     from app.modules.document.workflow import chunk_document
 
     values = {
@@ -110,6 +153,7 @@ async def _chunk_document(**overrides):
         "lock": FakeLock(),
         "chunk_size": 100,
         "overlap": 0,
+        "splitter_factory": create_default_document_splitter_factory(),
         "embed_store_dispatcher": None,
     }
     values.update(overrides)
@@ -217,6 +261,34 @@ async def test_chunk_workflow_rejects_busy_lock_without_starting_chunking():
 
     assert lock.acquire_calls == [{"blocking": False}]
     assert repository.get_calls == []
+
+
+@pytest.mark.asyncio
+async def test_chunk_workflow_uses_injected_splitter_factory():
+    splitter = RecordingSplitter()
+    splitter_factory = RecordingSplitterFactory(splitter)
+    repository = FakeRepository(_document(file_type=DocumentFileType.PDF.value))
+    id_generator = FakeIdGenerator()
+
+    response = await _chunk_document(
+        document_repository=repository,
+        storage=FakeStorage(payload=b"# Guide\ncontent"),
+        id_generator=id_generator,
+        chunk_size=77,
+        overlap=7,
+        splitter_factory=splitter_factory,
+    )
+
+    assert response.segment_count == 1
+    assert splitter_factory.calls == [
+        {
+            "file_type": DocumentFileType.PDF.value,
+            "chunk_size": 77,
+            "overlap": 7,
+        }
+    ]
+    assert splitter.calls == [{"text": "# Guide\ncontent", "id_generator": id_generator}]
+    assert repository.completed[0]["segment_drafts"][0].text == "split by injected factory"
 
 
 @pytest.mark.asyncio
@@ -408,18 +480,16 @@ async def test_chunk_workflow_leaves_converted_on_non_utf8_markdown():
 
 
 @pytest.mark.asyncio
-async def test_chunk_workflow_maps_splitter_failure_without_rollback(monkeypatch):
-    from app.modules.document import workflow
+async def test_chunk_workflow_maps_splitter_failure_without_rollback():
     from app.modules.document.errors import ChunkSplittingFailed
 
-    def fail_splitter(markdown, *, chunk_size, overlap, id_generator):
-        raise RuntimeError("split failed")
-
     repository = FakeRepository(_document())
-    monkeypatch.setattr(workflow, "split_markdown_into_chunks", fail_splitter)
 
     with pytest.raises(ChunkSplittingFailed):
-        await _chunk_document(document_repository=repository)
+        await _chunk_document(
+            document_repository=repository,
+            splitter_factory=FailingSplitterFactory(),
+        )
 
     assert repository.completed == []
 

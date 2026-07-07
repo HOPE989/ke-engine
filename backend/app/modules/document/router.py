@@ -123,6 +123,7 @@ async def chunk_document_endpoint(
             lock=lock,
             chunk_size=validated_request.chunk_size,
             overlap=validated_request.overlap,
+            splitter_factory=document_runtime.splitter_factory,
             embed_store_dispatcher=document_runtime.embed_store_dispatcher,
         )
     except DocumentNotFound as exc:

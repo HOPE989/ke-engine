@@ -169,6 +169,7 @@ def test_api_deps_define_document_module_runtime_without_api_runtime():
         "id_generator",
         "conversion_dispatcher",
         "embed_store_dispatcher",
+        "splitter_factory",
         "redis_client",
     ]
 
@@ -532,6 +533,7 @@ def test_api_deps_assemble_settings_and_document_runtime_state():
     assert "SnowflakeIdGenerator(worker_id=settings.snowflake_worker_id)" in source
     assert "KafkaDocumentConversionDispatcher(" in source
     assert "KafkaDocumentEmbedStoreDispatcher(" in source
+    assert "create_default_document_splitter_factory()" in source
     assert "create_kafka_producer(" in source
     assert "create_redis_client(" in source
     assert "push_async_callback(close_engine)" not in source
@@ -636,6 +638,10 @@ async def test_application_lifespan_resources_assemble_document_runtime_before_s
         def __init__(self, producer):
             calls.append(("create_embed_store_dispatcher", producer))
 
+    def fake_create_default_document_splitter_factory():
+        calls.append(("create_splitter_factory", None))
+        return "splitter-factory"
+
     class FakeRedisClient:
         def close(self):
             calls.append(("redis_close", None))
@@ -673,6 +679,10 @@ async def test_application_lifespan_resources_assemble_document_runtime_before_s
         "app.modules.document.dispatcher.KafkaDocumentEmbedStoreDispatcher",
         FakeKafkaDocumentEmbedStoreDispatcher,
     )
+    monkeypatch.setattr(
+        "app.modules.document.chunking.create_default_document_splitter_factory",
+        fake_create_default_document_splitter_factory,
+    )
 
     app = SimpleNamespace(state=SimpleNamespace())
     settings = SimpleNamespace(
@@ -695,12 +705,14 @@ async def test_application_lifespan_resources_assemble_document_runtime_before_s
             ("create_id_generator", 7),
             ("create_dispatcher", "producer"),
             ("create_embed_store_dispatcher", "producer"),
+            ("create_splitter_factory", None),
         ]
         assert app.state.settings is settings
         assert not hasattr(app.state, "api_runtime")
         assert app.state.document_runtime.storage.bucket == "documents"
         assert isinstance(app.state.document_runtime.repository, FakeDocumentRepository)
         assert app.state.document_runtime.embed_store_dispatcher is not None
+        assert app.state.document_runtime.splitter_factory == "splitter-factory"
         assert app.state.document_runtime.redis_client is not None
         assert not hasattr(app.state.document_runtime, "settings")
         assert not hasattr(app.state.document_runtime, "session_factory")

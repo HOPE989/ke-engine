@@ -70,6 +70,7 @@ class DocumentRuntime:
     id_generator: Any
     conversion_dispatcher: Any
     embed_store_dispatcher: Any
+    splitter_factory: Any
     redis_client: Any
 
 
@@ -123,6 +124,7 @@ async def application_lifespan_resources(
         KafkaDocumentConversionDispatcher,
         KafkaDocumentEmbedStoreDispatcher,
     )
+    from app.modules.document.chunking import create_default_document_splitter_factory
     from app.modules.document.repository import DocumentRepository
     from app.modules.document.storage import DocumentObjectStorage
 
@@ -151,6 +153,7 @@ async def application_lifespan_resources(
             id_generator=SnowflakeIdGenerator(worker_id=settings.snowflake_worker_id),
             conversion_dispatcher=KafkaDocumentConversionDispatcher(kafka_producer),
             embed_store_dispatcher=KafkaDocumentEmbedStoreDispatcher(kafka_producer),
+            splitter_factory=create_default_document_splitter_factory(),
             redis_client=redis_client,
         )
 
