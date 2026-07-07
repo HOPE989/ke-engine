@@ -321,6 +321,53 @@ async def test_worker_converts_plain_text_document_without_downloading_original(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("file_type", "filename"),
+    [
+        (DocumentFileType.EXCEL.value, "sales.xlsx"),
+        (DocumentFileType.CSV.value, "sales.csv"),
+    ],
+)
+async def test_worker_converts_excel_and_csv_documents_by_reusing_origin_url(
+    file_type,
+    filename,
+):
+    from app.modules.document.processing import convert_uploaded_document
+
+    document = _document(file_type=file_type)
+    document.doc_title = filename
+    document.doc_url = f"https://files.example.com/documents/documents/42/original/{filename}"
+    repository = FakeRepository(document)
+    storage = FakeStorage()
+    mineru_client = FakeMinerUClient()
+
+    await convert_uploaded_document(
+        doc_id=42,
+        document_repository=repository,
+        storage=storage,
+        mineru_client=mineru_client,
+        converter_factory=make_converter_factory(),
+    )
+
+    assert repository.events == [
+        {"action": "get_document", "doc_id": 42},
+        {"action": "start_converting", "doc_id": 42},
+        {
+            "action": "mark_converted",
+            "doc_id": 42,
+            "converted_doc_url": (
+                f"https://files.example.com/documents/documents/42/original/{filename}"
+            ),
+            "expected_status": DocumentStatus.CONVERTING,
+        },
+    ]
+    assert storage.download_calls == []
+    assert storage.uploads == []
+    assert mineru_client.calls == []
+    assert document.status == DocumentStatus.CONVERTED.value
+
+
+@pytest.mark.asyncio
 async def test_worker_converts_pdf_from_original_object_and_uploads_markdown():
     from app.modules.document.processing import convert_uploaded_document
 

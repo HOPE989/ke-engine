@@ -16,12 +16,14 @@ dependencies = [
     "langchain-text-splitters>=1.1.2",
     "magika>=1.0.3",
     "minio>=7.2.20",
+    "openpyxl>=3.1.5",
     "pydantic-settings>=2.6.0",
     "python-multipart>=0.0.32",
     "python-redis-lock>=4.0.0",
     "redis>=5.0.0",
     "sqlalchemy[asyncio]>=2.0.36",
     "uvicorn[standard]>=0.32.0",
+    "xlrd>=2.0.2",
 ]
 
 [project.optional-dependencies]

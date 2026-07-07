@@ -217,16 +217,21 @@ class WordDocumentConverter(MinerUDocumentConverter):
 
 
 class ExcelConverter(BaseDocumentConverter):
-    """Excel 文档转换器占位实现。
+    """Excel/CSV 文档转换器。
 
-    当前文件类型识别和 factory 已预留 Excel 分发路径，但业务上尚未实现
-    Excel 转 Markdown 的实际能力，因此命中后会明确抛出转换失败。
+    表格类文档在 DOCUMENT_SEARCH 链路中不生成中间 Markdown；转换结果
+    直接复用原始文件 URL，后续由 chunking 阶段按文件类型解析原始内容。
+    这意味着 converted_doc_url 对 Excel/CSV 来说不是“转换后的 Markdown”，
+    而是一个稳定的 origin URL，供 Excel2HTML splitter 重新下载原始 bytes。
     """
 
     def supports(self, file_type: DocumentFileType | str) -> bool:
-        """仅支持业务文件类型 ``excel``。"""
+        """支持业务文件类型 ``excel`` 和 ``csv``。"""
 
-        return _file_type_value(file_type) == DocumentFileType.EXCEL.value
+        return _file_type_value(file_type) in {
+            DocumentFileType.EXCEL.value,
+            DocumentFileType.CSV.value,
+        }
 
     async def convert_document(
         self,
@@ -236,11 +241,15 @@ class ExcelConverter(BaseDocumentConverter):
         mineru_client: Any,
         image_describer: Any | None = None,
     ) -> str:
-        """Excel 转换暂未实现，调用时直接抛出稳定领域异常。"""
+        """返回原始文档 URL，缺失 URL 时视为转换失败。
 
-        # 1. 保留显式 converter，便于调用方知道 Excel 类型已被识别。
-        # 2. 在真实转换能力完成前，统一按转换失败处理。
-        raise DocumentConversionFailed()
+        这里刻意不访问 storage、不调用 MinerU，避免把复杂表格强行转换成 Markdown
+        造成结构损失；真正的解析发生在 chunking 阶段。
+        """
+
+        if not document.doc_url:
+            raise DocumentConversionFailed()
+        return document.doc_url
 
 
 def create_default_document_converter_factory() -> DocumentConverterFactory:

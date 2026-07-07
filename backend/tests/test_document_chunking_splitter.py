@@ -1,3 +1,4 @@
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
@@ -65,6 +66,14 @@ def test_document_splitter_factory_maps_file_type_to_single_splitter():
         factory.splitter_for(DocumentFileType.WORD, chunk_size=100, overlap=0),
         chunking.MarkdownHeaderParentTextSplitter,
     )
+    assert isinstance(
+        factory.splitter_for(DocumentFileType.EXCEL, chunk_size=100, overlap=0),
+        chunking.Excel2HTMLParentTextSplitter,
+    )
+    assert isinstance(
+        factory.splitter_for(DocumentFileType.CSV, chunk_size=100, overlap=0),
+        chunking.Excel2HTMLParentTextSplitter,
+    )
 
 
 def test_document_splitter_factory_rejects_duplicate_file_type_mapping():
@@ -90,7 +99,7 @@ def test_document_splitter_factory_rejects_unregistered_file_type():
     factory = chunking.create_default_document_splitter_factory()
 
     with pytest.raises(ChunkSplittingFailed):
-        factory.splitter_for(DocumentFileType.EXCEL, chunk_size=100, overlap=0)
+        factory.splitter_for("unsupported", chunk_size=100, overlap=0)
 
 
 def test_markdown_header_splitter_uses_stable_configuration(monkeypatch):
@@ -335,6 +344,192 @@ def test_splitter_returns_zero_segments_for_empty_markdown():
         )
         == []
     )
+
+
+class FakeTableStorage:
+    bucket = "documents"
+    public_base_url = "https://files.example.com"
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.downloaded_keys = []
+
+    async def download_bytes(self, *, object_key):
+        self.downloaded_keys.append(object_key)
+        return self.payload
+
+
+def _xlsx_bytes(sheets):
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    for index, (sheet_name, rows) in enumerate(sheets):
+        worksheet = workbook.active if index == 0 else workbook.create_sheet()
+        worksheet.title = sheet_name
+        for row in rows:
+            worksheet.append(row)
+
+    stream = BytesIO()
+    workbook.save(stream)
+    return stream.getvalue()
+
+
+def _table_document(
+    *,
+    file_type=DocumentFileType.EXCEL.value,
+    doc_title="sales.xlsx",
+    converted_doc_url=None,
+):
+    return SimpleNamespace(
+        doc_id=42,
+        doc_title=doc_title,
+        converted_doc_url=converted_doc_url
+        or f"https://files.example.com/documents/documents/42/original/{doc_title}",
+        accessible_by="team-a",
+        file_type=file_type,
+    )
+
+
+def _html_row(tag, values):
+    cells = "".join(f"<{tag}>{value}</{tag}>" for value in values)
+    return f"<tr>{cells}</tr>"
+
+
+@pytest.mark.asyncio
+async def test_excel2html_splitter_builds_compact_sections_with_repeated_header():
+    from app.modules.document.chunking import Excel2HTMLParentTextSplitter
+
+    rows = [["Name", "Dept", "Amount"]] + [
+        [f"User {index}", "Sales", index] for index in range(1, 14)
+    ]
+    storage = FakeTableStorage(_xlsx_bytes([("May", rows)]))
+    splitter = Excel2HTMLParentTextSplitter(chunk_size=10_000, overlap=0)
+
+    chunks = await splitter.split_chunks(
+        document=_table_document(doc_title="may-sales.xlsx"),
+        storage=storage,
+        id_generator=FakeIdGenerator([10001, 10002]),
+    )
+
+    header = _html_row("th", ["Name", "Dept", "Amount"])
+    first_section_rows = "".join(
+        _html_row("td", [f"User {index}", "Sales", str(index)]) for index in range(1, 13)
+    )
+    second_section_rows = _html_row("td", ["User 13", "Sales", "13"])
+    assert [chunk.text for chunk in chunks] == [
+        f"<table><caption>may-sales.xlsx - May</caption>{header}{first_section_rows}</table>\n",
+        f"<table><caption>may-sales.xlsx - May</caption>{header}{second_section_rows}</table>\n",
+    ]
+    assert [chunk.skip_embedding for chunk in chunks] == [False, False]
+    assert [chunk.parent_chunk_id for chunk in chunks] == [None, None]
+    assert chunks[0].langchain_metadata == {
+        "sourceFormat": "html_table",
+        "sheetName": "May",
+        "headerRow": 1,
+        "dataStartRow": 2,
+        "dataEndRow": 13,
+        "chunkRows": 12,
+        "htmlTableIndex": 0,
+    }
+    assert chunks[1].langchain_metadata["dataStartRow"] == 14
+    assert chunks[1].langchain_metadata["dataEndRow"] == 14
+    assert storage.downloaded_keys == ["documents/42/original/may-sales.xlsx"]
+
+
+@pytest.mark.asyncio
+async def test_excel2html_splitter_escapes_html_skips_empty_sheets_and_keeps_multi_sheet_order():
+    from app.modules.document.chunking import Excel2HTMLParentTextSplitter
+
+    storage = FakeTableStorage(
+        _xlsx_bytes(
+            [
+                ("North & West", [["Name <ID>", "Dept"], ["A&B", "<Ops>"]]),
+                ("HeaderOnly", [["Name", "Dept"]]),
+                ("South", [["Name", "Dept"], ["Cara", "Sales"]]),
+            ]
+        )
+    )
+    splitter = Excel2HTMLParentTextSplitter(chunk_size=10_000, overlap=0)
+
+    chunks = await splitter.split_chunks(
+        document=_table_document(
+            doc_title="budget & ops.xlsx",
+            converted_doc_url=(
+                "https://files.example.com/documents/documents/42/original/"
+                "budget%20%26%20ops.xlsx"
+            ),
+        ),
+        storage=storage,
+        id_generator=FakeIdGenerator([10001, 10002]),
+    )
+
+    assert [chunk.text for chunk in chunks] == [
+        (
+            "<table><caption>budget &amp; ops.xlsx - North &amp; West</caption>"
+            "<tr><th>Name &lt;ID&gt;</th><th>Dept</th></tr>"
+            "<tr><td>A&amp;B</td><td>&lt;Ops&gt;</td></tr></table>\n"
+        ),
+        (
+            "<table><caption>budget &amp; ops.xlsx - South</caption>"
+            "<tr><th>Name</th><th>Dept</th></tr>"
+            "<tr><td>Cara</td><td>Sales</td></tr></table>\n"
+        ),
+    ]
+    assert [chunk.langchain_metadata["sheetName"] for chunk in chunks] == [
+        "North & West",
+        "South",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_csv_splitter_uses_data_sheet_name_and_encoding_fallback():
+    from app.modules.document.chunking import Excel2HTMLParentTextSplitter
+
+    csv_text = "\u59d3\u540d,\u90e8\u95e8\n\u5f20\u4e09,\u9500\u552e\n"
+    storage = FakeTableStorage(csv_text.encode("gb18030"))
+    splitter = Excel2HTMLParentTextSplitter(chunk_size=10_000, overlap=0)
+
+    chunks = await splitter.split_chunks(
+        document=_table_document(file_type=DocumentFileType.CSV.value, doc_title="data.csv"),
+        storage=storage,
+        id_generator=FakeIdGenerator([10001]),
+    )
+
+    assert chunks[0].text == (
+        "<table><caption>data.csv - Data</caption>"
+        "<tr><th>\u59d3\u540d</th><th>\u90e8\u95e8</th></tr>"
+        "<tr><td>\u5f20\u4e09</td><td>\u9500\u552e</td></tr></table>\n"
+    )
+    assert chunks[0].langchain_metadata["sheetName"] == "Data"
+    assert storage.downloaded_keys == ["documents/42/original/data.csv"]
+
+
+@pytest.mark.asyncio
+async def test_excel2html_splitter_returns_parent_and_children_for_oversized_section():
+    from app.modules.document.chunking import Excel2HTMLParentTextSplitter
+
+    rows = [["Name", "Notes"], ["Alice", " ".join(["long"] * 80)]]
+    storage = FakeTableStorage(_xlsx_bytes([("Notes", rows)]))
+    splitter = Excel2HTMLParentTextSplitter(chunk_size=120, overlap=0)
+
+    chunks = await splitter.split_chunks(
+        document=_table_document(doc_title="notes.xlsx"),
+        storage=storage,
+        id_generator=FakeIdGenerator(range(10001, 10020)),
+    )
+
+    parent = chunks[0]
+    children = chunks[1:]
+    assert parent.chunk_id == "10001"
+    assert parent.skip_embedding is True
+    assert parent.parent_chunk_id is None
+    assert parent.text.startswith("<table><caption>notes.xlsx - Notes</caption>")
+    assert parent.langchain_metadata["sheetName"] == "Notes"
+    assert children
+    assert all(child.skip_embedding is False for child in children)
+    assert all(child.parent_chunk_id == "10001" for child in children)
+    assert all(child.langchain_metadata == parent.langchain_metadata for child in children)
+    assert all(len(child.text) <= 120 for child in children)
 
 
 def _document():

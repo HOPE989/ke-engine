@@ -20,7 +20,6 @@ from app.modules.document.errors import (
 )
 from app.modules.document.chunking import (
     build_segment_drafts,
-    load_converted_markdown,
     run_with_document_chunk_lock,
 )
 from app.modules.document.file_types import detect_document_file_type
@@ -263,7 +262,10 @@ async def chunk_document(
 ) -> Any:
     """执行单个已转换文档的手动切分工作流。
 
-    切分流程只负责把 converted Markdown 拆成数据库 segment，并把文档推进到 `CHUNKED`。
+    切分流程只负责按文件类型把 converted 文档拆成数据库 segment，并把文档推进到 `CHUNKED`。
+    文件内容加载不在 workflow 里做，而是下沉到具体 splitter：
+    Markdown splitter 读取 UTF-8 文本，Excel/CSV splitter 读取 origin bytes。
+
     当 `embed_store_dispatcher` 存在时，成功持久化后再派发向量存储事件；派发发生在
     `complete_chunking` 返回之后，避免 chunk 持久化失败时产生无法处理的向量存储消息。
     """
@@ -284,21 +286,25 @@ async def chunk_document(
         if not document.converted_doc_url:
             raise DocumentStateConflict()
 
-        markdown = await load_converted_markdown(document=document, storage=storage)
         try:
+            # 1. 按 file_type 选择唯一 splitter；workflow 不再提前下载 converted 文档。
             splitter = splitter_factory.splitter_for(
                 document.file_type,
                 chunk_size=chunk_size,
                 overlap=overlap,
             )
-            split_chunks = await run_in_threadpool(
-                splitter.split_chunks,
-                markdown,
+            # 2. splitter 自己解释 converted_doc_url：Markdown 读文本，Excel/CSV 读 bytes。
+            split_chunks = await splitter.split_chunks(
+                document=document,
+                storage=storage,
                 id_generator=id_generator,
             )
+        except (DocumentStateConflict, ConvertedMarkdownUnavailable, ConvertedMarkdownInvalid):
+            raise
         except Exception as exc:
             raise ChunkSplittingFailed() from exc
 
+        # 3. 统一把 splitter 输出转换成 knowledge_segment 待写入草稿。
         segment_drafts = build_segment_drafts(
             document=document,
             split_chunks=split_chunks,

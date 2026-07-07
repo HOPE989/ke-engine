@@ -25,6 +25,8 @@ EXCEL_MIME_TYPES = {
     "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
+CSV_LABELS = {"csv"}
+CSV_MIME_TYPES = {"text/csv", "application/csv", "application/vnd.ms-excel"}
 
 
 class DocumentFileType(str, Enum):
@@ -34,6 +36,7 @@ class DocumentFileType(str, Enum):
     PLAIN_TEXT = "plain_text"
     WORD = "word"
     EXCEL = "excel"
+    CSV = "csv"
 
 
 def _normalized_output_value(output: Any, name: str) -> str:
@@ -71,9 +74,23 @@ def detect_document_file_type(
     ):
         return DocumentFileType.PDF
 
-    # 2. Magika 明确识别为 Excel 时先拒绝，避免被伪装的上传 MIME 覆盖。
+    # 2. Magika 明确识别为 Excel 时优先按 Excel 接受，避免被伪装的上传 MIME 覆盖。
     if ct_label in EXCEL_LABELS or detected_mime_type in EXCEL_MIME_TYPES:
-        raise UnsupportedDocumentFileType()
+        return DocumentFileType.EXCEL
+
+    if upload_mime_type in EXCEL_MIME_TYPES and suffix in {".xls", ".xlsx"}:
+        return DocumentFileType.EXCEL
+
+    if suffix == ".csv" and (
+        upload_mime_type in CSV_MIME_TYPES
+        or upload_mime_type == "application/octet-stream"
+        or detected_mime_type in CSV_MIME_TYPES
+        or detected_mime_type in TEXT_MIME_TYPES
+        or detected_mime_type.startswith("text/")
+        or ct_label in TEXT_LABELS
+        or ct_label in CSV_LABELS
+    ):
+        return DocumentFileType.CSV
 
     # 3. Word 需要明确 MIME 或 Magika 内容标签；不靠扩展名单独放行。
     if (

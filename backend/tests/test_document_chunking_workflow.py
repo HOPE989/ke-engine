@@ -1,3 +1,4 @@
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
@@ -90,10 +91,16 @@ class RecordingSplitter:
     def __init__(self):
         self.calls = []
 
-    def split_chunks(self, text, *, id_generator):
+    async def split_chunks(self, *, document, storage, id_generator):
         from app.modules.document.chunking import MarkdownSplitChunk
 
-        self.calls.append({"text": text, "id_generator": id_generator})
+        self.calls.append(
+            {
+                "document": document,
+                "storage": storage,
+                "id_generator": id_generator,
+            }
+        )
         return [
             MarkdownSplitChunk(
                 chunk_id="10001",
@@ -139,6 +146,20 @@ def _document(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def _xlsx_bytes(rows):
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Sheet1"
+    for row in rows:
+        worksheet.append(row)
+
+    stream = BytesIO()
+    workbook.save(stream)
+    return stream.getvalue()
 
 
 async def _chunk_document(**overrides):
@@ -268,11 +289,12 @@ async def test_chunk_workflow_uses_injected_splitter_factory():
     splitter = RecordingSplitter()
     splitter_factory = RecordingSplitterFactory(splitter)
     repository = FakeRepository(_document(file_type=DocumentFileType.PDF.value))
+    storage = FakeStorage(payload=b"workflow must not pre-load this")
     id_generator = FakeIdGenerator()
 
     response = await _chunk_document(
         document_repository=repository,
-        storage=FakeStorage(payload=b"# Guide\ncontent"),
+        storage=storage,
         id_generator=id_generator,
         chunk_size=77,
         overlap=7,
@@ -287,7 +309,14 @@ async def test_chunk_workflow_uses_injected_splitter_factory():
             "overlap": 7,
         }
     ]
-    assert splitter.calls == [{"text": "# Guide\ncontent", "id_generator": id_generator}]
+    assert splitter.calls == [
+        {
+            "document": repository.documents[0],
+            "storage": storage,
+            "id_generator": id_generator,
+        }
+    ]
+    assert storage.downloaded_keys == []
     assert repository.completed[0]["segment_drafts"][0].text == "split by injected factory"
 
 
@@ -338,6 +367,47 @@ async def test_chunk_workflow_dispatches_vector_storage_after_persistence():
 
     assert response.status == DocumentStatus.CHUNKED.value
     assert calls == [("persist", 42), ("dispatch", 42)]
+
+
+@pytest.mark.asyncio
+async def test_chunk_workflow_chunks_excel_document_and_dispatches_vector_storage():
+    calls = []
+
+    class RecordingDispatcher:
+        async def dispatch(self, doc_id):
+            calls.append(doc_id)
+
+    repository = FakeRepository(
+        _document(
+            doc_title="may-sales.xlsx",
+            file_type=DocumentFileType.EXCEL.value,
+            converted_doc_url=(
+                "https://files.example.com/documents/documents/42/original/may-sales.xlsx"
+            ),
+        )
+    )
+    storage = FakeStorage(payload=_xlsx_bytes([["Name", "Amount"], ["Alice", 100]]))
+
+    response = await _chunk_document(
+        document_repository=repository,
+        storage=storage,
+        embed_store_dispatcher=RecordingDispatcher(),
+        chunk_size=10_000,
+        overlap=0,
+    )
+
+    assert response.status == DocumentStatus.CHUNKED.value
+    assert response.segment_count == 1
+    assert calls == [42]
+    assert storage.downloaded_keys == ["documents/42/original/may-sales.xlsx"]
+    draft = repository.completed[0]["segment_drafts"][0]
+    assert draft.text == (
+        "<table><caption>may-sales.xlsx - Sheet1</caption>"
+        "<tr><th>Name</th><th>Amount</th></tr>"
+        "<tr><td>Alice</td><td>100</td></tr></table>\n"
+    )
+    assert draft.metadata["langchain"]["sourceFormat"] == "html_table"
+    assert draft.metadata["langchain"]["sheetName"] == "Sheet1"
 
 
 @pytest.mark.asyncio

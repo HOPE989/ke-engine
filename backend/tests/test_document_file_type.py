@@ -188,18 +188,24 @@ def test_docx_extension_without_word_evidence_is_rejected():
             "application/vnd.ms-excel",
             FakeMagikaResult(ct_label="xls", mime_type="application/vnd.ms-excel"),
         ),
+        (
+            "upload.bin",
+            "application/octet-stream",
+            FakeMagikaResult(ct_label="excel", mime_type="application/octet-stream"),
+        ),
     ],
 )
-def test_excel_files_are_still_rejected(filename, upload_content_type, result):
-    detect_document_file_type, _, _, UnsupportedDocumentFileType = _file_type_modules()
+def test_excel_files_are_accepted(filename, upload_content_type, result):
+    detect_document_file_type, DocumentFileType, _, _ = _file_type_modules()
 
-    with pytest.raises(UnsupportedDocumentFileType):
-        detect_document_file_type(
-            filename=filename,
-            content=b"excel-bytes",
-            upload_content_type=upload_content_type,
-            magika_client=FakeMagikaClient(result=result),
-        )
+    detected = detect_document_file_type(
+        filename=filename,
+        content=b"excel-bytes",
+        upload_content_type=upload_content_type,
+        magika_client=FakeMagikaClient(result=result),
+    )
+
+    assert detected == DocumentFileType.EXCEL
 
 
 @pytest.mark.parametrize(
@@ -215,18 +221,47 @@ def test_excel_files_are_still_rejected(filename, upload_content_type, result):
         ),
     ],
 )
-def test_excel_content_with_word_upload_mime_is_rejected(result):
-    detect_document_file_type, _, _, UnsupportedDocumentFileType = _file_type_modules()
+def test_excel_content_with_word_upload_mime_is_accepted_as_excel(result):
+    detect_document_file_type, DocumentFileType, _, _ = _file_type_modules()
 
-    with pytest.raises(UnsupportedDocumentFileType):
-        detect_document_file_type(
-            filename="sheet.xlsx",
-            content=b"excel-bytes",
-            upload_content_type=(
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            ),
-            magika_client=FakeMagikaClient(result=result),
-        )
+    detected = detect_document_file_type(
+        filename="sheet.xlsx",
+        content=b"excel-bytes",
+        upload_content_type=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
+        magika_client=FakeMagikaClient(result=result),
+    )
+
+    assert detected == DocumentFileType.EXCEL
+
+
+@pytest.mark.parametrize(
+    "filename,upload_content_type,result",
+    [
+        (
+            "data.csv",
+            "text/csv",
+            FakeMagikaResult(ct_label="txt", mime_type="text/csv"),
+        ),
+        (
+            "data.csv",
+            "application/octet-stream",
+            FakeMagikaResult(ct_label="unknown", mime_type="application/octet-stream"),
+        ),
+    ],
+)
+def test_csv_files_are_accepted(filename, upload_content_type, result):
+    detect_document_file_type, DocumentFileType, _, _ = _file_type_modules()
+
+    detected = detect_document_file_type(
+        filename=filename,
+        content=b"name,amount\nalice,10",
+        upload_content_type=upload_content_type,
+        magika_client=FakeMagikaClient(result=result),
+    )
+
+    assert detected == DocumentFileType.CSV
 
 
 @pytest.mark.parametrize("filename", ["guide.md", "guide.markdown", "notes.txt"])

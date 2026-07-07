@@ -197,13 +197,52 @@ async def test_mineru_converter_wraps_original_download_failure():
 
 
 @pytest.mark.asyncio
-async def test_excel_converter_supports_excel_but_conversion_is_not_implemented():
+async def test_excel_converter_reuses_origin_url_for_excel_and_csv_without_storage_or_mineru_calls():
     converters = load_converters_module()
     converter = converters.ExcelConverter()
-    document = make_document(file_type=DocumentFileType.EXCEL, doc_title="sheet.xlsx")
+    excel_document = make_document(
+        file_type=DocumentFileType.EXCEL,
+        doc_title="sheet.xlsx",
+        doc_url="https://files.example.com/documents/documents/42/original/sheet.xlsx",
+    )
+    csv_document = make_document(
+        file_type=DocumentFileType.CSV,
+        doc_title="data.csv",
+        doc_url="https://files.example.com/documents/documents/42/original/data.csv",
+    )
 
     assert converter.supports(DocumentFileType.EXCEL)
     assert converter.supports("excel")
+    assert converter.supports(DocumentFileType.CSV)
+    assert converter.supports("csv")
+    assert (
+        await converter.convert_document(
+            document=excel_document,
+            storage=FailingStorage(),
+            mineru_client=FailingMinerUClient(),
+        )
+        == "https://files.example.com/documents/documents/42/original/sheet.xlsx"
+    )
+    assert (
+        await converter.convert_document(
+            document=csv_document,
+            storage=FailingStorage(),
+            mineru_client=FailingMinerUClient(),
+        )
+        == "https://files.example.com/documents/documents/42/original/data.csv"
+    )
+
+
+@pytest.mark.asyncio
+async def test_excel_converter_raises_when_origin_url_is_missing():
+    converters = load_converters_module()
+    converter = converters.ExcelConverter()
+    document = make_document(
+        file_type=DocumentFileType.EXCEL,
+        doc_title="sheet.xlsx",
+        doc_url=None,
+    )
+
     with pytest.raises(DocumentConversionFailed):
         await converter.convert_document(
             document=document,
@@ -220,7 +259,9 @@ def test_document_converter_factory_selects_supported_converter_and_rejects_unkn
 
     assert factory.converter_for(DocumentFileType.PLAIN_TEXT) is plain_text_converter
     assert factory.converter_for(DocumentFileType.EXCEL) is excel_converter
+    assert factory.converter_for(DocumentFileType.CSV) is excel_converter
     assert factory.converter_for("excel") is excel_converter
+    assert factory.converter_for("csv") is excel_converter
 
     with pytest.raises(DocumentConversionFailed):
         factory.converter_for("ppt")
@@ -234,5 +275,7 @@ def test_create_default_document_converter_factory_registers_known_converters():
     assert isinstance(factory.converter_for(DocumentFileType.PDF), converters.PdfDocumentConverter)
     assert isinstance(factory.converter_for(DocumentFileType.WORD), converters.WordDocumentConverter)
     assert isinstance(factory.converter_for(DocumentFileType.EXCEL), converters.ExcelConverter)
+    assert isinstance(factory.converter_for(DocumentFileType.CSV), converters.ExcelConverter)
     assert isinstance(factory.converter_for("word"), converters.WordDocumentConverter)
     assert isinstance(factory.converter_for("excel"), converters.ExcelConverter)
+    assert isinstance(factory.converter_for("csv"), converters.ExcelConverter)
