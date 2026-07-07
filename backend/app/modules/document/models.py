@@ -21,6 +21,16 @@ class DocumentStatus(str, Enum):
     VECTOR_STORED = "VECTOR_STORED"
 
 
+class KnowledgeBaseType(str, Enum):
+    """knowledge_document.knowledge_base_type 允许的知识库来源类型。"""
+
+    DOCUMENT_SEARCH = "DOCUMENT_SEARCH"
+    DATA_QUERY = "DATA_QUERY"
+
+
+KNOWLEDGE_BASE_TYPE_CONSTRAINT = "knowledge_base_type IN ('DOCUMENT_SEARCH', 'DATA_QUERY')"
+
+
 class KnowledgeDocument(Base):
     """knowledge_document 表的 ORM 映射。"""
 
@@ -33,11 +43,17 @@ class KnowledgeDocument(Base):
             ),
             name="ck_knowledge_document_status",
         ),
+        CheckConstraint(
+            KNOWLEDGE_BASE_TYPE_CONSTRAINT,
+            name="ck_knowledge_document_knowledge_base_type",
+        ),
     )
 
     doc_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     doc_title: Mapped[str] = mapped_column(String(1024), nullable=False)
     upload_user: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    knowledge_base_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     doc_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     file_type: Mapped[str] = mapped_column(String(32), nullable=False)
     converted_doc_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)

@@ -109,7 +109,16 @@ def _force_plain_text_detection(monkeypatch, detections):
 
 
 def _fake_repository(events):
-    async def create_init_document(*, doc_id, doc_title, upload_user, accessible_by, file_type):
+    async def create_init_document(
+        *,
+        doc_id,
+        doc_title,
+        upload_user,
+        accessible_by,
+        description,
+        knowledge_base_type,
+        file_type,
+    ):
         events.append(
             {
                 "action": "create_init",
@@ -117,6 +126,8 @@ def _fake_repository(events):
                 "doc_title": doc_title,
                 "upload_user": upload_user,
                 "accessible_by": accessible_by,
+                "description": description,
+                "knowledge_base_type": knowledge_base_type,
                 "file_type": file_type,
             }
         )
@@ -185,7 +196,12 @@ async def test_markdown_upload_returns_uploaded_and_dispatches_conversion(
 
     response = await client.post(
         "/api/v1/document/upload",
-        data={"upload_user": "alice", "accessible_by": "team-a"},
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "description": "  Markdown guide  ",
+            "knowledgeBaseType": "DOCUMENT_SEARCH",
+        },
         files={"file": ("guide.md", b"# Guide", "text/markdown")},
     )
 
@@ -220,6 +236,8 @@ async def test_markdown_upload_returns_uploaded_and_dispatches_conversion(
             "doc_title": "guide.md",
             "upload_user": "alice",
             "accessible_by": "team-a",
+            "description": "Markdown guide",
+            "knowledge_base_type": "DOCUMENT_SEARCH",
             "file_type": DocumentFileType.PLAIN_TEXT,
         },
         {
@@ -259,7 +277,11 @@ async def test_conversion_dispatch_failure_still_returns_uploaded(
 
     response = await client.post(
         "/api/v1/document/upload",
-        data={"upload_user": "alice", "accessible_by": "team-a"},
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DOCUMENT_SEARCH",
+        },
         files={"file": ("guide.md", b"# Guide", "text/markdown")},
     )
 
@@ -306,6 +328,8 @@ async def test_upload_workflow_runs_file_detection_in_threadpool(monkeypatch):
             safe_filename="guide.md",
             upload_user="alice",
             accessible_by="team-a",
+            description="Markdown guide",
+            knowledge_base_type="DOCUMENT_SEARCH",
             content_type="text/markdown",
             content=b"# Guide",
             size_bytes=7,
@@ -346,7 +370,11 @@ async def test_original_upload_failure_keeps_init_and_skips_conversion(
 
     response = await client.post(
         "/api/v1/document/upload",
-        data={"upload_user": "alice", "accessible_by": "team-a"},
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DOCUMENT_SEARCH",
+        },
         files={"file": ("guide.md", b"# Guide", "text/markdown")},
     )
 
@@ -361,6 +389,8 @@ async def test_original_upload_failure_keeps_init_and_skips_conversion(
             "doc_title": "guide.md",
             "upload_user": "alice",
             "accessible_by": "team-a",
+            "description": "",
+            "knowledge_base_type": "DOCUMENT_SEARCH",
             "file_type": DocumentFileType.PLAIN_TEXT,
         }
     ]

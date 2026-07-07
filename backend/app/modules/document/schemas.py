@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from fastapi import UploadFile
 from pydantic import BaseModel, StrictInt
 
+from app.modules.document.models import KnowledgeBaseType
+
 
 class InvalidDocumentUpload(Exception):
     """上传请求内容不合法时使用的内部校验异常。"""
@@ -38,6 +40,8 @@ class ValidatedDocumentUpload:
     safe_filename: str
     upload_user: str
     accessible_by: str
+    description: str
+    knowledge_base_type: str
     content_type: str
     content: bytes
     size_bytes: int
@@ -133,6 +137,8 @@ async def validate_document_upload(
     file: UploadFile,
     upload_user: str,
     accessible_by: str,
+    description: str | None,
+    knowledge_base_type: str,
     max_upload_size_mb: int,
 ) -> ValidatedDocumentUpload:
     """校验 multipart 上传请求并返回不可变的上传数据对象。"""
@@ -140,7 +146,11 @@ async def validate_document_upload(
     # 1. 先校验普通表单字段，避免空上传者或空访问范围入库。
     normalized_user = upload_user.strip()
     normalized_scope = accessible_by.strip()
+    normalized_description = (description or "").strip()
+    normalized_knowledge_base_type = (knowledge_base_type or "").strip()
     if not normalized_user or not normalized_scope:
+        raise InvalidDocumentUpload()
+    if normalized_knowledge_base_type not in {item.value for item in KnowledgeBaseType}:
         raise InvalidDocumentUpload()
 
     # 2. 文件名校验早于读取内容，失败时不触发后续业务流程。
@@ -165,6 +175,8 @@ async def validate_document_upload(
         safe_filename=safe_filename,
         upload_user=normalized_user,
         accessible_by=normalized_scope,
+        description=normalized_description,
+        knowledge_base_type=normalized_knowledge_base_type,
         content_type=(file.content_type or "").strip().lower(),
         content=content,
         size_bytes=len(content),

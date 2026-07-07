@@ -224,6 +224,7 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
                 storage=object(),
                 mineru_client=object(),
                 image_describer=object(),
+                converter_factory=object(),
             ),
         ),
     )

@@ -130,12 +130,23 @@ def force_pdf_detection(monkeypatch):
 
 
 def fake_repository(events):
-    async def create_init_document(*, doc_id, doc_title, upload_user, accessible_by, file_type):
+    async def create_init_document(
+        *,
+        doc_id,
+        doc_title,
+        upload_user,
+        accessible_by,
+        description,
+        knowledge_base_type,
+        file_type,
+    ):
         events.append(
             {
                 "action": "create_init",
                 "doc_id": doc_id,
                 "doc_title": doc_title,
+                "description": description,
+                "knowledge_base_type": knowledge_base_type,
                 "file_type": file_type,
             }
         )
@@ -194,6 +205,8 @@ async def test_pdf_conversion_uploads_markdown_and_rewritten_images():
         safe_filename="guide.pdf",
         upload_user="alice",
         accessible_by="team-a",
+        description="PDF guide",
+        knowledge_base_type="DOCUMENT_SEARCH",
         content_type="application/pdf",
         content=b"%PDF-1.7",
         size_bytes=len(b"%PDF-1.7"),
@@ -260,6 +273,8 @@ async def test_pdf_conversion_marks_description_failures_without_losing_image_ur
         safe_filename="guide.pdf",
         upload_user="alice",
         accessible_by="team-a",
+        description="PDF guide",
+        knowledge_base_type="DOCUMENT_SEARCH",
         content_type="application/pdf",
         content=b"%PDF-1.7",
         size_bytes=len(b"%PDF-1.7"),
@@ -304,6 +319,8 @@ async def test_pdf_conversion_marks_missing_image_without_failing_conversion(cap
         safe_filename="guide.pdf",
         upload_user="alice",
         accessible_by="team-a",
+        description="PDF guide",
+        knowledge_base_type="DOCUMENT_SEARCH",
         content_type="application/pdf",
         content=b"%PDF-1.7",
         size_bytes=len(b"%PDF-1.7"),
@@ -351,6 +368,8 @@ async def test_pdf_conversion_marks_asset_upload_failure_without_failing_convers
         safe_filename="guide.pdf",
         upload_user="alice",
         accessible_by="team-a",
+        description="PDF guide",
+        knowledge_base_type="DOCUMENT_SEARCH",
         content_type="application/pdf",
         content=b"%PDF-1.7",
         size_bytes=len(b"%PDF-1.7"),
@@ -422,7 +441,12 @@ async def test_pdf_upload_api_persists_upload_and_dispatches_conversion(
 
     response = await client.post(
         "/api/v1/document/upload",
-        data={"upload_user": "alice", "accessible_by": "team-a"},
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "description": "  PDF guide  ",
+            "knowledgeBaseType": "DOCUMENT_SEARCH",
+        },
         files={"file": ("guide.pdf", b"%PDF-1.7", "application/pdf")},
     )
 
@@ -444,6 +468,8 @@ async def test_pdf_upload_api_persists_upload_and_dispatches_conversion(
             "action": "create_init",
             "doc_id": 9_007_199_254_740_993,
             "doc_title": "guide.pdf",
+            "description": "PDF guide",
+            "knowledge_base_type": "DOCUMENT_SEARCH",
             "file_type": DocumentFileType.PDF,
         },
         {

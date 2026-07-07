@@ -127,9 +127,26 @@ async def client_with_capturing_workflow(
 @pytest.mark.parametrize(
     ("data", "files"),
     [
-        ({"upload_user": "alice", "accessible_by": "team-a"}, None),
-        ({"accessible_by": "team-a"}, {"file": ("guide.md", b"# hi", "text/markdown")}),
-        ({"upload_user": "alice"}, {"file": ("guide.md", b"# hi", "text/markdown")}),
+        (
+            {
+                "upload_user": "alice",
+                "accessible_by": "team-a",
+                "knowledgeBaseType": "DOCUMENT_SEARCH",
+            },
+            None,
+        ),
+        (
+            {"accessible_by": "team-a", "knowledgeBaseType": "DOCUMENT_SEARCH"},
+            {"file": ("guide.md", b"# hi", "text/markdown")},
+        ),
+        (
+            {"upload_user": "alice", "knowledgeBaseType": "DOCUMENT_SEARCH"},
+            {"file": ("guide.md", b"# hi", "text/markdown")},
+        ),
+        (
+            {"upload_user": "alice", "accessible_by": "team-a"},
+            {"file": ("guide.md", b"# hi", "text/markdown")},
+        ),
     ],
 )
 async def test_missing_required_multipart_fields_return_422(
@@ -150,34 +167,66 @@ async def test_missing_required_multipart_fields_return_422(
     ("data", "file_tuple", "status_code", "message"),
     [
         (
-            {"upload_user": "   ", "accessible_by": "team-a"},
+            {
+                "upload_user": "   ",
+                "accessible_by": "team-a",
+                "knowledgeBaseType": "DOCUMENT_SEARCH",
+            },
             ("guide.md", b"# hi", "text/markdown"),
             400,
             "invalid upload request",
         ),
         (
-            {"upload_user": "alice", "accessible_by": "\t  "},
+            {
+                "upload_user": "alice",
+                "accessible_by": "\t  ",
+                "knowledgeBaseType": "DOCUMENT_SEARCH",
+            },
             ("guide.md", b"# hi", "text/markdown"),
             400,
             "invalid upload request",
         ),
         (
-            {"upload_user": "alice", "accessible_by": "team-a"},
+            {
+                "upload_user": "alice",
+                "accessible_by": "team-a",
+                "knowledgeBaseType": "DOCUMENT_SEARCH",
+            },
             ("guide.md", b"", "text/markdown"),
             400,
             "invalid upload request",
         ),
         (
-            {"upload_user": "alice", "accessible_by": "team-a"},
+            {
+                "upload_user": "alice",
+                "accessible_by": "team-a",
+                "knowledgeBaseType": "DOCUMENT_SEARCH",
+            },
             ("   ", b"# hi", "text/markdown"),
             400,
             "invalid upload request",
         ),
         (
-            {"upload_user": "alice", "accessible_by": "team-a"},
+            {
+                "upload_user": "alice",
+                "accessible_by": "team-a",
+                "knowledgeBaseType": "DOCUMENT_SEARCH",
+            },
             ("large.md", b"x" * (1024 * 1024 + 1), "text/markdown"),
             413,
             "file too large",
+        ),
+        (
+            {"upload_user": "alice", "accessible_by": "team-a", "knowledgeBaseType": "   "},
+            ("guide.md", b"# hi", "text/markdown"),
+            400,
+            "invalid upload request",
+        ),
+        (
+            {"upload_user": "alice", "accessible_by": "team-a", "knowledgeBaseType": "OTHER"},
+            ("guide.md", b"# hi", "text/markdown"),
+            400,
+            "invalid upload request",
         ),
     ],
 )
@@ -214,6 +263,9 @@ async def test_empty_upload_filename_returns_invalid_request_before_workflow(
         'Content-Disposition: form-data; name="accessible_by"\r\n\r\n'
         "team-a\r\n"
         f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="knowledgeBaseType"\r\n\r\n'
+        "DOCUMENT_SEARCH\r\n"
+        f"--{boundary}\r\n"
         'Content-Disposition: form-data; name="file"; filename=""\r\n'
         "Content-Type: text/markdown\r\n\r\n"
         "# hi\r\n"
@@ -244,7 +296,11 @@ async def test_unreadable_upload_stream_returns_invalid_request_before_workflow(
 
     response = await client.post(
         "/api/v1/document/upload",
-        data={"upload_user": "alice", "accessible_by": "team-a"},
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DOCUMENT_SEARCH",
+        },
         files={"file": ("guide.md", b"# hi", "text/markdown")},
     )
 
@@ -284,6 +340,8 @@ async def test_upload_validation_stops_reading_when_size_limit_is_exceeded():
             file=upload,
             upload_user="alice",
             accessible_by="team-a",
+            description=None,
+            knowledge_base_type="DOCUMENT_SEARCH",
             max_upload_size_mb=1,
         )
 
@@ -300,7 +358,11 @@ async def test_path_like_filename_is_normalized_before_workflow(
 
     response = await client.post(
         "/api/v1/document/upload",
-        data={"upload_user": "alice", "accessible_by": "team-a"},
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DOCUMENT_SEARCH",
+        },
         files={"file": ("..\\secret/../guide.md", b"# hi", "text/markdown")},
     )
 
@@ -308,8 +370,34 @@ async def test_path_like_filename_is_normalized_before_workflow(
     upload = captured["upload"]
     assert upload.doc_title == "guide.md"
     assert upload.safe_filename == "guide.md"
+    assert upload.description == ""
+    assert upload.knowledge_base_type == "DOCUMENT_SEARCH"
     assert upload.content_type == "text/markdown"
     assert ".." not in upload.safe_filename
     assert "\\" not in upload.safe_filename
     assert "/" not in upload.safe_filename
     assert "secret" not in response.json()["data"]["doc_url"]
+
+
+@pytest.mark.asyncio
+async def test_upload_validation_trims_description_and_accepts_data_query_type(
+    client_with_capturing_workflow,
+):
+    client, captured = client_with_capturing_workflow
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "description": "  查询数据源说明  ",
+            "knowledgeBaseType": "DATA_QUERY",
+        },
+        files={"file": ("guide.md", b"# hi", "text/markdown")},
+    )
+
+    assert response.status_code == 202
+    upload = captured["upload"]
+    assert upload.doc_title == "guide.md"
+    assert upload.description == "查询数据源说明"
+    assert upload.knowledge_base_type == "DATA_QUERY"

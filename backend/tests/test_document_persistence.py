@@ -130,22 +130,39 @@ def test_knowledge_document_model_accepts_chunked_status_without_schema_drift():
 
     assert DocumentStatus.CHUNKED.value == "CHUNKED"
     assert DocumentStatus.VECTOR_STORED.value == "VECTOR_STORED"
+    from app.modules.document.models import KnowledgeBaseType
+
+    assert KnowledgeBaseType.DOCUMENT_SEARCH.value == "DOCUMENT_SEARCH"
+    assert KnowledgeBaseType.DATA_QUERY.value == "DATA_QUERY"
 
     columns = KnowledgeDocument.__table__.columns
     assert columns["doc_id"].primary_key is True
     assert columns["doc_id"].identity is None
+    assert isinstance(columns["description"].type, sa.Text)
+    assert columns["description"].nullable is False
+    assert columns["knowledge_base_type"].type.length == 64
+    assert columns["knowledge_base_type"].nullable is False
     assert columns["file_type"].type.length == 32
     assert columns["file_type"].nullable is False
 
     constraints = [
         constraint
         for constraint in KnowledgeDocument.__table__.constraints
-        if constraint.name == "ck_knowledge_document_status"
+        if constraint.name
+        in {"ck_knowledge_document_status", "ck_knowledge_document_knowledge_base_type"}
     ]
-    assert len(constraints) == 1
-    constraint_sql = str(constraints[0].sqltext)
+    assert len(constraints) == 2
+    constraint_sql = "\n".join(str(constraint.sqltext) for constraint in constraints)
     assert "CHUNKED" in constraint_sql
     assert "VECTOR_STORED" in constraint_sql
+    assert "DOCUMENT_SEARCH" in constraint_sql
+    assert "DATA_QUERY" in constraint_sql
+
+    indexes_by_columns = {
+        tuple(column.name for column in index.columns): index.name
+        for index in KnowledgeDocument.__table__.indexes
+    }
+    assert indexes_by_columns[("knowledge_base_type",)]
 
 
 def test_knowledge_segment_model_defines_schema():
@@ -205,6 +222,8 @@ async def test_create_init_document_persists_provided_doc_id_and_file_type():
         doc_title="guide.md",
         upload_user="alice",
         accessible_by="team-a",
+        description="Markdown guide",
+        knowledge_base_type="DOCUMENT_SEARCH",
         file_type="plain_text",
     )
 
@@ -214,6 +233,8 @@ async def test_create_init_document_persists_provided_doc_id_and_file_type():
     assert document.doc_title == "guide.md"
     assert document.upload_user == "alice"
     assert document.accessible_by == "team-a"
+    assert document.description == "Markdown guide"
+    assert document.knowledge_base_type == "DOCUMENT_SEARCH"
     assert document.file_type == "plain_text"
     assert document.status == DocumentStatus.INIT.value
     assert session.added == [document]
@@ -458,6 +479,8 @@ async def test_complete_chunking_rolls_back_inserted_segments_on_postgres_stale_
                     doc_title="chunked.md",
                     upload_user="tester",
                     accessible_by="team-a",
+                    description="Chunked document",
+                    knowledge_base_type="DOCUMENT_SEARCH",
                     file_type="markdown",
                     converted_doc_url=(
                         "https://files.example.com/documents/documents/424242/converted/document.md"

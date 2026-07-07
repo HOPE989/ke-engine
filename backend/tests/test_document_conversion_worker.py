@@ -212,6 +212,8 @@ def _document(*, file_type, status=DocumentStatus.UPLOADED.value):
         doc_title="guide.pdf" if file_type == DocumentFileType.PDF.value else "guide.md",
         upload_user="alice",
         accessible_by="team-a",
+        description="Document description",
+        knowledge_base_type="DOCUMENT_SEARCH",
         file_type=file_type,
         doc_url=(
             "https://files.example.com/documents/"

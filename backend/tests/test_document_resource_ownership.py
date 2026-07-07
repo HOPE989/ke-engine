@@ -213,11 +213,12 @@ def test_worker_runtime_contexts_are_typed_stage_views_not_lifecycle_owners():
     assert set(kafka_worker.DocumentConversionContext.__dataclass_fields__) == {
         "repository",
         "redis_client",
-        "storage",
-        "mineru_client",
-        "image_describer",
-        "lock_expire_seconds",
-    }
+            "storage",
+            "mineru_client",
+            "image_describer",
+            "converter_factory",
+            "lock_expire_seconds",
+        }
     assert set(kafka_worker.DocumentVectorStorageContext.__dataclass_fields__) == {
         "repository",
         "redis_client",

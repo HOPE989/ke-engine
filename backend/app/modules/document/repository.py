@@ -69,6 +69,8 @@ class DocumentRepository:
         doc_title: str,
         upload_user: str,
         accessible_by: str,
+        description: str,
+        knowledge_base_type: str,
         file_type: str,
     ) -> KnowledgeDocument:
         """创建并提交 INIT 状态的文档行，返回带 doc_id 的模型。"""
@@ -78,6 +80,8 @@ class DocumentRepository:
             doc_title=doc_title,
             upload_user=upload_user,
             accessible_by=accessible_by,
+            description=description,
+            knowledge_base_type=knowledge_base_type,
             file_type=file_type,
             status=DocumentStatus.INIT.value,
         )

@@ -38,6 +38,8 @@ def make_document(
         doc_title=doc_title,
         upload_user="alice",
         accessible_by="team-a",
+        description="Document description",
+        knowledge_base_type="DOCUMENT_SEARCH",
         file_type=file_type,
         doc_url=doc_url,
         converted_doc_url=None,

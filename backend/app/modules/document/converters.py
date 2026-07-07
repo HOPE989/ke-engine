@@ -188,6 +188,8 @@ class MinerUDocumentConverter(BaseDocumentConverter):
             safe_filename=document.doc_title,
             upload_user=document.upload_user,
             accessible_by=document.accessible_by,
+            description=document.description,
+            knowledge_base_type=document.knowledge_base_type,
             content_type="application/octet-stream",
             content=content,
             size_bytes=len(content),

@@ -212,6 +212,8 @@ async def upload_document(
         doc_title=upload.doc_title,
         upload_user=upload.upload_user,
         accessible_by=upload.accessible_by,
+        description=upload.description,
+        knowledge_base_type=upload.knowledge_base_type,
         file_type=file_type,
     )
 

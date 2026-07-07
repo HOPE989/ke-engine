@@ -52,8 +52,10 @@ async def upload_document_endpoint(
     file: Annotated[UploadFile, File()],
     upload_user: Annotated[str, Form()],
     accessible_by: Annotated[str, Form()],
+    knowledge_base_type: Annotated[str, Form(alias="knowledgeBaseType")],
     settings: Annotated[Settings, Depends(get_config)],
     document_runtime: Annotated[DocumentRuntime, Depends(get_document_runtime)],
+    description: Annotated[str, Form()] = "",
 ) -> APIResponse[DocumentMetadata]:
     """接收 multipart 上传请求并返回文档转换后的元数据。"""
 
@@ -63,6 +65,8 @@ async def upload_document_endpoint(
             file=file,
             upload_user=upload_user,
             accessible_by=accessible_by,
+            description=description,
+            knowledge_base_type=knowledge_base_type,
             max_upload_size_mb=settings.max_upload_size_mb,
         )
     except DocumentFileTooLarge as exc:

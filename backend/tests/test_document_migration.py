@@ -12,6 +12,7 @@ class MigrationRecorder:
     def __init__(self):
         self.tables = {}
         self.indexes = []
+        self.added_columns = []
         self.dropped_constraints = []
         self.check_constraints = []
         self.altered_columns = []
@@ -26,6 +27,15 @@ class MigrationRecorder:
                 "name": name,
                 "table_name": table_name,
                 "columns": tuple(columns),
+                "kwargs": kwargs,
+            }
+        )
+
+    def add_column(self, table_name, column, **kwargs):
+        self.added_columns.append(
+            {
+                "table_name": table_name,
+                "column": column,
                 "kwargs": kwargs,
             }
         )
@@ -89,6 +99,26 @@ def _load_vector_storage_status_migration(monkeypatch):
 
     spec = importlib.util.spec_from_file_location(
         "document_vector_storage_status_migration",
+        migration_files[0],
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    recorder = MigrationRecorder()
+    monkeypatch.setattr(module, "op", recorder)
+    module.upgrade()
+    return recorder
+
+
+def _load_knowledge_base_metadata_migration(monkeypatch):
+    versions_dir = BACKEND_DIR / "alembic" / "versions"
+    migration_files = list(versions_dir.glob("*add_document_knowledge_base_metadata.py"))
+    assert len(migration_files) == 1
+
+    spec = importlib.util.spec_from_file_location(
+        "document_knowledge_base_metadata_migration",
         migration_files[0],
     )
     assert spec is not None
@@ -274,3 +304,32 @@ def test_vector_storage_status_migration_updates_existing_schema(monkeypatch):
     assert recorder.executed_sql == [
         "UPDATE knowledge_segment SET status = 'STORED' WHERE status = 'INIT'"
     ]
+
+
+def test_knowledge_base_metadata_migration_adds_columns_constraints_and_index(monkeypatch):
+    recorder = _load_knowledge_base_metadata_migration(monkeypatch)
+
+    added_columns = {
+        item["column"].name: item["column"]
+        for item in recorder.added_columns
+        if item["table_name"] == "knowledge_document"
+    }
+    assert isinstance(added_columns["description"].type, sa.Text)
+    assert added_columns["description"].nullable is False
+    assert isinstance(added_columns["knowledge_base_type"].type, sa.String)
+    assert added_columns["knowledge_base_type"].type.length == 64
+    assert added_columns["knowledge_base_type"].nullable is False
+
+    assert recorder.check_constraints == [
+        {
+            "name": "ck_knowledge_document_knowledge_base_type",
+            "table_name": "knowledge_document",
+            "condition": "knowledge_base_type IN ('DOCUMENT_SEARCH', 'DATA_QUERY')",
+            "kwargs": {},
+        }
+    ]
+    assert {
+        (index["table_name"], index["columns"]): index["name"]
+        for index in recorder.indexes
+    }[("knowledge_document", ("knowledge_base_type",))]
+    assert recorder.executed_sql == []

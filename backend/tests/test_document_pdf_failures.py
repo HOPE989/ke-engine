@@ -61,6 +61,8 @@ class FakeRepository:
             doc_title="guide.pdf",
             upload_user="alice",
             accessible_by="team-a",
+            description="PDF guide",
+            knowledge_base_type="DOCUMENT_SEARCH",
             file_type=DocumentFileType.PDF.value,
             doc_url="https://files.example.com/documents/documents/42/original/guide.pdf",
             converted_doc_url=None,
