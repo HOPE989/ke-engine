@@ -4,10 +4,12 @@
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import UploadFile
 from pydantic import BaseModel, StrictInt
 
+from app.modules.document.data_query_identifiers import is_valid_data_query_table_name
 from app.modules.document.models import KnowledgeBaseType
 
 
@@ -34,7 +36,12 @@ UPLOAD_READ_CHUNK_SIZE_BYTES = 1024 * 1024
 
 @dataclass(frozen=True, slots=True)
 class ValidatedDocumentUpload:
-    """通过 HTTP 边界校验后的上传文件数据。"""
+    """通过 HTTP 边界校验后的上传文件数据。
+
+    `table_name` 和 `is_override` 只在 DATA_QUERY spreadsheet 上传中有意义。
+    DOCUMENT_SEARCH 即使传入这些字段，也会在校验阶段被规整为 `None/False`，
+    避免普通文档链路误创建 table_meta 或触发 override。
+    """
 
     doc_title: str
     safe_filename: str
@@ -45,6 +52,9 @@ class ValidatedDocumentUpload:
     content_type: str
     content: bytes
     size_bytes: int
+    table_name: str | None = None
+    is_override: bool = False
+    data_query_upload_lock_factory: Any | None = None
 
 
 class DocumentMetadata(BaseModel):
@@ -140,8 +150,15 @@ async def validate_document_upload(
     description: str | None,
     knowledge_base_type: str,
     max_upload_size_mb: int,
+    table_name: str | None = None,
+    is_override: bool | None = None,
 ) -> ValidatedDocumentUpload:
-    """校验 multipart 上传请求并返回不可变的上传数据对象。"""
+    """校验 multipart 上传请求并返回不可变的上传数据对象。
+
+    本函数只处理 HTTP 入参层面的通用规则：必填字段、文件名、大小、DATA_QUERY
+    `tableName` 形状等。文件真实类型由 workflow 调用 Magika 后判断；数据库占位、
+    对象存储和 Kafka 派发也都不在这里发生。
+    """
 
     # 1. 先校验普通表单字段，避免空上传者或空访问范围入库。
     normalized_user = upload_user.strip()
@@ -152,6 +169,20 @@ async def validate_document_upload(
         raise InvalidDocumentUpload()
     if normalized_knowledge_base_type not in {item.value for item in KnowledgeBaseType}:
         raise InvalidDocumentUpload()
+    normalized_table_name = (table_name or "").strip()
+    if normalized_knowledge_base_type == KnowledgeBaseType.DATA_QUERY.value:
+        # DATA_QUERY 的 tableName 会进入逻辑表唯一约束和物理表名生成，因此在请求边界
+        # 就完成字符集与长度校验，失败时不能触达 workflow。
+        if not normalized_table_name or not is_valid_data_query_table_name(
+            normalized_table_name
+        ):
+            raise InvalidDocumentUpload()
+        upload_table_name = normalized_table_name
+        upload_is_override = bool(is_override)
+    else:
+        # DOCUMENT_SEARCH 忽略 DATA_QUERY 专属字段，保持旧上传语义不变。
+        upload_table_name = None
+        upload_is_override = False
 
     # 2. 文件名校验早于读取内容，失败时不触发后续业务流程。
     safe_filename = safe_upload_basename(file.filename)
@@ -180,4 +211,6 @@ async def validate_document_upload(
         content_type=(file.content_type or "").strip().lower(),
         content=content,
         size_bytes=len(content),
+        table_name=upload_table_name,
+        is_override=upload_is_override,
     )

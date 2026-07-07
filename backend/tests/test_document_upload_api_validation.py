@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -44,8 +45,108 @@ def patch_router_dependencies(app, document_router, monkeypatch):
         file_detector=object(),
         id_generator=object(),
         conversion_dispatcher=object(),
+        redis_client=object(),
     )
     app.state.document_runtime = runtime
+
+
+class FakeMagikaOutput:
+    def __init__(self, *, ct_label: str = "unknown", mime_type: str = "application/octet-stream"):
+        self.ct_label = ct_label
+        self.mime_type = mime_type
+
+
+class FakeMagikaResult:
+    def __init__(self, *, ct_label: str = "unknown", mime_type: str = "application/octet-stream"):
+        self.output = FakeMagikaOutput(ct_label=ct_label, mime_type=mime_type)
+
+
+class RecordingUploadLock:
+    def __init__(self, *, acquired=True, failure=None, release_failure=None):
+        self.acquired = acquired
+        self.failure = failure
+        self.release_failure = release_failure
+        self.acquire_calls = []
+        self.released = False
+
+    def acquire(self, *, blocking):
+        self.acquire_calls.append({"blocking": blocking})
+        if self.failure is not None:
+            raise self.failure
+        return self.acquired
+
+    def release(self):
+        self.released = True
+        if self.release_failure is not None:
+            raise self.release_failure
+
+
+class RecordingFileDetector:
+    def identify_bytes(self, content):
+        return FakeMagikaResult()
+
+
+class RecordingDataQueryRepository:
+    def __init__(self, *, conflict=False):
+        self.conflict = conflict
+        self.events = []
+
+    async def create_data_query_document_with_table_reservation(self, **kwargs):
+        self.events.append({"action": "reserve", **kwargs})
+        if self.conflict:
+            from app.modules.document.errors import DataQueryTableNameConflict
+
+            raise DataQueryTableNameConflict()
+        return SimpleNamespace(
+            doc_id=kwargs["doc_id"],
+            doc_title=kwargs["doc_title"],
+            upload_user=kwargs["upload_user"],
+            accessible_by=kwargs["accessible_by"],
+            description=kwargs["description"],
+            knowledge_base_type=kwargs["knowledge_base_type"],
+            file_type=kwargs["file_type"],
+            status="INIT",
+        )
+
+    async def mark_uploaded(self, *, doc_id, doc_url):
+        self.events.append({"action": "mark_uploaded", "doc_id": doc_id, "doc_url": doc_url})
+
+    async def delete_data_query_reservation(self, *, document_id):
+        self.events.append({"action": "cleanup_reservation", "document_id": document_id})
+
+
+class RecordingStorage:
+    def __init__(self, *, failure=None):
+        self.failure = failure
+        self.uploads = []
+
+    async def upload_bytes(self, *, object_key, content, content_type):
+        self.uploads.append(
+            {
+                "object_key": object_key,
+                "content": content,
+                "content_type": content_type,
+            }
+        )
+        if self.failure is not None:
+            raise self.failure
+        return f"https://files.example.com/documents/{object_key}"
+
+
+class RecordingIdGenerator:
+    def __init__(self):
+        self.next_values = [1001, 1002]
+
+    def next_id(self):
+        return self.next_values.pop(0)
+
+
+class RecordingDispatcher:
+    def __init__(self):
+        self.calls = []
+
+    async def dispatch(self, doc_id):
+        self.calls.append(doc_id)
 
 
 @pytest.fixture
@@ -112,6 +213,12 @@ async def client_with_capturing_workflow(
             )
 
         monkeypatch.setattr(document_router, "upload_document", capture_upload)
+        monkeypatch.setattr(
+            document_router,
+            "data_query_upload_lock",
+            lambda **kwargs: RecordingUploadLock(),
+            raising=False,
+        )
         patch_router_dependencies(app, document_router, monkeypatch)
     except (ImportError, AttributeError):
         pass
@@ -119,6 +226,37 @@ async def client_with_capturing_workflow(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client, captured
+
+    config.get_settings.cache_clear()
+
+
+@pytest.fixture
+async def client_with_data_query_runtime(
+    tmp_path,
+    monkeypatch,
+) -> AsyncIterator[tuple[AsyncClient, SimpleNamespace]]:
+    env_file = tmp_path / ".env"
+    env_file.write_text(DOCUMENT_ENV, encoding="utf-8")
+    monkeypatch.setattr(config, "DEFAULT_ENV_FILE", env_file)
+    for line in DOCUMENT_ENV.splitlines():
+        monkeypatch.delenv(line.split("=", 1)[0], raising=False)
+    config.get_settings.cache_clear()
+
+    app = create_app()
+    runtime = SimpleNamespace(
+        repository=RecordingDataQueryRepository(),
+        storage=RecordingStorage(),
+        file_detector=RecordingFileDetector(),
+        id_generator=RecordingIdGenerator(),
+        conversion_dispatcher=RecordingDispatcher(),
+        redis_client=object(),
+    )
+    app.state.settings = config.get_settings()
+    app.state.document_runtime = runtime
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client, runtime
 
     config.get_settings.cache_clear()
 
@@ -380,7 +518,7 @@ async def test_path_like_filename_is_normalized_before_workflow(
 
 
 @pytest.mark.asyncio
-async def test_upload_validation_trims_description_and_accepts_data_query_type(
+async def test_data_query_upload_validation_trims_description_and_defaults_override(
     client_with_capturing_workflow,
 ):
     client, captured = client_with_capturing_workflow
@@ -392,12 +530,356 @@ async def test_upload_validation_trims_description_and_accepts_data_query_type(
             "accessible_by": "team-a",
             "description": "  查询数据源说明  ",
             "knowledgeBaseType": "DATA_QUERY",
+            "tableName": "sales_2026",
+        },
+        files={"file": ("sales.csv", b"name,amount\nalice,10", "text/csv")},
+    )
+
+    assert response.status_code == 202
+    upload = captured["upload"]
+    assert upload.doc_title == "sales.csv"
+    assert upload.description == "查询数据源说明"
+    assert upload.knowledge_base_type == "DATA_QUERY"
+    assert upload.table_name == "sales_2026"
+    assert upload.is_override is False
+
+
+@pytest.mark.asyncio
+async def test_data_query_upload_rejects_missing_table_name_before_workflow(validation_client):
+    client, workflow_calls = validation_client
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DATA_QUERY",
+        },
+        files={"file": ("sales.csv", b"name,amount\nalice,10", "text/csv")},
+    )
+
+    assert_error_response(response, 400, "invalid upload request")
+    assert workflow_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("table_name", ["Sales", "sales-2026", "sales 2026", "销售表"])
+async def test_data_query_upload_rejects_invalid_table_name_before_workflow(
+    validation_client,
+    table_name,
+):
+    client, workflow_calls = validation_client
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DATA_QUERY",
+            "tableName": table_name,
+        },
+        files={"file": ("sales.csv", b"name,amount\nalice,10", "text/csv")},
+    )
+
+    assert_error_response(response, 400, "invalid upload request")
+    assert workflow_calls == []
+
+
+@pytest.mark.asyncio
+async def test_data_query_upload_rejects_table_name_that_exceeds_generated_identifier_limit(
+    validation_client,
+):
+    client, workflow_calls = validation_client
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DATA_QUERY",
+            "tableName": "a" * 48,
+        },
+        files={"file": ("sales.csv", b"name,amount\nalice,10", "text/csv")},
+    )
+
+    assert_error_response(response, 400, "invalid upload request")
+    assert workflow_calls == []
+
+
+@pytest.mark.asyncio
+async def test_document_search_upload_does_not_require_table_name(
+    client_with_capturing_workflow,
+):
+    client, captured = client_with_capturing_workflow
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DOCUMENT_SEARCH",
         },
         files={"file": ("guide.md", b"# hi", "text/markdown")},
     )
 
     assert response.status_code == 202
     upload = captured["upload"]
-    assert upload.doc_title == "guide.md"
-    assert upload.description == "查询数据源说明"
-    assert upload.knowledge_base_type == "DATA_QUERY"
+    assert upload.knowledge_base_type == "DOCUMENT_SEARCH"
+    assert upload.table_name is None
+    assert upload.is_override is False
+
+
+@pytest.mark.asyncio
+async def test_data_query_non_spreadsheet_upload_returns_415_before_persistence(
+    client_with_data_query_runtime,
+    monkeypatch,
+):
+    from app.modules.document import router as document_router
+
+    lock = RecordingUploadLock()
+    monkeypatch.setattr(
+        document_router,
+        "data_query_upload_lock",
+        lambda **kwargs: lock,
+        raising=False,
+    )
+    client, runtime = client_with_data_query_runtime
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DATA_QUERY",
+            "tableName": "sales",
+        },
+        files={"file": ("guide.md", b"# hi", "text/markdown")},
+    )
+
+    assert_error_response(response, 415, "unsupported file type")
+    assert runtime.repository.events == []
+    assert runtime.storage.uploads == []
+    assert runtime.conversion_dispatcher.calls == []
+    assert lock.acquire_calls == []
+
+
+@pytest.mark.asyncio
+async def test_data_query_upload_lock_busy_returns_409_before_persistence(
+    client_with_data_query_runtime,
+    monkeypatch,
+):
+    from app.modules.document import router as document_router
+
+    lock = RecordingUploadLock(acquired=False)
+    monkeypatch.setattr(
+        document_router,
+        "data_query_upload_lock",
+        lambda **kwargs: lock,
+        raising=False,
+    )
+    client, runtime = client_with_data_query_runtime
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DATA_QUERY",
+            "tableName": "sales",
+        },
+        files={"file": ("sales.csv", b"name,amount\nalice,10", "text/csv")},
+    )
+
+    assert_error_response(response, 409, "data query upload busy")
+    assert runtime.repository.events == []
+    assert runtime.storage.uploads == []
+    assert runtime.conversion_dispatcher.calls == []
+    assert lock.acquire_calls == [{"blocking": False}]
+    assert lock.released is False
+
+
+@pytest.mark.asyncio
+async def test_data_query_upload_lock_failure_returns_503_before_persistence(
+    client_with_data_query_runtime,
+    monkeypatch,
+):
+    from app.modules.document import router as document_router
+
+    lock = RecordingUploadLock(failure=RuntimeError("redis down"))
+    monkeypatch.setattr(
+        document_router,
+        "data_query_upload_lock",
+        lambda **kwargs: lock,
+        raising=False,
+    )
+    client, runtime = client_with_data_query_runtime
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DATA_QUERY",
+            "tableName": "sales",
+        },
+        files={"file": ("sales.csv", b"name,amount\nalice,10", "text/csv")},
+    )
+
+    assert_error_response(response, 503, "data query upload lock unavailable")
+    assert runtime.repository.events == []
+    assert runtime.storage.uploads == []
+    assert runtime.conversion_dispatcher.calls == []
+    assert lock.acquire_calls == [{"blocking": False}]
+    assert lock.released is False
+
+
+@pytest.mark.asyncio
+async def test_duplicate_data_query_table_name_returns_409_before_storage(
+    client_with_data_query_runtime,
+    monkeypatch,
+):
+    from app.modules.document import router as document_router
+
+    lock = RecordingUploadLock()
+    monkeypatch.setattr(
+        document_router,
+        "data_query_upload_lock",
+        lambda **kwargs: lock,
+        raising=False,
+    )
+    client, runtime = client_with_data_query_runtime
+    runtime.repository = RecordingDataQueryRepository(conflict=True)
+    runtime.repository.conflict = True
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DATA_QUERY",
+            "tableName": "sales",
+        },
+        files={"file": ("sales.csv", b"name,amount\nalice,10", "text/csv")},
+    )
+
+    assert_error_response(response, 409, "table name conflict")
+    assert runtime.repository.events[0]["action"] == "reserve"
+    assert runtime.repository.events[0]["is_override"] is False
+    assert runtime.storage.uploads == []
+    assert runtime.conversion_dispatcher.calls == []
+    assert lock.released is True
+
+
+@pytest.mark.asyncio
+async def test_data_query_override_intent_reaches_reservation_workflow(
+    client_with_data_query_runtime,
+    monkeypatch,
+):
+    from app.modules.document import router as document_router
+
+    lock = RecordingUploadLock()
+    monkeypatch.setattr(
+        document_router,
+        "data_query_upload_lock",
+        lambda **kwargs: lock,
+        raising=False,
+    )
+    client, runtime = client_with_data_query_runtime
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DATA_QUERY",
+            "tableName": "sales",
+            "isOverride": "true",
+        },
+        files={"file": ("sales.csv", b"name,amount\nalice,10", "text/csv")},
+    )
+
+    assert response.status_code == 202
+    reserve_event = runtime.repository.events[0]
+    assert reserve_event["action"] == "reserve"
+    assert reserve_event["namespace"] == "alice"
+    assert reserve_event["table_name"] == "sales"
+    assert reserve_event["is_override"] is True
+    assert reserve_event["extension"] == {"tableName": "sales", "isOverride": True}
+    assert runtime.repository.events[1]["action"] == "mark_uploaded"
+    assert runtime.conversion_dispatcher.calls == [1001]
+    assert lock.released is True
+
+
+@pytest.mark.asyncio
+async def test_data_query_original_storage_failure_deletes_new_reservation(
+    client_with_data_query_runtime,
+    monkeypatch,
+):
+    from app.modules.document import router as document_router
+
+    lock = RecordingUploadLock()
+    monkeypatch.setattr(
+        document_router,
+        "data_query_upload_lock",
+        lambda **kwargs: lock,
+        raising=False,
+    )
+    client, runtime = client_with_data_query_runtime
+    runtime.storage = RecordingStorage(failure=RuntimeError("minio failed"))
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DATA_QUERY",
+            "tableName": "sales",
+        },
+        files={"file": ("sales.csv", b"name,amount\nalice,10", "text/csv")},
+    )
+
+    assert_error_response(response, 502, "document storage failed")
+    assert [event["action"] for event in runtime.repository.events] == [
+        "reserve",
+        "cleanup_reservation",
+    ]
+    assert runtime.repository.events[1]["document_id"] == 1001
+    assert runtime.conversion_dispatcher.calls == []
+    assert lock.released is True
+
+
+@pytest.mark.asyncio
+async def test_data_query_upload_release_failure_after_success_does_not_mask_accepted_upload(
+    client_with_data_query_runtime,
+    monkeypatch,
+):
+    from app.modules.document import router as document_router
+
+    lock = RecordingUploadLock(release_failure=RuntimeError("redis release failed"))
+    monkeypatch.setattr(
+        document_router,
+        "data_query_upload_lock",
+        lambda **kwargs: lock,
+        raising=False,
+    )
+    client, runtime = client_with_data_query_runtime
+
+    response = await client.post(
+        "/api/v1/document/upload",
+        data={
+            "upload_user": "alice",
+            "accessible_by": "team-a",
+            "knowledgeBaseType": "DATA_QUERY",
+            "tableName": "sales",
+        },
+        files={"file": ("sales.csv", b"name,amount\nalice,10", "text/csv")},
+    )
+
+    assert response.status_code == 202
+    assert [event["action"] for event in runtime.repository.events] == [
+        "reserve",
+        "mark_uploaded",
+    ]
+    assert runtime.conversion_dispatcher.calls == [1001]
+    assert lock.acquire_calls == [{"blocking": False}]
+    assert lock.released is True

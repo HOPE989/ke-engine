@@ -132,6 +132,36 @@ def _load_knowledge_base_metadata_migration(monkeypatch):
     return recorder
 
 
+def _load_data_query_spreadsheet_ingestion_migration(monkeypatch):
+    versions_dir = BACKEND_DIR / "alembic" / "versions"
+    migration_files = list(versions_dir.glob("*add_data_query_spreadsheet_ingestion.py"))
+    assert len(migration_files) == 1
+
+    spec = importlib.util.spec_from_file_location(
+        "data_query_spreadsheet_ingestion_migration",
+        migration_files[0],
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    recorder = MigrationRecorder()
+    monkeypatch.setattr(module, "op", recorder)
+    module.upgrade()
+    return recorder
+
+
+def _constraint_column_names(constraint):
+    bound_names = tuple(constraint.columns.keys())
+    if bound_names:
+        return bound_names
+    return tuple(
+        getattr(column, "name", column)
+        for column in getattr(constraint, "_pending_colargs", ())
+    )
+
+
 def test_knowledge_document_migration_defines_exact_columns(monkeypatch):
     recorder = _load_knowledge_document_migration(monkeypatch)
 
@@ -333,3 +363,116 @@ def test_knowledge_base_metadata_migration_adds_columns_constraints_and_index(mo
         for index in recorder.indexes
     }[("knowledge_document", ("knowledge_base_type",))]
     assert recorder.executed_sql == []
+
+
+def test_data_query_migration_adds_stored_status_and_document_extension(monkeypatch):
+    recorder = _load_data_query_spreadsheet_ingestion_migration(monkeypatch)
+
+    assert {
+        "name": "ck_knowledge_document_status",
+        "table_name": "knowledge_document",
+        "kwargs": {"type_": "check"},
+    } in recorder.dropped_constraints
+
+    status_constraints = [
+        constraint
+        for constraint in recorder.check_constraints
+        if constraint["name"] == "ck_knowledge_document_status"
+    ]
+    assert len(status_constraints) == 1
+    status_sql = status_constraints[0]["condition"]
+    for status in [
+        "INIT",
+        "UPLOADED",
+        "CONVERTING",
+        "CONVERTED",
+        "CHUNKED",
+        "VECTOR_STORED",
+        "STORED",
+    ]:
+        assert status in status_sql
+
+    added_columns = {
+        item["column"].name: item["column"]
+        for item in recorder.added_columns
+        if item["table_name"] == "knowledge_document"
+    }
+    assert isinstance(added_columns["extension"].type, postgresql.JSONB)
+    assert added_columns["extension"].nullable is False
+    assert "{}" in str(added_columns["extension"].server_default.arg)
+
+
+def test_data_query_migration_creates_table_meta_schema(monkeypatch):
+    recorder = _load_data_query_spreadsheet_ingestion_migration(monkeypatch)
+
+    elements = recorder.tables["table_meta"]
+    columns = {
+        element.name: element
+        for element in elements
+        if isinstance(element, sa.Column)
+    }
+
+    assert isinstance(columns["id"].type, sa.BigInteger)
+    assert columns["id"].primary_key is True
+    assert isinstance(columns["namespace"].type, sa.String)
+    assert columns["namespace"].type.length == 255
+    assert columns["namespace"].nullable is False
+    assert isinstance(columns["document_id"].type, sa.BigInteger)
+    assert columns["document_id"].nullable is False
+    foreign_keys = list(columns["document_id"].foreign_keys)
+    assert len(foreign_keys) == 1
+    assert foreign_keys[0].target_fullname == "knowledge_document.doc_id"
+    assert isinstance(columns["table_name"].type, sa.String)
+    assert columns["table_name"].type.length == 255
+    assert columns["table_name"].nullable is False
+    assert isinstance(columns["description"].type, sa.Text)
+    assert columns["description"].nullable is False
+    assert isinstance(columns["create_sql"].type, sa.Text)
+    assert columns["create_sql"].nullable is True
+    assert isinstance(columns["columns_info"].type, postgresql.JSONB)
+    assert columns["columns_info"].nullable is True
+
+    for timestamp_column in [columns["created_at"], columns["updated_at"]]:
+        assert isinstance(timestamp_column.type, sa.DateTime)
+        assert timestamp_column.type.timezone is True
+        assert timestamp_column.server_default is not None
+
+    unique_constraints = {
+        _constraint_column_names(constraint)
+        for constraint in elements
+        if isinstance(constraint, sa.UniqueConstraint)
+    }
+    assert ("namespace", "table_name") in unique_constraints
+    assert ("document_id",) in unique_constraints
+
+    indexes_by_columns = {
+        (index["table_name"], index["columns"]): index["name"]
+        for index in recorder.indexes
+    }
+    assert indexes_by_columns[("table_meta", ("namespace",))]
+    assert indexes_by_columns[("table_meta", ("document_id",))]
+
+
+def test_document_models_include_data_query_spreadsheet_schema_fields():
+    from app.modules.document.models import DocumentStatus, KnowledgeDocument, TableMeta
+
+    assert DocumentStatus.STORED.value == "STORED"
+    document_columns = KnowledgeDocument.__table__.c
+    assert isinstance(document_columns.extension.type, postgresql.JSONB)
+    assert document_columns.extension.nullable is False
+    status_constraints = [
+        constraint
+        for constraint in KnowledgeDocument.__table__.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+        and constraint.name == "ck_knowledge_document_status"
+    ]
+    assert len(status_constraints) == 1
+    assert "STORED" in str(status_constraints[0].sqltext)
+
+    table_meta_columns = TableMeta.__table__.c
+    assert isinstance(table_meta_columns.namespace.type, sa.String)
+    assert isinstance(table_meta_columns.document_id.type, sa.BigInteger)
+    assert isinstance(table_meta_columns.table_name.type, sa.String)
+    assert isinstance(table_meta_columns.description.type, sa.Text)
+    assert isinstance(table_meta_columns.create_sql.type, sa.Text)
+    assert isinstance(table_meta_columns.columns_info.type, postgresql.JSONB)
