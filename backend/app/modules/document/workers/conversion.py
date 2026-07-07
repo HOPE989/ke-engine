@@ -123,7 +123,7 @@ async def run_locked_document_conversion(
 
     这里是 Kafka message 的文档执行热路径，只消费 conversion context 暴露的长生命周期
     资源视图：repository 负责短生命周期 DB session，storage/MinerU/image_describer
-    负责实际转换能力。
+    负责实际转换能力，converter_factory 负责按文件类型分发具体转换器。
     """
 
     from app.modules.document.processing import convert_uploaded_document
@@ -135,4 +135,5 @@ async def run_locked_document_conversion(
         storage=conversion_context.storage,
         mineru_client=conversion_context.mineru_client,
         image_describer=conversion_context.image_describer,
+        converter_factory=conversion_context.converter_factory,
     )

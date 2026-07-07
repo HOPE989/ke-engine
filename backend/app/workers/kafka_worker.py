@@ -124,6 +124,7 @@ class DocumentConversionContext:
     storage: Any
     mineru_client: Any
     image_describer: Any
+    converter_factory: Any
     lock_expire_seconds: int
 
 
@@ -168,16 +169,18 @@ async def create_kafka_worker_runtime(
     repository = _create_worker_repository(session_factory)
     redis_client = _create_worker_redis_client(stack=stack, settings=settings)
 
-    # 1. 转换 context 暴露 DB/Redis/MinIO/MinerU/图片模型资源视图。
+    # 1. 转换 context 暴露 DB/Redis/MinIO/MinerU/图片模型/factory 资源视图。
     storage = await _maybe_await(_create_worker_document_storage(settings=settings))
     mineru_client = _create_worker_mineru_client(stack=stack, settings=settings)
     image_describer = _create_worker_image_describer(stack=stack, settings=settings)
+    converter_factory = _create_document_converter_factory()
     conversion = DocumentConversionContext(
         repository=repository,
         redis_client=redis_client,
         storage=storage,
         mineru_client=mineru_client,
         image_describer=image_describer,
+        converter_factory=converter_factory,
         lock_expire_seconds=settings.document_convert_lock_expire_seconds,
     )
 
@@ -244,6 +247,14 @@ def _create_worker_image_describer(*, stack: RuntimeResourceStack, settings: Any
     _push_named_cleanup(stack, image_describer, "aclose")
     _push_named_cleanup(stack, image_describer, "close")
     return image_describer
+
+
+def _create_document_converter_factory() -> Any:
+    """在 Kafka worker 启动期创建文档转换器工厂。"""
+
+    from app.modules.document.converters import create_default_document_converter_factory
+
+    return create_default_document_converter_factory()
 
 
 def _create_worker_embedding_model(*, settings: Any) -> Any:

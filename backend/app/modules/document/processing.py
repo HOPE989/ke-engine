@@ -7,17 +7,7 @@ from app.modules.document.errors import (
     DocumentStateConflict,
     DocumentStateRollbackFailed,
 )
-from app.modules.document.file_types import DocumentFileType
 from app.modules.document.models import DocumentStatus
-from app.modules.document.schemas import ValidatedDocumentUpload
-from app.modules.document.storage import original_object_key
-from app.modules.document.workflow import convert_pdf_document
-
-
-def _file_type_value(file_type: DocumentFileType | str) -> str:
-    if isinstance(file_type, DocumentFileType):
-        return file_type.value
-    return str(file_type)
 
 
 async def convert_uploaded_document(
@@ -26,9 +16,14 @@ async def convert_uploaded_document(
     document_repository: Any,
     storage: Any,
     mineru_client: Any,
+    converter_factory: Any,
     image_describer: Any | None = None,
 ) -> None:
-    """把一个 UPLOADED 文档自动解析推进到 CONVERTED。"""
+    """把一个 UPLOADED 文档自动解析推进到 CONVERTED。
+
+    ``converter_factory`` 由 worker 进程启动期创建并注入，转换热路径只使用
+    已装配好的 factory，不负责初始化 converter 注册表。
+    """
 
     document = await document_repository.get_document(doc_id)
     if document is None or document.status != DocumentStatus.UPLOADED.value:
@@ -44,6 +39,7 @@ async def convert_uploaded_document(
             document=document,
             storage=storage,
             mineru_client=mineru_client,
+            converter_factory=converter_factory,
             image_describer=image_describer,
         )
     except DocumentConversionFailed:
@@ -66,6 +62,7 @@ async def convert_document_with_lock(
     document_repository: Any,
     storage: Any,
     mineru_client: Any,
+    converter_factory: Any,
     image_describer: Any | None = None,
     lock: Any,
 ) -> None:
@@ -79,6 +76,7 @@ async def convert_document_with_lock(
             document_repository=document_repository,
             storage=storage,
             mineru_client=mineru_client,
+            converter_factory=converter_factory,
             image_describer=image_describer,
         )
     finally:
@@ -90,38 +88,11 @@ async def _convert_document_content(
     document: Any,
     storage: Any,
     mineru_client: Any,
+    converter_factory: Any,
     image_describer: Any | None = None,
 ) -> str:
-    file_type = _file_type_value(document.file_type)
-    if file_type == DocumentFileType.PLAIN_TEXT.value:
-        if not document.doc_url:
-            raise DocumentConversionFailed()
-        return document.doc_url
-
-    if file_type != DocumentFileType.PDF.value:
-        raise DocumentConversionFailed()
-
-    object_key = original_object_key(
-        doc_id=document.doc_id,
-        safe_filename=document.doc_title,
-    )
-    try:
-        content = await storage.download_bytes(object_key=object_key)
-    except Exception as exc:
-        raise DocumentConversionFailed() from exc
-
-    upload = ValidatedDocumentUpload(
-        doc_title=document.doc_title,
-        safe_filename=document.doc_title,
-        upload_user=document.upload_user,
-        accessible_by=document.accessible_by,
-        content_type="application/pdf",
-        content=content,
-        size_bytes=len(content),
-    )
-    return await convert_pdf_document(
-        doc_id=document.doc_id,
-        upload=upload,
+    return await converter_factory.convert_document(
+        document=document,
         storage=storage,
         mineru_client=mineru_client,
         image_describer=image_describer,

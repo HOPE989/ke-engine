@@ -128,7 +128,7 @@ async def test_local_miner_requests_file_parse_zip_and_sends_optional_bearer_tok
             "post",
             "/file_parse",
             {
-                "files": {"file": ("guide.pdf", b"%PDF-1.7", "application/pdf")},
+                "files": {"files": ("guide.pdf", b"%PDF-1.7")},
                 "data": {"output_format": "zip", "return_images": True},
                 "headers": {"Authorization": "Bearer local-token"},
             },

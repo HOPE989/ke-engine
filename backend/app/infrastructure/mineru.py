@@ -66,10 +66,10 @@ class LocalMiner:
     api_key: str | None = None
 
     async def request_zip(self, *, filename: str, content: bytes) -> bytes:
-        """提交 PDF 内容并返回 MinerU ZIP bytes。"""
+        """提交文档内容并返回 MinerU ZIP bytes。"""
 
         request_kwargs: dict[str, Any] = {
-            "files": {"file": (filename, content, "application/pdf")},
+            "files": {"files": (filename, content)},
             "data": {
                 "output_format": "zip",
                 "return_images": True,

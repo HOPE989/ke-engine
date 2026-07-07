@@ -95,6 +95,12 @@ class FakeRepository:
         self.document.converted_doc_url = converted_doc_url
 
 
+def make_converter_factory():
+    from app.modules.document.converters import create_default_document_converter_factory
+
+    return create_default_document_converter_factory()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "case",
@@ -137,6 +143,7 @@ async def test_pdf_conversion_failures_restore_uploaded(case):
             document_repository=repository,
             storage=storage,
             mineru_client=mineru_client,
+            converter_factory=make_converter_factory(),
         )
 
     assert repository.document.status == DocumentStatus.UPLOADED.value
@@ -175,6 +182,7 @@ async def test_pdf_conversion_image_failures_mark_converted(case):
         document_repository=repository,
         storage=storage,
         mineru_client=mineru_client,
+        converter_factory=make_converter_factory(),
     )
 
     assert repository.document.status == DocumentStatus.CONVERTED.value
@@ -202,6 +210,7 @@ async def test_conversion_rollback_failure_preserves_converting_state():
             document_repository=repository,
             storage=FakeStorage(),
             mineru_client=FakeMinerUClient(zip_bytes=b"not a zip"),
+            converter_factory=make_converter_factory(),
         )
 
     assert repository.document.status == DocumentStatus.CONVERTING.value

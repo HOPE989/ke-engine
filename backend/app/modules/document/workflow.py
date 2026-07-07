@@ -45,7 +45,7 @@ from app.modules.document.storage import (
 logger = logging.getLogger(__name__)
 
 
-async def convert_pdf_document(
+async def convert_mineru_document(
     *,
     doc_id: int,
     upload: Any,
@@ -53,7 +53,7 @@ async def convert_pdf_document(
     mineru_client: Any,
     image_describer: Any | None = None,
 ) -> str:
-    """转换 PDF 文件，上传图片和最终 Markdown，并返回 Markdown URL。"""
+    """调用 MinerU 转换文件，上传图片和最终 Markdown，并返回 Markdown URL。"""
 
     try:
         # 1. 请求 MinerU 产出 ZIP，后续所有解析都基于这个归档。
@@ -165,6 +165,25 @@ async def convert_pdf_document(
         raise
     except Exception as exc:
         raise DocumentConversionFailed() from exc
+
+
+async def convert_pdf_document(
+    *,
+    doc_id: int,
+    upload: Any,
+    storage: Any,
+    mineru_client: Any,
+    image_describer: Any | None = None,
+) -> str:
+    """转换 PDF 文件，上传图片和最终 Markdown，并返回 Markdown URL。"""
+
+    return await convert_mineru_document(
+        doc_id=doc_id,
+        upload=upload,
+        storage=storage,
+        mineru_client=mineru_client,
+        image_describer=image_describer,
+    )
 
 
 async def upload_document(
