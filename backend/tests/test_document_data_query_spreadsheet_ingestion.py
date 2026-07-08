@@ -1,4 +1,5 @@
 from io import BytesIO
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -36,6 +37,57 @@ def test_excel_parser_accepts_one_data_sheet_and_ignores_empty_extra_sheets():
     assert dataset.original_sheet_name == "Sales"
     assert dataset.headers == ["Customer", "Amount"]
     assert dataset.rows == [["Alice", "10"], ["Bob", ""]]
+
+
+def test_excel_parser_accepts_legacy_xls_by_filename(monkeypatch):
+    from app.modules.document.data_query_spreadsheet import parse_data_query_spreadsheet
+    from app.modules.document.file_types import DocumentFileType
+
+    class FakeSheet:
+        name = "Legacy Sales"
+        nrows = 3
+
+        def row_values(self, row_index):
+            return [
+                ["Customer", "Amount"],
+                ["Alice", 10],
+                ["Bob", ""],
+            ][row_index]
+
+    class FakeWorkbook:
+        def sheets(self):
+            return [FakeSheet()]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "xlrd",
+        SimpleNamespace(open_workbook=lambda *, file_contents: FakeWorkbook()),
+    )
+
+    dataset = parse_data_query_spreadsheet(
+        file_type=DocumentFileType.EXCEL.value,
+        content=b"legacy-xls-bytes",
+        filename="sales.xls",
+    )
+
+    assert dataset.original_sheet_name == "Legacy Sales"
+    assert dataset.headers == ["Customer", "Amount"]
+    assert dataset.rows == [["Alice", "10"], ["Bob", ""]]
+
+
+def test_excel_parser_rejects_invalid_xlsx_as_domain_error():
+    from app.modules.document.data_query_spreadsheet import (
+        DataQuerySpreadsheetInvalid,
+        parse_data_query_spreadsheet,
+    )
+    from app.modules.document.file_types import DocumentFileType
+
+    with pytest.raises(DataQuerySpreadsheetInvalid, match="invalid xlsx workbook"):
+        parse_data_query_spreadsheet(
+            file_type=DocumentFileType.EXCEL.value,
+            content=b"not-a-zip-xlsx",
+            filename="sales.xlsx",
+        )
 
 
 @pytest.mark.parametrize(

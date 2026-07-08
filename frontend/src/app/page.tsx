@@ -52,6 +52,15 @@ const supportedUploadAccept = [
   "text/markdown",
   "text/csv"
 ].join(",");
+const dataQueryUploadAccept = [
+  ".xlsx",
+  ".xls",
+  ".csv",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv"
+].join(",");
+const dataQueryTableNamePattern = "^[a-z0-9_]+$";
 
 function documentEndpoint(docId: string) {
   return `/api/v1/document/${docId}`;
@@ -95,8 +104,11 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [uploadUser, setUploadUser] = useState("local-tester");
   const [accessibleBy, setAccessibleBy] = useState("local");
+  const [description, setDescription] = useState("");
   const [knowledgeBaseType, setKnowledgeBaseType] =
     useState<KnowledgeBaseType>("DOCUMENT_SEARCH");
+  const [tableName, setTableName] = useState("");
+  const [isOverride, setIsOverride] = useState(false);
   const [docId, setDocId] = useState("");
   const [chunkSize, setChunkSize] = useState(1000);
   const [overlap, setOverlap] = useState(100);
@@ -117,9 +129,13 @@ export default function Home() {
     return `${file.name} · ${formatFileSize(file.size)}`;
   }, [file]);
 
+  const isDataQueryUpload = knowledgeBaseType === "DATA_QUERY";
   const normalizedDocId = docId.trim();
+  const normalizedTableName = tableName.trim();
+  const tableNameIsValid = /^[a-z0-9_]+$/.test(normalizedTableName);
   const canQueryDocument = normalizedDocId.length > 0 && !isQuerying;
   const canChunkDocument =
+    !isDataQueryUpload &&
     normalizedDocId.length > 0 &&
     Number.isInteger(chunkSize) &&
     Number.isInteger(overlap) &&
@@ -127,7 +143,8 @@ export default function Home() {
     overlap >= 0 &&
     overlap < chunkSize &&
     !isChunking;
-  const canEmbedStoreDocument = normalizedDocId.length > 0 && !isEmbedding;
+  const canEmbedStoreDocument =
+    !isDataQueryUpload && normalizedDocId.length > 0 && !isEmbedding;
 
   function showResult<T>(
     label: string,
@@ -155,7 +172,15 @@ export default function Home() {
     setDocId("");
 
     if (!file) {
-      setError("请选择要上传的 PDF、Word、Markdown、文本、Excel 或 CSV 文件。");
+      setError(
+        isDataQueryUpload
+          ? "请选择要上传的 Excel 或 CSV 文件。"
+          : "请选择要上传的 PDF、Word、Markdown、文本、Excel 或 CSV 文件。"
+      );
+      return;
+    }
+    if (isDataQueryUpload && !tableNameIsValid) {
+      setError("DATA_QUERY 上传必须填写 tableName，仅允许小写字母、数字和下划线。");
       return;
     }
 
@@ -163,7 +188,12 @@ export default function Home() {
     formData.append("file", file);
     formData.append("upload_user", uploadUser);
     formData.append("accessible_by", accessibleBy);
+    formData.append("description", description);
     formData.append("knowledgeBaseType", knowledgeBaseType);
+    if (isDataQueryUpload) {
+      formData.append("tableName", normalizedTableName);
+      formData.append("isOverride", String(isOverride));
+    }
 
     setIsUploading(true);
     try {
@@ -180,7 +210,14 @@ export default function Home() {
           file: file.name,
           upload_user: uploadUser,
           accessible_by: accessibleBy,
-          knowledgeBaseType
+          description,
+          knowledgeBaseType,
+          ...(isDataQueryUpload
+            ? {
+                tableName: normalizedTableName,
+                isOverride
+              }
+            : {})
         },
         payload,
         result.ok,
@@ -315,14 +352,17 @@ export default function Home() {
                   <input
                     className="block w-full cursor-pointer rounded-md border border-gray-300 bg-white text-sm text-gray-700 file:mr-4 file:border-0 file:bg-gray-900 file:px-4 file:py-2.5 file:text-sm file:font-medium file:text-white hover:file:bg-gray-700"
                     type="file"
-                    accept={supportedUploadAccept}
+                    key={knowledgeBaseType}
+                    accept={isDataQueryUpload ? dataQueryUploadAccept : supportedUploadAccept}
                     onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                   />
                   <span className="mt-2 block text-xs text-gray-500">
                     {selectedFileLabel}
                   </span>
                   <span className="mt-1 block text-xs text-gray-500">
-                    支持 PDF、Word、Markdown、TXT、Excel、CSV。
+                    {isDataQueryUpload
+                      ? "DATA_QUERY 仅支持 Excel、CSV，上传后由 worker 写入关系表。"
+                      : "支持 PDF、Word、Markdown、TXT、Excel、CSV。"}
                   </span>
                 </label>
 
@@ -359,19 +399,70 @@ export default function Home() {
                   <select
                     className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                     value={knowledgeBaseType}
-                    onChange={(event) =>
-                      setKnowledgeBaseType(event.target.value as KnowledgeBaseType)
-                    }
+                    onChange={(event) => {
+                      setKnowledgeBaseType(event.target.value as KnowledgeBaseType);
+                      setFile(null);
+                    }}
                     required
                   >
                     <option value="DOCUMENT_SEARCH">DOCUMENT_SEARCH</option>
                     <option value="DATA_QUERY">DATA_QUERY</option>
                   </select>
                   <span className="mt-2 block text-xs leading-5 text-gray-500">
-                    当前 Excel/CSV 文档搜索链路请选择 DOCUMENT_SEARCH；DATA_QUERY
-                    预留给后续结构化入库链路。
+                    DOCUMENT_SEARCH 会进入转换、切分、向量入库；DATA_QUERY 会把
+                    Excel/CSV 异步导入关系表，成功状态为 STORED。
                   </span>
                 </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-gray-800">
+                    description
+                  </span>
+                  <textarea
+                    className="min-h-24 w-full resize-y rounded-md border border-gray-300 px-3 py-2.5 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    placeholder="可选：描述这份文档或数据表"
+                  />
+                </label>
+
+                {isDataQueryUpload ? (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
+                    <div className="grid gap-4">
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-gray-800">
+                          tableName
+                        </span>
+                        <input
+                          className="w-full rounded-md border border-amber-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+                          value={tableName}
+                          onChange={(event) => setTableName(event.target.value)}
+                          placeholder="sales_2026"
+                          pattern={dataQueryTableNamePattern}
+                          required
+                        />
+                        <span className="mt-2 block text-xs leading-5 text-amber-800">
+                          必填；同一 upload_user 下唯一，仅允许小写字母、数字和下划线。
+                        </span>
+                      </label>
+
+                      <label className="flex items-start gap-3 text-sm text-gray-800">
+                        <input
+                          className="mt-1 h-4 w-4 rounded border-amber-300 text-amber-700 focus:ring-amber-200"
+                          type="checkbox"
+                          checked={isOverride}
+                          onChange={(event) => setIsOverride(event.target.checked)}
+                        />
+                        <span>
+                          覆盖同名表
+                          <span className="mt-1 block text-xs leading-5 text-amber-800">
+                            勾选后会以 isOverride=true 上传，后端会删除同名旧表后重新导入。
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
 
                 <button
                   className="inline-flex h-11 w-full items-center justify-center rounded-md bg-gray-950 px-4 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-400 sm:w-auto"
@@ -489,7 +580,8 @@ export default function Home() {
                   {isChunking ? "切分中..." : "触发切分"}
                 </button>
                 <p className="text-xs leading-5 text-gray-500">
-                  后端要求文档状态为 CONVERTED；如果返回 409，先等待转换 worker 完成后再查询重试。
+                  仅 DOCUMENT_SEARCH 文档会进入切分。DATA_QUERY spreadsheet
+                  成功后状态为 STORED，不需要调用此接口。
                 </p>
               </div>
             </section>
@@ -531,7 +623,8 @@ export default function Home() {
                   {isEmbedding ? "派发中..." : "派发向量入库"}
                 </button>
                 <p className="text-xs leading-5 text-gray-500">
-                  后端要求文档已完成切分；如果返回 409，先确认切分接口成功后再重试。
+                  仅 DOCUMENT_SEARCH 文档切分完成后需要派发向量入库；DATA_QUERY
+                  不会进入向量存储阶段。
                 </p>
               </div>
             </section>
@@ -565,7 +658,7 @@ export default function Home() {
                 ) : null}
                 {!error && !response ? (
                   <p className="text-gray-400">
-                    执行上传、查询或切分后，这里会显示后端 APIResponse。
+                    执行上传、查询、切分或向量入库后，这里会显示后端 APIResponse。
                   </p>
                 ) : null}
               </div>

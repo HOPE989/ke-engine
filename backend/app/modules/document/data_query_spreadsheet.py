@@ -10,6 +10,8 @@ DATA_QUERY 的 Excel/CSV 不走文档检索链路，而是被解释为结构化�
 from __future__ import annotations
 
 import csv
+import logging
+import time
 from dataclasses import dataclass
 from io import BytesIO, StringIO
 from typing import Any
@@ -23,6 +25,9 @@ from app.modules.document.data_query_identifiers import (
 from app.modules.document.file_types import DocumentFileType
 from app.modules.document.errors import DataQueryIngestionFailed
 from app.modules.document.storage import original_object_key
+
+
+logger = logging.getLogger(__name__)
 
 
 class DataQuerySpreadsheetInvalid(Exception):
@@ -58,7 +63,12 @@ class DataQueryTablePlan:
     rows: list[list[str]]
 
 
-def parse_data_query_spreadsheet(*, file_type: str, content: bytes) -> ParsedDataQueryTable:
+def parse_data_query_spreadsheet(
+    *,
+    file_type: str,
+    content: bytes,
+    filename: str = "",
+) -> ParsedDataQueryTable:
     """将 Excel 或 CSV 字节解析为唯一的表形数据集。
 
     Excel 必须只有一个包含表头和数据行的有效 sheet；完全空 sheet 会被忽略。
@@ -66,7 +76,7 @@ def parse_data_query_spreadsheet(*, file_type: str, content: bytes) -> ParsedDat
     """
 
     if file_type == DocumentFileType.EXCEL.value:
-        return _parse_excel(content)
+        return _parse_excel(content=content, filename=filename)
     if file_type == DocumentFileType.CSV.value:
         return _parse_csv(content)
     raise DataQuerySpreadsheetInvalid("unsupported spreadsheet file type")
@@ -87,22 +97,71 @@ async def ingest_data_query_spreadsheet_document(
     4. 委托 repository 在数据库事务中创建表、插入数据并推进文档状态。
     """
 
+    started_at = time.perf_counter()
+    logger.info(
+        "data query ingestion started doc_id=%s title=%s file_type=%s status=%s",
+        document.doc_id,
+        document.doc_title,
+        document.file_type,
+        document.status,
+    )
+
     # 1. table_meta 是上传阶段的表名占位；worker 只消费属于当前 doc_id 的占位。
+    stage_started_at = time.perf_counter()
     table_meta = await document_repository.get_table_meta_by_document(document_id=document.doc_id)
     if table_meta is None or table_meta.document_id != document.doc_id:
         raise DataQueryIngestionFailed()
+    logger.info(
+        "data query table meta loaded doc_id=%s namespace=%s table_name=%s elapsed_ms=%.2f",
+        document.doc_id,
+        table_meta.namespace,
+        table_meta.table_name,
+        (time.perf_counter() - stage_started_at) * 1000,
+    )
 
     # 2. DATA_QUERY 使用原始上传文件作为数据源，不依赖 converted_doc_url。
     object_key = original_object_key(doc_id=document.doc_id, safe_filename=document.doc_title)
+    stage_started_at = time.perf_counter()
     content = await storage.download_bytes(object_key=object_key)
+    logger.info(
+        "data query source downloaded doc_id=%s object_key=%s size_bytes=%s elapsed_ms=%.2f",
+        document.doc_id,
+        object_key,
+        len(content),
+        (time.perf_counter() - stage_started_at) * 1000,
+    )
 
     # 3. 解析和计划构建都不落库，便于任何失败在进入事务前直接向外传播。
-    dataset = parse_data_query_spreadsheet(file_type=document.file_type, content=content)
+    stage_started_at = time.perf_counter()
+    dataset = parse_data_query_spreadsheet(
+        file_type=document.file_type,
+        content=content,
+        filename=document.doc_title,
+    )
+    logger.info(
+        "data query spreadsheet parsed doc_id=%s sheet=%s columns=%s rows=%s elapsed_ms=%.2f",
+        document.doc_id,
+        dataset.original_sheet_name,
+        len(dataset.headers),
+        len(dataset.rows),
+        (time.perf_counter() - stage_started_at) * 1000,
+    )
+    stage_started_at = time.perf_counter()
     plan = build_data_query_table_plan(
         namespace=table_meta.namespace,
         table_name=table_meta.table_name,
         dataset=dataset,
     )
+    logger.info(
+        "data query table plan built doc_id=%s physical_table=%s columns=%s rows=%s "
+        "elapsed_ms=%.2f",
+        document.doc_id,
+        plan.physical_table_name,
+        len(plan.column_names),
+        len(plan.rows),
+        (time.perf_counter() - stage_started_at) * 1000,
+    )
+    stage_started_at = time.perf_counter()
     await document_repository.import_data_query_table(
         document_id=document.doc_id,
         physical_table_name=plan.physical_table_name,
@@ -110,6 +169,16 @@ async def ingest_data_query_spreadsheet_document(
         columns_info=plan.columns_info,
         column_names=plan.column_names,
         rows=plan.rows,
+    )
+    logger.info(
+        "data query table imported doc_id=%s physical_table=%s columns=%s rows=%s "
+        "db_elapsed_ms=%.2f total_elapsed_ms=%.2f",
+        document.doc_id,
+        plan.physical_table_name,
+        len(plan.column_names),
+        len(plan.rows),
+        (time.perf_counter() - stage_started_at) * 1000,
+        (time.perf_counter() - started_at) * 1000,
     )
 
 
@@ -199,10 +268,29 @@ def build_insert_sql_and_params(
     )
 
 
-def _parse_excel(content: bytes) -> ParsedDataQueryTable:
+def build_insert_params(*, column_names: list[str], row: list[str]) -> dict[str, str]:
+    """构造单行 INSERT 参数，供批量 execute 复用同一条 SQL。"""
+
+    values = list(row[: len(column_names)])
+    values.extend([""] * (len(column_names) - len(values)))
+    return dict(zip(column_names, values, strict=True))
+
+
+def _parse_excel(*, content: bytes, filename: str) -> ParsedDataQueryTable:
     """解析 Excel 并强制收敛为唯一数据 sheet。"""
 
-    workbook = load_workbook(filename=BytesIO(content), read_only=True, data_only=True)
+    if str(filename).lower().endswith(".xls"):
+        return _parse_xls(content)
+    return _parse_xlsx(content)
+
+
+def _parse_xlsx(content: bytes) -> ParsedDataQueryTable:
+    """解析 xlsx 并强制收敛为唯一数据 sheet。"""
+
+    try:
+        workbook = load_workbook(filename=BytesIO(content), read_only=True, data_only=True)
+    except Exception as exc:
+        raise DataQuerySpreadsheetInvalid("invalid xlsx workbook") from exc
     data_tables: list[ParsedDataQueryTable] = []
     try:
         for worksheet in workbook.worksheets:
@@ -225,6 +313,41 @@ def _parse_excel(content: bytes) -> ParsedDataQueryTable:
             )
     finally:
         workbook.close()
+
+    if len(data_tables) > 1:
+        raise DataQuerySpreadsheetInvalid("multiple data sheets")
+    if not data_tables:
+        raise DataQuerySpreadsheetInvalid("empty workbook")
+    return data_tables[0]
+
+
+def _parse_xls(content: bytes) -> ParsedDataQueryTable:
+    """解析旧版 xls 并强制收敛为唯一数据 sheet。"""
+
+    import xlrd
+
+    try:
+        workbook = xlrd.open_workbook(file_contents=content)
+    except Exception as exc:
+        raise DataQuerySpreadsheetInvalid("invalid xls workbook") from exc
+
+    data_tables: list[ParsedDataQueryTable] = []
+    for worksheet in workbook.sheets():
+        rows = _xls_worksheet_rows(worksheet)
+        if not rows:
+            continue
+        header = [_cell_to_text(value) for value in rows[0]]
+        data_rows = [_normalize_data_row(row, len(header)) for row in rows[1:]]
+        data_rows = [row for row in data_rows if any(cell != "" for cell in row)]
+        if not data_rows:
+            raise DataQuerySpreadsheetInvalid("header-only sheet")
+        data_tables.append(
+            ParsedDataQueryTable(
+                original_sheet_name=worksheet.name,
+                headers=header,
+                rows=data_rows,
+            )
+        )
 
     if len(data_tables) > 1:
         raise DataQuerySpreadsheetInvalid("multiple data sheets")
@@ -260,6 +383,17 @@ def _worksheet_rows(worksheet) -> list[list[Any]]:
     rows: list[list[Any]] = []
     for row in worksheet.iter_rows(values_only=True):
         trimmed = _trim_trailing_empty(list(row))
+        if any(_cell_to_text(value) != "" for value in trimmed):
+            rows.append(trimmed)
+    return rows
+
+
+def _xls_worksheet_rows(worksheet) -> list[list[Any]]:
+    """读取 xls worksheet 中所有非空行，并去掉每行末尾的空单元格。"""
+
+    rows: list[list[Any]] = []
+    for row_index in range(worksheet.nrows):
+        trimmed = _trim_trailing_empty(list(worksheet.row_values(row_index)))
         if any(_cell_to_text(value) != "" for value in trimmed):
             rows.append(trimmed)
     return rows

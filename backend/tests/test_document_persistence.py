@@ -453,7 +453,7 @@ async def test_import_data_query_table_creates_rows_metadata_and_marks_document_
             "columns": [{"ordinal": 1, "header": "Customer", "columnName": "col_001", "type": "TEXT"}],
         },
         column_names=["col_001"],
-        rows=[["Alice"]],
+        rows=[["Alice"], ["Bob"]],
     )
 
     session = session_factory.sessions[0]
@@ -461,7 +461,7 @@ async def test_import_data_query_table_creates_rows_metadata_and_marks_document_
     assert session.transaction_rollbacks == 0
     assert str(session.executed[2]) == 'CREATE TABLE "dq_abc123_sales" ("col_001" TEXT)'
     assert "INSERT INTO" in str(session.executed[3])
-    assert session.execute_params[3] == {"col_001": "Alice"}
+    assert session.execute_params[3] == [{"col_001": "Alice"}, {"col_001": "Bob"}]
     table_meta_update = session.executed[4]
     assert _statement_value(table_meta_update, "create_sql") == (
         'CREATE TABLE "dq_abc123_sales" ("col_001" TEXT)'
@@ -469,6 +469,46 @@ async def test_import_data_query_table_creates_rows_metadata_and_marks_document_
     document_update = session.executed[5]
     assert _statement_value(document_update, "status") == DocumentStatus.STORED.value
     assert "knowledge_document.status = 'UPLOADED'" in _compiled_sql(document_update)
+
+
+@pytest.mark.asyncio
+async def test_import_data_query_table_inserts_rows_in_batches(monkeypatch):
+    from app.modules.document.models import TableMeta
+
+    repository, _, _, _, _ = _document_modules()
+    monkeypatch.setattr(repository, "DATA_QUERY_INSERT_BATCH_SIZE", 2)
+    table_meta = TableMeta(
+        id=9002,
+        namespace="alice",
+        document_id=9001,
+        table_name="sales",
+        description="Sales table",
+    )
+    session_factory = FakeSessionFactory(
+        scalar_results=[table_meta, None],
+    )
+    document_repository = repository.DocumentRepository(session_factory)
+
+    await document_repository.import_data_query_table(
+        document_id=9001,
+        physical_table_name="dq_abc123_sales",
+        create_sql='CREATE TABLE "dq_abc123_sales" ("col_001" TEXT)',
+        columns_info={"physicalTableName": "dq_abc123_sales", "columns": []},
+        column_names=["col_001"],
+        rows=[["A"], ["B"], ["C"], ["D"], ["E"]],
+    )
+
+    session = session_factory.sessions[0]
+    insert_params = [
+        params
+        for statement, params in zip(session.executed, session.execute_params, strict=True)
+        if "INSERT INTO" in str(statement)
+    ]
+    assert insert_params == [
+        [{"col_001": "A"}, {"col_001": "B"}],
+        [{"col_001": "C"}, {"col_001": "D"}],
+        [{"col_001": "E"}],
+    ]
 
 
 @pytest.mark.asyncio
@@ -497,7 +537,7 @@ async def test_import_data_query_table_rolls_back_when_document_cannot_be_marked
             create_sql='CREATE TABLE "dq_abc123_sales" ("col_001" TEXT)',
             columns_info={"physicalTableName": "dq_abc123_sales", "columns": []},
             column_names=["col_001"],
-            rows=[["Alice"]],
+            rows=[["Alice"], ["Bob"]],
         )
 
     session = session_factory.sessions[0]
@@ -505,6 +545,10 @@ async def test_import_data_query_table_rolls_back_when_document_cannot_be_marked
     assert session.transaction_rollbacks == 1
     assert any("CREATE TABLE" in str(statement) for statement in session.executed)
     assert any("INSERT INTO" in str(statement) for statement in session.executed)
+    insert_index = next(
+        index for index, statement in enumerate(session.executed) if "INSERT INTO" in str(statement)
+    )
+    assert session.execute_params[insert_index] == [{"col_001": "Alice"}, {"col_001": "Bob"}]
 
 
 @pytest.mark.asyncio

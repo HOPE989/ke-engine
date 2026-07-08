@@ -1,5 +1,7 @@
 """knowledge_document 的持久化 repository。"""
 
+import logging
+import time
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, func, select, text, update
@@ -13,8 +15,15 @@ from app.modules.document.errors import (
     DocumentStateConflict,
 )
 from app.modules.document.data_query_identifiers import quote_generated_identifier
-from app.modules.document.data_query_spreadsheet import build_insert_sql_and_params
+from app.modules.document.data_query_spreadsheet import (
+    build_insert_params,
+    build_insert_sql_and_params,
+)
 from app.modules.document.models import DocumentStatus, KnowledgeDocument, KnowledgeSegment, TableMeta
+
+
+logger = logging.getLogger(__name__)
+DATA_QUERY_INSERT_BATCH_SIZE = 5000
 
 
 def _status_value(status: DocumentStatus | str) -> str:
@@ -51,6 +60,13 @@ def _physical_table_name_from_meta(table_meta: TableMeta) -> str | None:
     if not physical_table_name:
         return None
     return str(physical_table_name)
+
+
+def _iter_batches(rows: list[list[str]], batch_size: int):
+    """按固定大小切分行数据，避免特大 DATA_QUERY 表一次传入过多参数。"""
+
+    for start in range(0, len(rows), batch_size):
+        yield start, rows[start : start + batch_size]
 
 
 async def _execute_update_with_expected_status(
@@ -244,36 +260,110 @@ class DocumentRepository:
         这里不做 drop/rebuild；如果目标物理表已存在，说明状态不一致，需要失败后人工处理。
         """
 
+        started_at = time.perf_counter()
+        row_count = len(rows)
+        column_count = len(column_names)
+        logger.info(
+            "data query db import started doc_id=%s physical_table=%s columns=%s rows=%s",
+            document_id,
+            physical_table_name,
+            column_count,
+            row_count,
+        )
+
         async with self._session_factory() as session:
             try:
                 async with session.begin():
                     # 1. 重新读取占位，确认 table_meta 仍归当前文档所有。
+                    stage_started_at = time.perf_counter()
                     meta_result = await session.execute(
                         select(TableMeta).where(TableMeta.document_id == document_id)
                     )
                     table_meta = meta_result.scalar_one_or_none()
                     if table_meta is None or table_meta.document_id != document_id:
                         raise DataQueryIngestionFailed()
+                    logger.info(
+                        "data query db reservation checked doc_id=%s elapsed_ms=%.2f",
+                        document_id,
+                        (time.perf_counter() - stage_started_at) * 1000,
+                    )
 
                     # 2. worker 不进行破坏性重建；已有物理表表示导入前置状态异常。
+                    stage_started_at = time.perf_counter()
                     exists_result = await session.execute(
                         text("SELECT to_regclass(:table_name)"),
                         {"table_name": physical_table_name},
                     )
                     if exists_result.scalar_one_or_none() is not None:
                         raise DataQueryIngestionFailed()
+                    logger.info(
+                        "data query db physical table checked doc_id=%s physical_table=%s "
+                        "elapsed_ms=%.2f",
+                        document_id,
+                        physical_table_name,
+                        (time.perf_counter() - stage_started_at) * 1000,
+                    )
 
-                    # 3. 建表和逐行插入都处于同一个 PostgreSQL 事务内。
+                    # 3. 建表和批量插入都处于同一个 PostgreSQL 事务内。
+                    stage_started_at = time.perf_counter()
                     await session.execute(text(create_sql))
-                    for row in rows:
-                        insert_sql, params = build_insert_sql_and_params(
+                    logger.info(
+                        "data query db table created doc_id=%s physical_table=%s elapsed_ms=%.2f",
+                        document_id,
+                        physical_table_name,
+                        (time.perf_counter() - stage_started_at) * 1000,
+                    )
+                    stage_started_at = time.perf_counter()
+                    if rows:
+                        insert_sql, _ = build_insert_sql_and_params(
                             physical_table_name=physical_table_name,
                             column_names=column_names,
-                            row=row,
+                            row=rows[0],
                         )
-                        await session.execute(text(insert_sql), params)
+                        inserted_count = 0
+                        for batch_start, batch_rows in _iter_batches(
+                            rows,
+                            DATA_QUERY_INSERT_BATCH_SIZE,
+                        ):
+                            first_batch_row = batch_rows[0]
+                            _, first_params = build_insert_sql_and_params(
+                                physical_table_name=physical_table_name,
+                                column_names=column_names,
+                                row=first_batch_row,
+                            )
+                            batch_params = [
+                                first_params,
+                                *[
+                                    build_insert_params(column_names=column_names, row=row)
+                                    for row in batch_rows[1:]
+                                ],
+                            ]
+                            await session.execute(text(insert_sql), batch_params)
+                            inserted_count = batch_start + len(batch_rows)
+                            logger.info(
+                                "data query db rows inserted batch doc_id=%s physical_table=%s "
+                                "inserted=%s total=%s batch_size=%s elapsed_ms=%.2f",
+                                document_id,
+                                physical_table_name,
+                                inserted_count,
+                                row_count,
+                                len(batch_rows),
+                                (time.perf_counter() - stage_started_at) * 1000,
+                            )
+                    else:
+                        inserted_count = 0
+                    logger.info(
+                        "data query db rows inserted doc_id=%s physical_table=%s "
+                        "inserted=%s total=%s elapsed_ms=%.2f",
+                        document_id,
+                        physical_table_name,
+                        inserted_count,
+                        row_count,
+                        (time.perf_counter() - stage_started_at) * 1000,
+                    )
 
                     # 4. 物理表写入成功后，才把 DDL 和 columns_info 固化到 table_meta。
+                    stage_started_at = time.perf_counter()
                     meta_update = (
                         update(TableMeta)
                         .where(TableMeta.document_id == document_id)
@@ -286,8 +376,14 @@ class DocumentRepository:
                     meta_update_result = await session.execute(meta_update)
                     if meta_update_result.rowcount != 1:
                         raise DataQueryIngestionFailed()
+                    logger.info(
+                        "data query db table meta updated doc_id=%s elapsed_ms=%.2f",
+                        document_id,
+                        (time.perf_counter() - stage_started_at) * 1000,
+                    )
 
                     # 5. 最后推进文档到 STORED；状态不符合预期则回滚整个导入事务。
+                    stage_started_at = time.perf_counter()
                     document_update = (
                         update(KnowledgeDocument)
                         .where(
@@ -299,10 +395,24 @@ class DocumentRepository:
                     document_update_result = await session.execute(document_update)
                     if document_update_result.rowcount != 1:
                         raise DataQueryIngestionFailed()
+                    logger.info(
+                        "data query db document marked stored doc_id=%s elapsed_ms=%.2f",
+                        document_id,
+                        (time.perf_counter() - stage_started_at) * 1000,
+                    )
             except DataQueryIngestionFailed:
                 raise
             except Exception as exc:
                 raise DataQueryIngestionFailed() from exc
+        logger.info(
+            "data query db import committed doc_id=%s physical_table=%s rows=%s "
+            "columns=%s total_elapsed_ms=%.2f",
+            document_id,
+            physical_table_name,
+            row_count,
+            column_count,
+            (time.perf_counter() - started_at) * 1000,
+        )
 
     async def get_document(self, doc_id: int) -> KnowledgeDocument | None:
         """按 doc_id 读取文档元数据，找不到时返回 None。"""
