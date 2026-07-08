@@ -27,16 +27,26 @@ class FakeTransaction:
 
 
 class FakeAsyncSession:
-    def __init__(self, *, rowcounts=None, scalar_result=None, scalars_result=None):
+    def __init__(
+        self,
+        *,
+        rowcounts=None,
+        scalar_result=None,
+        scalar_results=None,
+        scalars_result=None,
+    ):
         self.added = []
+        self.deleted = []
         self.commits = 0
         self.begins = 0
         self.transaction_commits = 0
         self.transaction_rollbacks = 0
         self.refreshes = []
         self.executed = []
+        self.execute_params = []
         self._rowcounts = list(rowcounts or [1])
         self._scalar_result = scalar_result
+        self._scalar_results = list(scalar_results or [])
         self._scalars_result = scalars_result
 
     def add(self, instance):
@@ -44,6 +54,9 @@ class FakeAsyncSession:
 
     def add_all(self, instances):
         self.added.extend(instances)
+
+    async def delete(self, instance):
+        self.deleted.append(instance)
 
     def begin(self):
         return FakeTransaction(self)
@@ -55,21 +68,25 @@ class FakeAsyncSession:
         instance.doc_id = 42
         self.refreshes.append(instance)
 
-    async def execute(self, statement):
+    async def execute(self, statement, params=None):
         self.executed.append(statement)
+        self.execute_params.append(params)
         rowcount = self._rowcounts.pop(0) if self._rowcounts else 1
-        if self._scalar_result is not None:
-            return SimpleNamespace(
-                rowcount=rowcount,
-                scalar_one_or_none=lambda: self._scalar_result,
-                scalar_one=lambda: self._scalar_result,
-            )
+        scalar_value = (
+            self._scalar_results.pop(0)
+            if self._scalar_results
+            else self._scalar_result
+        )
         if self._scalars_result is not None:
             return SimpleNamespace(
                 rowcount=rowcount,
                 scalars=lambda: SimpleNamespace(all=lambda: self._scalars_result),
             )
-        return SimpleNamespace(rowcount=rowcount)
+        return SimpleNamespace(
+            rowcount=rowcount,
+            scalar_one_or_none=lambda: scalar_value,
+            scalar_one=lambda: scalar_value,
+        )
 
 
 class FakeSessionContext:
@@ -84,9 +101,17 @@ class FakeSessionContext:
 
 
 class FakeSessionFactory:
-    def __init__(self, *, rowcounts=None, scalar_result=None, scalars_result=None):
+    def __init__(
+        self,
+        *,
+        rowcounts=None,
+        scalar_result=None,
+        scalar_results=None,
+        scalars_result=None,
+    ):
         self.rowcounts = rowcounts
         self.scalar_result = scalar_result
+        self.scalar_results = scalar_results
         self.scalars_result = scalars_result
         self.sessions = []
 
@@ -94,6 +119,7 @@ class FakeSessionFactory:
         session = FakeAsyncSession(
             rowcounts=self.rowcounts,
             scalar_result=self.scalar_result,
+            scalar_results=self.scalar_results,
             scalars_result=self.scalars_result,
         )
         self.sessions.append(session)
@@ -240,6 +266,324 @@ async def test_create_init_document_persists_provided_doc_id_and_file_type():
     assert session.added == [document]
     assert session.commits == 1
     assert session.refreshes == []
+
+
+@pytest.mark.asyncio
+async def test_create_data_query_document_with_table_reservation_inserts_document_and_meta():
+    from app.modules.document.models import TableMeta
+
+    repository, _, DocumentStatus, KnowledgeDocument, _ = _document_modules()
+    session_factory = FakeSessionFactory()
+    document_repository = repository.DocumentRepository(session_factory)
+
+    document = await document_repository.create_data_query_document_with_table_reservation(
+        doc_id=9001,
+        table_meta_id=9002,
+        doc_title="sales.csv",
+        upload_user="alice",
+        accessible_by="team-a",
+        description="Sales table",
+        knowledge_base_type="DATA_QUERY",
+        file_type="csv",
+        namespace="alice",
+        table_name="sales",
+        is_override=False,
+        extension={"tableName": "sales", "isOverride": False},
+    )
+
+    session = session_factory.sessions[0]
+    assert session.begins == 1
+    assert session.transaction_commits == 1
+    assert isinstance(document, KnowledgeDocument)
+    assert document.doc_id == 9001
+    assert document.extension == {"tableName": "sales", "isOverride": False}
+    assert document.status == DocumentStatus.INIT.value
+    assert len(session.added) == 2
+    assert isinstance(session.added[0], KnowledgeDocument)
+    assert isinstance(session.added[1], TableMeta)
+    table_meta = session.added[1]
+    assert table_meta.id == 9002
+    assert table_meta.namespace == "alice"
+    assert table_meta.document_id == 9001
+    assert table_meta.table_name == "sales"
+    assert table_meta.description == "Sales table"
+    assert table_meta.create_sql is None
+    assert table_meta.columns_info is None
+
+
+@pytest.mark.asyncio
+async def test_create_data_query_document_with_table_reservation_rejects_duplicate_without_override():
+    from app.modules.document.errors import DataQueryTableNameConflict
+    from app.modules.document.models import TableMeta
+
+    repository, _, _, _, _ = _document_modules()
+    existing_meta = TableMeta(
+        id=8001,
+        namespace="alice",
+        document_id=8002,
+        table_name="sales",
+        description="Old sales",
+    )
+    session_factory = FakeSessionFactory(scalar_result=existing_meta)
+    document_repository = repository.DocumentRepository(session_factory)
+
+    with pytest.raises(DataQueryTableNameConflict):
+        await document_repository.create_data_query_document_with_table_reservation(
+            doc_id=9001,
+            table_meta_id=9002,
+            doc_title="sales.csv",
+            upload_user="alice",
+            accessible_by="team-a",
+            description="Sales table",
+            knowledge_base_type="DATA_QUERY",
+            file_type="csv",
+            namespace="alice",
+            table_name="sales",
+            is_override=False,
+            extension={"tableName": "sales", "isOverride": False},
+        )
+
+    session = session_factory.sessions[0]
+    assert session.transaction_rollbacks == 1
+    assert session.added == []
+    assert session.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_create_data_query_document_with_table_reservation_overrides_existing_meta():
+    from app.modules.document.models import TableMeta
+
+    repository, _, _, KnowledgeDocument, _ = _document_modules()
+    existing_meta = TableMeta(
+        id=8001,
+        namespace="alice",
+        document_id=8002,
+        table_name="sales",
+        description="Old sales",
+        columns_info={"physicalTableName": "dq_alice_sales"},
+    )
+    session_factory = FakeSessionFactory(scalar_result=existing_meta)
+    document_repository = repository.DocumentRepository(session_factory)
+
+    await document_repository.create_data_query_document_with_table_reservation(
+        doc_id=9001,
+        table_meta_id=9002,
+        doc_title="sales.csv",
+        upload_user="alice",
+        accessible_by="team-a",
+        description="Sales table",
+        knowledge_base_type="DATA_QUERY",
+        file_type="csv",
+        namespace="alice",
+        table_name="sales",
+        is_override=True,
+        extension={"tableName": "sales", "isOverride": True},
+    )
+
+    session = session_factory.sessions[0]
+    assert "DROP TABLE IF EXISTS" in str(session.executed[1])
+    assert '"dq_alice_sales"' in str(session.executed[1])
+    assert session.deleted == [existing_meta]
+    assert any(isinstance(instance, KnowledgeDocument) for instance in session.added)
+    assert any(isinstance(instance, TableMeta) and instance.document_id == 9001 for instance in session.added)
+
+
+@pytest.mark.asyncio
+async def test_delete_data_query_reservation_deletes_by_document_id():
+    repository, _, _, _, _ = _document_modules()
+    session_factory = FakeSessionFactory()
+    document_repository = repository.DocumentRepository(session_factory)
+
+    await document_repository.delete_data_query_reservation(document_id=9001)
+
+    session = session_factory.sessions[0]
+    sql = _compiled_sql(session.executed[0])
+    assert "DELETE FROM table_meta" in sql
+    assert "table_meta.document_id = 9001" in sql
+    assert session.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_get_table_meta_by_document_selects_by_document_id():
+    from app.modules.document.models import TableMeta
+
+    repository, _, _, _, _ = _document_modules()
+    table_meta = TableMeta(
+        id=9002,
+        namespace="alice",
+        document_id=9001,
+        table_name="sales",
+        description="Sales table",
+    )
+    session_factory = FakeSessionFactory(scalar_result=table_meta)
+    document_repository = repository.DocumentRepository(session_factory)
+
+    result = await document_repository.get_table_meta_by_document(document_id=9001)
+
+    session = session_factory.sessions[0]
+    assert result is table_meta
+    assert "WHERE table_meta.document_id = 9001" in _compiled_sql(session.executed[0])
+
+
+@pytest.mark.asyncio
+async def test_import_data_query_table_creates_rows_metadata_and_marks_document_stored():
+    from app.modules.document.models import DocumentStatus, TableMeta
+
+    repository, _, _, _, _ = _document_modules()
+    table_meta = TableMeta(
+        id=9002,
+        namespace="alice",
+        document_id=9001,
+        table_name="sales",
+        description="Sales table",
+    )
+    session_factory = FakeSessionFactory(
+        scalar_results=[table_meta, None],
+        rowcounts=[1, 1],
+    )
+    document_repository = repository.DocumentRepository(session_factory)
+
+    await document_repository.import_data_query_table(
+        document_id=9001,
+        physical_table_name="dq_abc123_sales",
+        create_sql='CREATE TABLE "dq_abc123_sales" ("col_001" TEXT)',
+        columns_info={
+            "originalSheetName": "Data",
+            "physicalTableName": "dq_abc123_sales",
+            "columns": [{"ordinal": 1, "header": "Customer", "columnName": "col_001", "type": "TEXT"}],
+        },
+        column_names=["col_001"],
+        rows=[["Alice"], ["Bob"]],
+    )
+
+    session = session_factory.sessions[0]
+    assert session.transaction_commits == 1
+    assert session.transaction_rollbacks == 0
+    assert str(session.executed[2]) == 'CREATE TABLE "dq_abc123_sales" ("col_001" TEXT)'
+    assert "INSERT INTO" in str(session.executed[3])
+    assert session.execute_params[3] == [{"col_001": "Alice"}, {"col_001": "Bob"}]
+    table_meta_update = session.executed[4]
+    assert _statement_value(table_meta_update, "create_sql") == (
+        'CREATE TABLE "dq_abc123_sales" ("col_001" TEXT)'
+    )
+    document_update = session.executed[5]
+    assert _statement_value(document_update, "status") == DocumentStatus.STORED.value
+    assert "knowledge_document.status = 'UPLOADED'" in _compiled_sql(document_update)
+
+
+@pytest.mark.asyncio
+async def test_import_data_query_table_inserts_rows_in_batches(monkeypatch):
+    from app.modules.document.models import TableMeta
+
+    repository, _, _, _, _ = _document_modules()
+    monkeypatch.setattr(repository, "DATA_QUERY_INSERT_BATCH_SIZE", 2)
+    table_meta = TableMeta(
+        id=9002,
+        namespace="alice",
+        document_id=9001,
+        table_name="sales",
+        description="Sales table",
+    )
+    session_factory = FakeSessionFactory(
+        scalar_results=[table_meta, None],
+    )
+    document_repository = repository.DocumentRepository(session_factory)
+
+    await document_repository.import_data_query_table(
+        document_id=9001,
+        physical_table_name="dq_abc123_sales",
+        create_sql='CREATE TABLE "dq_abc123_sales" ("col_001" TEXT)',
+        columns_info={"physicalTableName": "dq_abc123_sales", "columns": []},
+        column_names=["col_001"],
+        rows=[["A"], ["B"], ["C"], ["D"], ["E"]],
+    )
+
+    session = session_factory.sessions[0]
+    insert_params = [
+        params
+        for statement, params in zip(session.executed, session.execute_params, strict=True)
+        if "INSERT INTO" in str(statement)
+    ]
+    assert insert_params == [
+        [{"col_001": "A"}, {"col_001": "B"}],
+        [{"col_001": "C"}, {"col_001": "D"}],
+        [{"col_001": "E"}],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_import_data_query_table_rolls_back_when_document_cannot_be_marked_stored():
+    from app.modules.document.errors import DataQueryIngestionFailed
+    from app.modules.document.models import TableMeta
+
+    repository, _, _, _, _ = _document_modules()
+    table_meta = TableMeta(
+        id=9002,
+        namespace="alice",
+        document_id=9001,
+        table_name="sales",
+        description="Sales table",
+    )
+    session_factory = FakeSessionFactory(
+        scalar_results=[table_meta, None],
+        rowcounts=[1, 1, 1, 1, 1, 0],
+    )
+    document_repository = repository.DocumentRepository(session_factory)
+
+    with pytest.raises(DataQueryIngestionFailed):
+        await document_repository.import_data_query_table(
+            document_id=9001,
+            physical_table_name="dq_abc123_sales",
+            create_sql='CREATE TABLE "dq_abc123_sales" ("col_001" TEXT)',
+            columns_info={"physicalTableName": "dq_abc123_sales", "columns": []},
+            column_names=["col_001"],
+            rows=[["Alice"], ["Bob"]],
+        )
+
+    session = session_factory.sessions[0]
+    assert session.transaction_commits == 0
+    assert session.transaction_rollbacks == 1
+    assert any("CREATE TABLE" in str(statement) for statement in session.executed)
+    assert any("INSERT INTO" in str(statement) for statement in session.executed)
+    insert_index = next(
+        index for index, statement in enumerate(session.executed) if "INSERT INTO" in str(statement)
+    )
+    assert session.execute_params[insert_index] == [{"col_001": "Alice"}, {"col_001": "Bob"}]
+
+
+@pytest.mark.asyncio
+async def test_import_data_query_table_rejects_existing_physical_table_without_drop():
+    from app.modules.document.errors import DataQueryIngestionFailed
+    from app.modules.document.models import TableMeta
+
+    repository, _, _, _, _ = _document_modules()
+    table_meta = TableMeta(
+        id=9002,
+        namespace="alice",
+        document_id=9001,
+        table_name="sales",
+        description="Sales table",
+    )
+    session_factory = FakeSessionFactory(
+        scalar_results=[table_meta, "dq_abc123_sales"],
+    )
+    document_repository = repository.DocumentRepository(session_factory)
+
+    with pytest.raises(DataQueryIngestionFailed):
+        await document_repository.import_data_query_table(
+            document_id=9001,
+            physical_table_name="dq_abc123_sales",
+            create_sql='CREATE TABLE "dq_abc123_sales" ("col_001" TEXT)',
+            columns_info={"physicalTableName": "dq_abc123_sales", "columns": []},
+            column_names=["col_001"],
+            rows=[["Alice"]],
+        )
+
+    session = session_factory.sessions[0]
+    assert session.transaction_rollbacks == 1
+    executed_sql = "\n".join(str(statement) for statement in session.executed)
+    assert "DROP TABLE" not in executed_sql
+    assert "INSERT INTO" not in executed_sql
 
 
 @pytest.mark.asyncio
@@ -509,6 +853,114 @@ async def test_complete_chunking_rolls_back_inserted_segments_on_postgres_stale_
 
         assert segment_count == 0
         assert status == DocumentStatus.CHUNKED.value
+    finally:
+        await engine.dispose()
+        cleanup_engine = create_async_engine(database_url)
+        async with cleanup_engine.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        await cleanup_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_import_data_query_table_rolls_back_dynamic_table_on_postgres_failure():
+    database_url = os.environ.get("DOCUMENT_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("set DOCUMENT_TEST_DATABASE_URL to run PostgreSQL transaction integration tests")
+
+    from app.db.base import Base
+    from app.modules.document.errors import DataQueryIngestionFailed
+    from app.modules.document.models import DocumentStatus, KnowledgeDocument, TableMeta
+    from app.modules.document.repository import DocumentRepository
+
+    schema_name = f"test_data_query_import_{uuid4().hex}"
+    bootstrap_engine = create_async_engine(database_url)
+    async with bootstrap_engine.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA "{schema_name}"'))
+    await bootstrap_engine.dispose()
+
+    engine = create_async_engine(database_url)
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_search_path(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute(f'SET search_path TO "{schema_name}"')
+        finally:
+            cursor.close()
+
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+
+        session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+        doc_id = 525252
+        physical_table_name = "dq_abc123abc123_sales"
+        async with session_factory() as session:
+            session.add(
+                KnowledgeDocument(
+                    doc_id=doc_id,
+                    doc_title="sales.csv",
+                    upload_user="tester",
+                    accessible_by="team-a",
+                    description="Sales data",
+                    knowledge_base_type="DATA_QUERY",
+                    extension={"tableName": "sales", "isOverride": False},
+                    file_type="csv",
+                    status=DocumentStatus.CONVERTED.value,
+                )
+            )
+            session.add(
+                TableMeta(
+                    id=625252,
+                    namespace="tester",
+                    document_id=doc_id,
+                    table_name="sales",
+                    description="Sales data",
+                )
+            )
+            await session.commit()
+
+        repository = DocumentRepository(session_factory)
+        with pytest.raises(DataQueryIngestionFailed):
+            await repository.import_data_query_table(
+                document_id=doc_id,
+                physical_table_name=physical_table_name,
+                create_sql=f'CREATE TABLE "{physical_table_name}" ("col_001" TEXT)',
+                columns_info={
+                    "originalSheetName": "Data",
+                    "physicalTableName": physical_table_name,
+                    "columns": [
+                        {
+                            "ordinal": 1,
+                            "header": "Customer",
+                            "columnName": "col_001",
+                            "type": "TEXT",
+                        }
+                    ],
+                },
+                column_names=["col_001"],
+                rows=[["Alice"]],
+            )
+
+        async with session_factory() as session:
+            exists_result = await session.execute(
+                text("SELECT to_regclass(:table_name)"),
+                {"table_name": physical_table_name},
+            )
+            document_status = await session.scalar(
+                sa.select(KnowledgeDocument.status).where(KnowledgeDocument.doc_id == doc_id)
+            )
+            metadata_result = await session.execute(
+                sa.select(TableMeta.create_sql, TableMeta.columns_info).where(
+                    TableMeta.document_id == doc_id
+                )
+            )
+            create_sql, columns_info = metadata_result.one()
+
+        assert exists_result.scalar_one() is None
+        assert document_status == DocumentStatus.CONVERTED.value
+        assert create_sql is None
+        assert columns_info is None
     finally:
         await engine.dispose()
         cleanup_engine = create_async_engine(database_url)

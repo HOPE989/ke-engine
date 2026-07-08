@@ -44,6 +44,22 @@ def document_chunking_lock(
     )
 
 
+def data_query_upload_lock(
+    *,
+    redis_client: Any,
+    namespace: str,
+    expire_seconds: int,
+):
+    """创建 DATA_QUERY 上传 namespace 锁。"""
+
+    return redis_lock.Lock(
+        redis_client,
+        name=f"data_query_upload:{namespace}",
+        expire=expire_seconds,
+        auto_renewal=True,
+    )
+
+
 def document_embed_store_lock(
     *,
     redis_client: Any,

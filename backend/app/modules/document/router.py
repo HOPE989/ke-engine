@@ -1,5 +1,6 @@
 """文档上传 HTTP 路由与错误响应映射。"""
 
+from dataclasses import replace
 from typing import Annotated
 
 from fastapi import (
@@ -15,17 +16,21 @@ from app.api.deps import DocumentRuntime, get_config, get_document_runtime
 from app.common.response import APIResponse, success_response
 from app.core.config import Settings
 from app.core.exceptions import AppException
-from app.infrastructure.redis_lock import document_chunking_lock
+from app.infrastructure.redis_lock import data_query_upload_lock, document_chunking_lock
 from app.modules.document.errors import (
     ChunkLockUnavailable,
     ChunkPersistenceFailed,
     ChunkSplittingFailed,
     ConvertedMarkdownInvalid,
     ConvertedMarkdownUnavailable,
+    DataQueryTableNameConflict,
+    DataQueryUploadBusy,
+    DataQueryUploadLockUnavailable,
     DocumentNotFound,
     DocumentStateConflict,
     DocumentStorageFailed,
     DocumentVectorStorageDispatchFailed,
+    UnsupportedDocumentFileType,
 )
 from app.modules.document.schemas import (
     DocumentChunkRequest,
@@ -56,6 +61,8 @@ async def upload_document_endpoint(
     settings: Annotated[Settings, Depends(get_config)],
     document_runtime: Annotated[DocumentRuntime, Depends(get_document_runtime)],
     description: Annotated[str, Form()] = "",
+    table_name: Annotated[str | None, Form(alias="tableName")] = None,
+    is_override: Annotated[bool | None, Form(alias="isOverride")] = None,
 ) -> APIResponse[DocumentMetadata]:
     """接收 multipart 上传请求并返回文档转换后的元数据。"""
 
@@ -68,6 +75,8 @@ async def upload_document_endpoint(
             description=description,
             knowledge_base_type=knowledge_base_type,
             max_upload_size_mb=settings.max_upload_size_mb,
+            table_name=table_name,
+            is_override=is_override,
         )
     except DocumentFileTooLarge as exc:
         raise AppException("file too large", status.HTTP_413_CONTENT_TOO_LARGE) from exc
@@ -76,20 +85,54 @@ async def upload_document_endpoint(
 
     try:
         # 2. 业务编排交给 workflow，router 只负责 HTTP 依赖和异常映射。
-        metadata = await upload_document(
+        metadata = await _run_upload_with_optional_data_query_lock(
             upload=validated_upload,
-            document_repository=document_runtime.repository,
-            storage=document_runtime.storage,
-            file_detector=document_runtime.file_detector,
-            id_generator=document_runtime.id_generator,
-            conversion_dispatcher=document_runtime.conversion_dispatcher,
+            settings=settings,
+            document_runtime=document_runtime,
         )
+    except UnsupportedDocumentFileType as exc:
+        raise AppException("unsupported file type", status.HTTP_415_UNSUPPORTED_MEDIA_TYPE) from exc
+    except DataQueryTableNameConflict as exc:
+        raise AppException("table name conflict", status.HTTP_409_CONFLICT) from exc
+    except DataQueryUploadBusy as exc:
+        raise AppException("data query upload busy", status.HTTP_409_CONFLICT) from exc
+    except DataQueryUploadLockUnavailable as exc:
+        raise AppException(
+            "data query upload lock unavailable",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        ) from exc
     except DocumentStorageFailed as exc:
         raise AppException("document storage failed", status.HTTP_502_BAD_GATEWAY) from exc
     except DocumentStateConflict as exc:
         raise AppException("document state conflict", status.HTTP_409_CONFLICT) from exc
 
     return success_response(metadata)
+
+
+async def _run_upload_with_optional_data_query_lock(
+    *,
+    upload,
+    settings: Settings,
+    document_runtime: DocumentRuntime,
+) -> DocumentMetadata:
+    if upload.knowledge_base_type == "DATA_QUERY":
+        upload = replace(
+            upload,
+            data_query_upload_lock_factory=lambda: data_query_upload_lock(
+                redis_client=document_runtime.redis_client,
+                namespace=upload.upload_user,
+                expire_seconds=settings.document_convert_lock_expire_seconds,
+            ),
+        )
+
+    return await upload_document(
+        upload=upload,
+        document_repository=document_runtime.repository,
+        storage=document_runtime.storage,
+        file_detector=document_runtime.file_detector,
+        id_generator=document_runtime.id_generator,
+        conversion_dispatcher=document_runtime.conversion_dispatcher,
+    )
 
 
 @router.post(

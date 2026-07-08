@@ -107,11 +107,46 @@ async def run_document_conversion(*, doc_id: int, runtime: KafkaWorkerRuntime) -
         expire_seconds=conversion_context.lock_expire_seconds,
     )
     if not lock.acquire(blocking=False):
+        # 普通文档沿用历史语义：同 doc_id 锁忙时直接跳过并提交消息。
+        # DATA_QUERY spreadsheet 处于 UPLOADED 时必须重试，否则可能永远不导入动态表。
+        if await _is_retryable_data_query_conversion_lock_busy(doc_id=doc_id, runtime=runtime):
+            from app.modules.document.errors import DocumentConversionLockBusy
+
+            raise DocumentConversionLockBusy()
         return
     try:
         await run_locked_document_conversion(doc_id=doc_id, runtime=runtime)
     finally:
         lock.release()
+
+
+async def _is_retryable_data_query_conversion_lock_busy(
+    *,
+    doc_id: int,
+    runtime: KafkaWorkerRuntime,
+) -> bool:
+    """判断文档锁忙时是否应让 Kafka 消息保持未提交。
+
+    只有 DATA_QUERY spreadsheet 且仍处于 UPLOADED 时才需要重试。已经 STORED 或其他
+    非 UPLOADED 状态的消息可以按终端消息处理，避免因为旧消息一直阻塞消费进度。
+    """
+
+    from app.modules.document.file_types import DocumentFileType
+    from app.modules.document.models import DocumentStatus, KnowledgeBaseType
+
+    repository = getattr(runtime.conversion, "repository", None)
+    if repository is None:
+        return False
+    document = await repository.get_document(doc_id)
+    if document is None:
+        return False
+    # 这里读取的是当前数据库状态，而不是 Kafka payload，避免旧消息误判。
+    return (
+        document.status == DocumentStatus.UPLOADED.value
+        and getattr(document, "knowledge_base_type", None) == KnowledgeBaseType.DATA_QUERY.value
+        and getattr(document, "file_type", None)
+        in {DocumentFileType.EXCEL.value, DocumentFileType.CSV.value}
+    )
 
 
 async def run_locked_document_conversion(

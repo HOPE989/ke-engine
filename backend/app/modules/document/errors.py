@@ -32,6 +32,10 @@ class DocumentStateRollbackFailed(Exception):
     """转换失败后无法将文档状态回滚到 UPLOADED 时抛出。"""
 
 
+class DocumentConversionLockBusy(Exception):
+    """文档转换锁被占用且当前消息应保留重试。"""
+
+
 class ConvertedMarkdownUnavailable(Exception):
     """转换后的 Markdown 对象无法从对象存储读取时抛出。"""
 
@@ -54,3 +58,19 @@ class ChunkLockUnavailable(Exception):
 
 class DocumentVectorStorageDispatchFailed(Exception):
     """文档向量存储事件派发失败时抛出。"""
+
+
+class DataQueryTableNameConflict(Exception):
+    """DATA_QUERY 逻辑表名在同一 namespace 下已被占用。"""
+
+
+class DataQueryUploadBusy(Exception):
+    """DATA_QUERY 上传 namespace 锁已被占用。"""
+
+
+class DataQueryUploadLockUnavailable(Exception):
+    """DATA_QUERY 上传锁基础设施不可用。"""
+
+
+class DataQueryIngestionFailed(Exception):
+    """DATA_QUERY spreadsheet 关系表导入失败。"""

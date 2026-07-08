@@ -9,7 +9,7 @@ import pytest
 
 from app.modules.document.errors import DocumentConversionFailed, DocumentStateConflict
 from app.modules.document.file_types import DocumentFileType
-from app.modules.document.models import DocumentStatus
+from app.modules.document.models import DocumentStatus, KnowledgeBaseType
 
 
 def install_worker_dependency_stubs_if_missing():
@@ -166,6 +166,25 @@ class FakeLock:
         self.released = True
 
 
+class FakeMessage:
+    def __init__(self, value):
+        self._value = value
+
+    def value(self):
+        return self._value
+
+    def error(self):
+        return None
+
+
+class RecordingConsumer:
+    def __init__(self):
+        self.commits = []
+
+    async def commit(self, *, message):
+        self.commits.append(message)
+
+
 def make_converter_factory():
     from app.modules.document.converters import create_default_document_converter_factory
 
@@ -224,6 +243,15 @@ def _document(*, file_type, status=DocumentStatus.UPLOADED.value):
         converted_doc_url=None,
         status=status,
     )
+
+
+def _data_query_document(*, file_type=DocumentFileType.CSV.value, status=DocumentStatus.UPLOADED.value):
+    document = _document(file_type=file_type, status=status)
+    document.doc_title = "sales.csv" if file_type == DocumentFileType.CSV.value else "sales.xlsx"
+    document.doc_url = f"https://files.example.com/documents/documents/42/original/{document.doc_title}"
+    document.knowledge_base_type = KnowledgeBaseType.DATA_QUERY.value
+    document.extension = {"tableName": "sales"}
+    return document
 
 
 @pytest.mark.asyncio
@@ -365,6 +393,113 @@ async def test_worker_converts_excel_and_csv_documents_by_reusing_origin_url(
     assert storage.uploads == []
     assert mineru_client.calls == []
     assert document.status == DocumentStatus.CONVERTED.value
+
+
+@pytest.mark.asyncio
+async def test_worker_routes_data_query_csv_to_relational_ingestion_without_converted_url(
+    monkeypatch,
+):
+    from app.modules.document import processing
+    from app.modules.document.processing import convert_uploaded_document
+
+    document = _data_query_document(file_type=DocumentFileType.CSV.value)
+    repository = FakeRepository(document)
+    storage = FakeStorage()
+    ingest_calls = []
+
+    async def fake_ingest_data_query_spreadsheet_document(**kwargs):
+        ingest_calls.append(kwargs)
+        document.status = DocumentStatus.STORED.value
+
+    monkeypatch.setattr(
+        processing,
+        "ingest_data_query_spreadsheet_document",
+        fake_ingest_data_query_spreadsheet_document,
+        raising=False,
+    )
+
+    await convert_uploaded_document(
+        doc_id=42,
+        document_repository=repository,
+        storage=storage,
+        mineru_client=FakeMinerUClient(),
+        converter_factory=make_converter_factory(),
+    )
+
+    assert repository.events == [{"action": "get_document", "doc_id": 42}]
+    assert ingest_calls == [
+        {
+            "document": document,
+            "document_repository": repository,
+            "storage": storage,
+        }
+    ]
+    assert document.status == DocumentStatus.STORED.value
+    assert document.converted_doc_url is None
+
+
+@pytest.mark.asyncio
+async def test_worker_treats_already_stored_data_query_document_as_terminal(monkeypatch):
+    from app.modules.document import processing
+    from app.modules.document.processing import convert_uploaded_document
+
+    document = _data_query_document(status=DocumentStatus.STORED.value)
+    repository = FakeRepository(document)
+
+    async def fail_ingest(**kwargs):
+        raise AssertionError("already STORED DATA_QUERY document must not be imported")
+
+    monkeypatch.setattr(
+        processing,
+        "ingest_data_query_spreadsheet_document",
+        fail_ingest,
+        raising=False,
+    )
+
+    await convert_uploaded_document(
+        doc_id=42,
+        document_repository=repository,
+        storage=FakeStorage(),
+        mineru_client=FakeMinerUClient(),
+        converter_factory=make_converter_factory(),
+    )
+
+    assert repository.events == [{"action": "get_document", "doc_id": 42}]
+    assert document.status == DocumentStatus.STORED.value
+
+
+@pytest.mark.asyncio
+async def test_data_query_busy_document_lock_leaves_kafka_message_uncommitted(monkeypatch):
+    from app.modules.document.events import DocumentConvertRequested
+    from app.modules.document.errors import DocumentConversionLockBusy
+    from app.modules.document.workers import conversion as conversion_worker
+
+    class BusyLock:
+        def acquire(self, *, blocking):
+            return False
+
+    monkeypatch.setattr(
+        "app.infrastructure.redis_lock.document_conversion_lock",
+        lambda **kwargs: BusyLock(),
+    )
+    runtime = SimpleNamespace(
+        conversion=SimpleNamespace(
+            redis_client=object(),
+            lock_expire_seconds=180,
+            repository=FakeRepository(_data_query_document()),
+        ),
+    )
+    consumer = RecordingConsumer()
+    message = FakeMessage(DocumentConvertRequested.create(doc_id=42).to_json())
+
+    with pytest.raises(DocumentConversionLockBusy):
+        await conversion_worker.handle_document_conversion_message(
+            message=message,
+            consumer=consumer,
+            runtime=runtime,
+        )
+
+    assert consumer.commits == []
 
 
 @pytest.mark.asyncio
