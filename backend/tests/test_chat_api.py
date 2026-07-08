@@ -4,7 +4,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core import config
-from app.main import create_app
+from app.services.agent_api.app import create_app
 
 
 def assert_error_response(payload: dict, status_code: int, message_part: str) -> None:

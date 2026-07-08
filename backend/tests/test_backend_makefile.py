@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 
 def test_root_makefile_exposes_backend_dev_targets():
@@ -6,11 +6,18 @@ def test_root_makefile_exposes_backend_dev_targets():
 
     content = makefile.read_text(encoding="utf-8")
 
-    assert "dev-api:" in content
+    assert "dev-document-api:" in content
+    assert "dev-agent-api:" in content
     assert "dev-worker:" in content
     assert "dev-infra:" in content
-    assert "$(UV) run uvicorn app.main:app --reload" in content
-    assert "$(UV) run python -m app.workers.kafka_worker" in content
+    assert "$(UV) run uvicorn app.entrypoints.document_api:app --reload" in content
+    assert "$(UV) run uvicorn app.entrypoints.agent_api:app --reload" in content
+    assert "app.main:app" not in content
+    assert "dev-api:" not in content
+    assert "DOCUMENT_API_PORT ?= 8000" in content
+    assert "AGENT_API_PORT ?= 8001" in content
+    assert "$(MAKE) -j 3 dev-document-api dev-agent-api dev-worker" in content
+    assert "$(UV) run python -m app.entrypoints.document_worker" in content
     assert "docker compose up -d postgres redis minio kafka" in content
     assert "kafka-topics-init:" in content
     assert "kafka-topics-list:" in content
@@ -46,13 +53,13 @@ def test_root_makefile_exposes_celery_compensation_targets():
     assert "CELERY_BEAT_SCHEDULE ?= .runtime/celerybeat-schedule" in content
     assert "dev-celery-worker:" in content
     assert "dev-celery-beat:" in content
-    assert "celery -A app.workers.celery_worker.celery_app worker -l INFO --pool=solo" in content
+    assert "celery -A app.entrypoints.celery_worker.celery_app worker -l INFO --pool=solo" in content
     assert "mkdir -p" not in content
     assert (
         "Path('$(CELERY_BEAT_SCHEDULE)').parent.mkdir(parents=True, exist_ok=True)"
     ) in content
     assert (
-        "celery -A app.workers.celery_worker.celery_app beat -l INFO "
+        "celery -A app.entrypoints.celery_worker.celery_app beat -l INFO "
         "--schedule $(CELERY_BEAT_SCHEDULE)"
     ) in content
 

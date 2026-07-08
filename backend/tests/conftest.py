@@ -1,9 +1,9 @@
-"""Shared pytest configuration."""
+﻿"""Shared pytest configuration."""
 
 import pytest
 
 from app.core.config import get_settings
-from app.modules.chat.service import get_chat_model
+from app.domains.agent.services.chat import get_chat_model
 
 
 @pytest.fixture(autouse=True)

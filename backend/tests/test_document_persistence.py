@@ -1,4 +1,4 @@
-import os
+﻿import os
 from datetime import timedelta
 from types import SimpleNamespace
 from uuid import uuid4
@@ -144,9 +144,9 @@ def _statement_value(statement, column_name):
 
 
 def _document_modules():
-    from app.modules.document import repository
-    from app.modules.document.errors import DocumentStateConflict
-    from app.modules.document.models import DocumentStatus, KnowledgeDocument, KnowledgeSegment
+    from app.domains.document.repositories import document_repository as repository
+    from app.domains.document.shared.errors import DocumentStateConflict
+    from app.domains.document.shared.models import DocumentStatus, KnowledgeDocument, KnowledgeSegment
 
     return repository, DocumentStateConflict, DocumentStatus, KnowledgeDocument, KnowledgeSegment
 
@@ -156,7 +156,7 @@ def test_knowledge_document_model_accepts_chunked_status_without_schema_drift():
 
     assert DocumentStatus.CHUNKED.value == "CHUNKED"
     assert DocumentStatus.VECTOR_STORED.value == "VECTOR_STORED"
-    from app.modules.document.models import KnowledgeBaseType
+    from app.domains.document.shared.models import KnowledgeBaseType
 
     assert KnowledgeBaseType.DOCUMENT_SEARCH.value == "DOCUMENT_SEARCH"
     assert KnowledgeBaseType.DATA_QUERY.value == "DATA_QUERY"
@@ -270,7 +270,7 @@ async def test_create_init_document_persists_provided_doc_id_and_file_type():
 
 @pytest.mark.asyncio
 async def test_create_data_query_document_with_table_reservation_inserts_document_and_meta():
-    from app.modules.document.models import TableMeta
+    from app.domains.document.shared.models import TableMeta
 
     repository, _, DocumentStatus, KnowledgeDocument, _ = _document_modules()
     session_factory = FakeSessionFactory()
@@ -313,8 +313,8 @@ async def test_create_data_query_document_with_table_reservation_inserts_documen
 
 @pytest.mark.asyncio
 async def test_create_data_query_document_with_table_reservation_rejects_duplicate_without_override():
-    from app.modules.document.errors import DataQueryTableNameConflict
-    from app.modules.document.models import TableMeta
+    from app.domains.document.shared.errors import DataQueryTableNameConflict
+    from app.domains.document.shared.models import TableMeta
 
     repository, _, _, _, _ = _document_modules()
     existing_meta = TableMeta(
@@ -351,7 +351,7 @@ async def test_create_data_query_document_with_table_reservation_rejects_duplica
 
 @pytest.mark.asyncio
 async def test_create_data_query_document_with_table_reservation_overrides_existing_meta():
-    from app.modules.document.models import TableMeta
+    from app.domains.document.shared.models import TableMeta
 
     repository, _, _, KnowledgeDocument, _ = _document_modules()
     existing_meta = TableMeta(
@@ -405,7 +405,7 @@ async def test_delete_data_query_reservation_deletes_by_document_id():
 
 @pytest.mark.asyncio
 async def test_get_table_meta_by_document_selects_by_document_id():
-    from app.modules.document.models import TableMeta
+    from app.domains.document.shared.models import TableMeta
 
     repository, _, _, _, _ = _document_modules()
     table_meta = TableMeta(
@@ -427,7 +427,7 @@ async def test_get_table_meta_by_document_selects_by_document_id():
 
 @pytest.mark.asyncio
 async def test_import_data_query_table_creates_rows_metadata_and_marks_document_stored():
-    from app.modules.document.models import DocumentStatus, TableMeta
+    from app.domains.document.shared.models import DocumentStatus, TableMeta
 
     repository, _, _, _, _ = _document_modules()
     table_meta = TableMeta(
@@ -473,7 +473,7 @@ async def test_import_data_query_table_creates_rows_metadata_and_marks_document_
 
 @pytest.mark.asyncio
 async def test_import_data_query_table_inserts_rows_in_batches(monkeypatch):
-    from app.modules.document.models import TableMeta
+    from app.domains.document.shared.models import TableMeta
 
     repository, _, _, _, _ = _document_modules()
     monkeypatch.setattr(repository, "DATA_QUERY_INSERT_BATCH_SIZE", 2)
@@ -513,8 +513,8 @@ async def test_import_data_query_table_inserts_rows_in_batches(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_import_data_query_table_rolls_back_when_document_cannot_be_marked_stored():
-    from app.modules.document.errors import DataQueryIngestionFailed
-    from app.modules.document.models import TableMeta
+    from app.domains.document.shared.errors import DataQueryIngestionFailed
+    from app.domains.document.shared.models import TableMeta
 
     repository, _, _, _, _ = _document_modules()
     table_meta = TableMeta(
@@ -553,8 +553,8 @@ async def test_import_data_query_table_rolls_back_when_document_cannot_be_marked
 
 @pytest.mark.asyncio
 async def test_import_data_query_table_rejects_existing_physical_table_without_drop():
-    from app.modules.document.errors import DataQueryIngestionFailed
-    from app.modules.document.models import TableMeta
+    from app.domains.document.shared.errors import DataQueryIngestionFailed
+    from app.domains.document.shared.models import TableMeta
 
     repository, _, _, _, _ = _document_modules()
     table_meta = TableMeta(
@@ -708,7 +708,7 @@ async def test_expected_state_update_raises_state_conflict_on_zero_rows():
 
 
 def _segment_draft(**overrides):
-    from app.modules.document.chunking import SegmentDraft
+    from app.domains.document.components.splitters import SegmentDraft
 
     values = {
         "id": 9001,
@@ -764,7 +764,7 @@ async def test_complete_chunking_inserts_segments_and_marks_chunked_in_one_trans
 
 @pytest.mark.asyncio
 async def test_complete_chunking_failure_rolls_back_segment_inserts():
-    from app.modules.document.errors import ChunkPersistenceFailed
+    from app.domains.document.shared.errors import ChunkPersistenceFailed
 
     repository, _, _, _, _ = _document_modules()
     session_factory = FakeSessionFactory(rowcounts=[0])
@@ -788,9 +788,9 @@ async def test_complete_chunking_rolls_back_inserted_segments_on_postgres_stale_
     if not database_url:
         pytest.skip("set DOCUMENT_TEST_DATABASE_URL to run PostgreSQL transaction integration tests")
 
-    from app.db.base import Base
-    from app.modules.document.errors import ChunkPersistenceFailed
-    from app.modules.document.repository import DocumentRepository
+    from app.infrastructure.db.base import Base
+    from app.domains.document.shared.errors import ChunkPersistenceFailed
+    from app.domains.document.repositories.document_repository import DocumentRepository
 
     _, _, DocumentStatus, KnowledgeDocument, KnowledgeSegment = _document_modules()
 
@@ -867,10 +867,10 @@ async def test_import_data_query_table_rolls_back_dynamic_table_on_postgres_fail
     if not database_url:
         pytest.skip("set DOCUMENT_TEST_DATABASE_URL to run PostgreSQL transaction integration tests")
 
-    from app.db.base import Base
-    from app.modules.document.errors import DataQueryIngestionFailed
-    from app.modules.document.models import DocumentStatus, KnowledgeDocument, TableMeta
-    from app.modules.document.repository import DocumentRepository
+    from app.infrastructure.db.base import Base
+    from app.domains.document.shared.errors import DataQueryIngestionFailed
+    from app.domains.document.shared.models import DocumentStatus, KnowledgeDocument, TableMeta
+    from app.domains.document.repositories.document_repository import DocumentRepository
 
     schema_name = f"test_data_query_import_{uuid4().hex}"
     bootstrap_engine = create_async_engine(database_url)

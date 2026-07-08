@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+﻿from types import SimpleNamespace
 
 import pytest
 
@@ -20,7 +20,7 @@ class FakeStorage:
 
 @pytest.mark.asyncio
 async def test_load_converted_markdown_resolves_valid_public_url_to_object_key():
-    from app.modules.document.chunking import load_converted_markdown
+    from app.domains.document.components.splitters import load_converted_markdown
 
     storage = FakeStorage(payload="# Guide\ncontent".encode())
     document = SimpleNamespace(
@@ -38,7 +38,7 @@ async def test_load_converted_markdown_resolves_valid_public_url_to_object_key()
 
 @pytest.mark.asyncio
 async def test_load_converted_markdown_allows_same_document_object_key_outside_default_path():
-    from app.modules.document.chunking import load_converted_markdown
+    from app.domains.document.components.splitters import load_converted_markdown
 
     storage = FakeStorage(payload="# Alternate\ncontent".encode())
     document = SimpleNamespace(
@@ -56,8 +56,8 @@ async def test_load_converted_markdown_allows_same_document_object_key_outside_d
 
 @pytest.mark.asyncio
 async def test_load_converted_markdown_rejects_same_bucket_object_key_for_other_document():
-    from app.modules.document.chunking import load_converted_markdown
-    from app.modules.document.errors import DocumentStateConflict
+    from app.domains.document.components.splitters import load_converted_markdown
+    from app.domains.document.shared.errors import DocumentStateConflict
 
     storage = FakeStorage()
     document = SimpleNamespace(
@@ -83,8 +83,8 @@ async def test_load_converted_markdown_rejects_same_bucket_object_key_for_other_
     ],
 )
 async def test_load_converted_markdown_rejects_invalid_public_url(converted_doc_url):
-    from app.modules.document.chunking import load_converted_markdown
-    from app.modules.document.errors import DocumentStateConflict
+    from app.domains.document.components.splitters import load_converted_markdown
+    from app.domains.document.shared.errors import DocumentStateConflict
 
     storage = FakeStorage()
     document = SimpleNamespace(doc_id=42, converted_doc_url=converted_doc_url)
@@ -98,8 +98,8 @@ async def test_load_converted_markdown_rejects_invalid_public_url(converted_doc_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("download_error", [FileNotFoundError("missing"), OSError("minio down")])
 async def test_load_converted_markdown_maps_download_failures_to_unavailable(download_error):
-    from app.modules.document.chunking import load_converted_markdown
-    from app.modules.document.errors import ConvertedMarkdownUnavailable
+    from app.domains.document.components.splitters import load_converted_markdown
+    from app.domains.document.shared.errors import ConvertedMarkdownUnavailable
 
     storage = FakeStorage(download_error=download_error)
     document = SimpleNamespace(
@@ -117,8 +117,8 @@ async def test_load_converted_markdown_maps_download_failures_to_unavailable(dow
 
 @pytest.mark.asyncio
 async def test_load_converted_markdown_maps_non_utf8_bytes_to_invalid():
-    from app.modules.document.chunking import load_converted_markdown
-    from app.modules.document.errors import ConvertedMarkdownInvalid
+    from app.domains.document.components.splitters import load_converted_markdown
+    from app.domains.document.shared.errors import ConvertedMarkdownInvalid
 
     storage = FakeStorage(payload=b"\xff\xfe\xfa")
     document = SimpleNamespace(

@@ -12,7 +12,13 @@ def _repo_root() -> Path:
 def test_project_is_split_into_backend_and_frontend():
     root = _repo_root()
 
-    assert (root / "backend" / "app" / "main.py").is_file()
+    assert not (root / "backend" / "app" / "main.py").exists()
+    assert (root / "backend" / "app" / "entrypoints" / "document_api.py").is_file()
+    assert (root / "backend" / "app" / "entrypoints" / "agent_api.py").is_file()
+    assert (root / "backend" / "app" / "services" / "document_api").is_dir()
+    assert (root / "backend" / "app" / "services" / "agent_api").is_dir()
+    assert (root / "backend" / "app" / "domains" / "document").is_dir()
+    assert (root / "backend" / "app" / "domains" / "agent").is_dir()
     assert (root / "backend" / "pyproject.toml").is_file()
     assert (root / "backend" / "tests").is_dir()
     assert (root / "frontend" / "README.md").is_file()
@@ -20,22 +26,5 @@ def test_project_is_split_into_backend_and_frontend():
 
 def test_placeholder_modules_do_not_carry_unused_service_repository_model_scaffolding():
     root = _repo_root()
-    forbidden_files = [
-        root / "backend" / "app" / "modules" / "auth" / "schemas.py",
-        root / "backend" / "app" / "modules" / "auth" / "security.py",
-        root / "backend" / "app" / "modules" / "auth" / "service.py",
-        root / "backend" / "app" / "modules" / "users" / "exceptions.py",
-        root / "backend" / "app" / "modules" / "users" / "models.py",
-        root / "backend" / "app" / "modules" / "users" / "repository.py",
-        root / "backend" / "app" / "modules" / "users" / "service.py",
-        root / "backend" / "app" / "modules" / "orders" / "models.py",
-        root / "backend" / "app" / "modules" / "orders" / "repository.py",
-        root / "backend" / "app" / "modules" / "orders" / "service.py",
-    ]
-
-    existing_forbidden_files = [
-        str(path.relative_to(root)) for path in forbidden_files if path.exists()
-    ]
-
-    assert existing_forbidden_files == []
+    assert not (root / "backend" / "app" / "modules").exists()
 

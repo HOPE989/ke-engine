@@ -1,10 +1,10 @@
-from io import BytesIO
+﻿from io import BytesIO
 
 import pytest
 
 
 def _storage_module():
-    from app.modules.document import storage
+    from app.domains.document.components import storage
 
     return storage
 

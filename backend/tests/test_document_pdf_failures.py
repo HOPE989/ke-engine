@@ -1,12 +1,12 @@
-from io import BytesIO
+﻿from io import BytesIO
 from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
 
-from app.modules.document.errors import DocumentConversionFailed, DocumentStateRollbackFailed
-from app.modules.document.file_types import DocumentFileType
-from app.modules.document.models import DocumentStatus
+from app.domains.document.shared.errors import DocumentConversionFailed, DocumentStateRollbackFailed
+from app.domains.document.shared.file_types import DocumentFileType
+from app.domains.document.shared.models import DocumentStatus
 
 
 def make_zip(entries: dict[str, bytes | str]) -> bytes:
@@ -98,7 +98,7 @@ class FakeRepository:
 
 
 def make_converter_factory():
-    from app.modules.document.converters import create_default_document_converter_factory
+    from app.domains.document.components.converters import create_default_document_converter_factory
 
     return create_default_document_converter_factory()
 
@@ -130,7 +130,7 @@ def make_converter_factory():
     ],
 )
 async def test_pdf_conversion_failures_restore_uploaded(case):
-    from app.modules.document.processing import convert_uploaded_document
+    from app.domains.document.services.conversion import convert_uploaded_document
 
     repository = FakeRepository()
     storage = FakeStorage(fail_on_object_key=case.get("fail_on_object_key"))
@@ -173,7 +173,7 @@ async def test_pdf_conversion_failures_restore_uploaded(case):
     ],
 )
 async def test_pdf_conversion_image_failures_mark_converted(case):
-    from app.modules.document.processing import convert_uploaded_document
+    from app.domains.document.services.conversion import convert_uploaded_document
 
     repository = FakeRepository()
     storage = FakeStorage(fail_on_object_key=case.get("fail_on_object_key"))
@@ -202,7 +202,7 @@ async def test_pdf_conversion_image_failures_mark_converted(case):
 
 @pytest.mark.asyncio
 async def test_conversion_rollback_failure_preserves_converting_state():
-    from app.modules.document.processing import convert_uploaded_document
+    from app.domains.document.services.conversion import convert_uploaded_document
 
     repository = FakeRepository(rollback_failure=True)
 

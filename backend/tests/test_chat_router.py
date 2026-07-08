@@ -1,9 +1,9 @@
-import pytest
+﻿import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.core.exceptions import register_exception_handlers
-from app.modules.chat.router import router
+from app.services.agent_api.chat_router import router
 
 
 def assert_error_response(payload: dict, status_code: int, message_part: str) -> None:

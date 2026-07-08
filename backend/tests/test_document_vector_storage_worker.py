@@ -1,9 +1,9 @@
-import inspect
+﻿import inspect
 from types import SimpleNamespace
 
 import pytest
 
-from app.modules.document.models import DocumentStatus
+from app.domains.document.shared.models import DocumentStatus
 
 
 class FakeMessage:
@@ -40,20 +40,20 @@ def _document(status):
 
 
 def test_vector_storage_worker_exposes_runtime_injected_entrypoint():
-    from app.modules.document.workers import vector_storage
+    from app.domains.document.workers import vectorization_consumer as vector_storage
 
     assert hasattr(vector_storage, "run_document_vector_storage_with_runtime")
 
 
 def test_vector_storage_worker_removes_legacy_non_injected_entrypoint():
-    from app.modules.document.workers import vector_storage
+    from app.domains.document.workers import vectorization_consumer as vector_storage
 
     assert not hasattr(vector_storage, "run_document_vector_storage")
 
 
 @pytest.mark.asyncio
 async def test_vector_storage_consumer_subscribes_to_topic_and_group(monkeypatch):
-    from app.modules.document.workers import vector_storage
+    from app.domains.document.workers import vectorization_consumer as vector_storage
 
     calls = []
     runtime = SimpleNamespace(settings=SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"))
@@ -87,7 +87,7 @@ async def test_vector_storage_consumer_subscribes_to_topic_and_group(monkeypatch
 
 @pytest.mark.asyncio
 async def test_handle_vector_storage_message_commits_after_success(monkeypatch):
-    from app.modules.document.workers import vector_storage
+    from app.domains.document.workers import vectorization_consumer as vector_storage
 
     calls = []
     runtime = object()
@@ -116,7 +116,7 @@ async def test_handle_vector_storage_message_commits_after_success(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_vector_storage_message_does_not_commit_retryable_failure(monkeypatch):
-    from app.modules.document.workers import vector_storage
+    from app.domains.document.workers import vectorization_consumer as vector_storage
 
     async def fake_run_document_vector_storage_with_runtime(*, doc_id, runtime):
         return False
@@ -139,7 +139,7 @@ async def test_handle_vector_storage_message_does_not_commit_retryable_failure(m
 
 
 def test_vector_storage_message_handler_calls_runtime_injected_entrypoint():
-    from app.modules.document.workers import vector_storage
+    from app.domains.document.workers import vectorization_consumer as vector_storage
 
     source = inspect.getsource(vector_storage.handle_document_vector_storage_message)
 
@@ -159,7 +159,7 @@ async def test_vector_storage_event_terminal_business_states_commit_without_work
     monkeypatch,
     document,
 ):
-    from app.modules.document.workers import vector_storage
+    from app.domains.document.workers import vectorization_consumer as vector_storage
 
     calls = []
 
@@ -182,7 +182,7 @@ async def test_vector_storage_event_terminal_business_states_commit_without_work
 
 @pytest.mark.asyncio
 async def test_vector_storage_event_success_for_chunked_document_commits(monkeypatch):
-    from app.modules.document.workers import vector_storage
+    from app.domains.document.workers import vectorization_consumer as vector_storage
 
     calls = []
 
@@ -216,7 +216,7 @@ async def test_vector_storage_event_success_for_chunked_document_commits(monkeyp
 async def test_runtime_injected_vector_storage_uses_runtime_resources_and_per_document_lock(
     monkeypatch,
 ):
-    from app.modules.document.workers import vector_storage
+    from app.domains.document.workers import vectorization_consumer as vector_storage
 
     calls = []
     redis_client = object()
@@ -269,7 +269,7 @@ async def test_runtime_injected_vector_storage_uses_runtime_resources_and_per_do
 
 
 def test_runtime_injected_vector_storage_does_not_construct_runtime_owned_resources():
-    from app.modules.document.workers import vector_storage
+    from app.domains.document.workers import vectorization_consumer as vector_storage
 
     source = inspect.getsource(vector_storage.run_document_vector_storage_with_runtime)
 
@@ -292,9 +292,9 @@ def test_runtime_injected_vector_storage_does_not_construct_runtime_owned_resour
     ],
 )
 async def test_vector_storage_event_retryable_failures_do_not_commit(monkeypatch, error):
-    from app.modules.document import vector_storage as workflow
-    from app.modules.document.vector_store import VectorStoreIdCountMismatch
-    from app.modules.document.workers import vector_storage
+    from app.domains.document.services import vectorization as workflow
+    from app.domains.document.components.vector_store import VectorStoreIdCountMismatch
+    from app.domains.document.workers import vectorization_consumer as vector_storage
 
     if error == "busy":
         raised = workflow.VectorStorageLockBusy()

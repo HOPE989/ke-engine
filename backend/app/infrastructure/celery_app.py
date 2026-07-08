@@ -1,4 +1,4 @@
-"""Celery application factory for process-level background tasks."""
+﻿"""Celery application factory for process-level background tasks."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from celery import Celery
 
 from app.core.config import get_settings
-from app.modules.document.tasks.vector_storage_compensation import (
+from app.domains.document.tasks.vector_storage_compensation import (
     DOCUMENT_VECTOR_STORAGE_COMPENSATION_INTERVAL_SECONDS,
     DOCUMENT_VECTOR_STORAGE_COMPENSATION_TASK_NAME,
 )

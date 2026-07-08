@@ -1,12 +1,12 @@
-from collections.abc import AsyncIterator
+﻿from collections.abc import AsyncIterator
 from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core import config
-from app.main import create_app
-from app.modules.document.models import DocumentStatus
+from app.services.document_api.app import create_app
+from app.domains.document.shared.models import DocumentStatus
 
 
 DOCUMENT_ENV = "\n".join(
@@ -65,7 +65,7 @@ async def test_get_document_returns_current_metadata(configured_client):
         status=DocumentStatus.UPLOADED.value,
     )
     repository = FakeRepository(document)
-    app.state.document_runtime = SimpleNamespace(repository=repository)
+    app.state.document_deps = SimpleNamespace(repository=repository)
 
     response = await client.get("/api/v1/document/9007199254740993")
 
@@ -85,7 +85,7 @@ async def test_get_document_returns_current_metadata(configured_client):
 @pytest.mark.asyncio
 async def test_get_document_returns_404_when_missing(configured_client):
     client, app = configured_client
-    app.state.document_runtime = SimpleNamespace(repository=FakeRepository(None))
+    app.state.document_deps = SimpleNamespace(repository=FakeRepository(None))
 
     response = await client.get("/api/v1/document/42")
 

@@ -1,9 +1,9 @@
-import pytest
+﻿import pytest
 from fastapi import status
 
 from app.core import config
 from app.core.exceptions import AppException
-from app.modules.chat import service as chat_service_module
+from app.domains.agent.services import chat as chat_service_module
 
 
 @pytest.mark.asyncio

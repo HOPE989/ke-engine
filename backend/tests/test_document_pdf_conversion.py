@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+﻿from collections.abc import AsyncIterator
 from io import BytesIO
 import logging
 from pathlib import Path
@@ -9,11 +9,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core import config
-from app.main import create_app
-from app.modules.document import workflow
-from app.modules.document.file_types import DocumentFileType
-from app.modules.document.models import DocumentStatus
-from app.modules.document.schemas import ValidatedDocumentUpload
+from app.services.document_api.app import create_app
+from app.domains.document.services import conversion as workflow
+from app.domains.document.services import upload as upload_workflow
+from app.domains.document.shared.file_types import DocumentFileType
+from app.domains.document.shared.models import DocumentStatus
+from app.domains.document.shared.schemas import ValidatedDocumentUpload
 
 
 DOCUMENT_ENV = "\n".join(
@@ -126,7 +127,7 @@ def force_pdf_detection(monkeypatch):
     def fake_detect_document_file_type(*, filename, content, upload_content_type, magika_client):
         return DocumentFileType.PDF
 
-    monkeypatch.setattr(workflow, "detect_document_file_type", fake_detect_document_file_type)
+    monkeypatch.setattr(upload_workflow, "detect_document_file_type", fake_detect_document_file_type)
 
 
 def fake_repository(events):
@@ -186,7 +187,7 @@ def patch_router_dependencies(
         id_generator=id_generator,
         conversion_dispatcher=conversion_dispatcher,
     )
-    app.state.document_runtime = runtime
+    app.state.document_deps = runtime
 
 
 @pytest.mark.asyncio
@@ -280,7 +281,7 @@ async def test_pdf_conversion_marks_description_failures_without_losing_image_ur
         size_bytes=len(b"%PDF-1.7"),
     )
 
-    caplog.set_level(logging.WARNING, logger="app.modules.document.workflow")
+    caplog.set_level(logging.WARNING, logger="app.domains.document.services.conversion")
 
     converted_url = await workflow.convert_pdf_document(
         doc_id=42,
@@ -326,7 +327,7 @@ async def test_pdf_conversion_marks_missing_image_without_failing_conversion(cap
         size_bytes=len(b"%PDF-1.7"),
     )
 
-    caplog.set_level(logging.WARNING, logger="app.modules.document.workflow")
+    caplog.set_level(logging.WARNING, logger="app.domains.document.services.conversion")
 
     converted_url = await workflow.convert_pdf_document(
         doc_id=42,
@@ -375,7 +376,7 @@ async def test_pdf_conversion_marks_asset_upload_failure_without_failing_convers
         size_bytes=len(b"%PDF-1.7"),
     )
 
-    caplog.set_level(logging.WARNING, logger="app.modules.document.workflow")
+    caplog.set_level(logging.WARNING, logger="app.domains.document.services.conversion")
 
     converted_url = await workflow.convert_pdf_document(
         doc_id=42,
@@ -403,7 +404,7 @@ async def test_pdf_conversion_marks_asset_upload_failure_without_failing_convers
 
 
 def test_multiple_markdown_selection_prefers_pdf_conventions():
-    from app.modules.document.markdown import select_markdown_path
+    from app.domains.document.components.markdown_assets import select_markdown_path
 
     assert select_markdown_path([Path("other.md"), Path("guide.md")], "guide") == Path(
         "guide.md"

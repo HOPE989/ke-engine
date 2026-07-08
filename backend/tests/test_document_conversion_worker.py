@@ -1,4 +1,4 @@
-from io import BytesIO
+﻿from io import BytesIO
 import inspect
 import importlib.util
 from types import ModuleType, SimpleNamespace
@@ -7,9 +7,9 @@ from zipfile import ZipFile
 
 import pytest
 
-from app.modules.document.errors import DocumentConversionFailed, DocumentStateConflict
-from app.modules.document.file_types import DocumentFileType
-from app.modules.document.models import DocumentStatus, KnowledgeBaseType
+from app.domains.document.shared.errors import DocumentConversionFailed, DocumentStateConflict
+from app.domains.document.shared.file_types import DocumentFileType
+from app.domains.document.shared.models import DocumentStatus, KnowledgeBaseType
 
 
 def install_worker_dependency_stubs_if_missing():
@@ -186,14 +186,14 @@ class RecordingConsumer:
 
 
 def make_converter_factory():
-    from app.modules.document.converters import create_default_document_converter_factory
+    from app.domains.document.components.converters import create_default_document_converter_factory
 
     return create_default_document_converter_factory()
 
 
 @pytest.mark.asyncio
 async def test_conversion_consumer_subscribes_to_topic_and_group(monkeypatch):
-    from app.modules.document.workers import conversion as conversion_worker
+    from app.domains.document.workers import conversion_consumer as conversion_worker
 
     calls = []
     runtime = SimpleNamespace(settings=SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"))
@@ -256,7 +256,7 @@ def _data_query_document(*, file_type=DocumentFileType.CSV.value, status=Documen
 
 @pytest.mark.asyncio
 async def test_convert_document_content_delegates_to_injected_converter_factory():
-    from app.modules.document import processing
+    from app.domains.document.services import conversion as processing
 
     document = _document(file_type=DocumentFileType.PLAIN_TEXT.value)
     storage = object()
@@ -303,7 +303,7 @@ async def test_convert_document_content_delegates_to_injected_converter_factory(
 
 
 def test_convert_document_content_has_no_hardcoded_pdf_conversion_details():
-    from app.modules.document import processing
+    from app.domains.document.services import conversion as processing
 
     source = inspect.getsource(processing._convert_document_content)
 
@@ -316,7 +316,7 @@ def test_convert_document_content_has_no_hardcoded_pdf_conversion_details():
 
 @pytest.mark.asyncio
 async def test_worker_converts_plain_text_document_without_downloading_original():
-    from app.modules.document.processing import convert_uploaded_document
+    from app.domains.document.services.conversion import convert_uploaded_document
 
     document = _document(file_type=DocumentFileType.PLAIN_TEXT.value)
     repository = FakeRepository(document)
@@ -360,7 +360,7 @@ async def test_worker_converts_excel_and_csv_documents_by_reusing_origin_url(
     file_type,
     filename,
 ):
-    from app.modules.document.processing import convert_uploaded_document
+    from app.domains.document.services.conversion import convert_uploaded_document
 
     document = _document(file_type=file_type)
     document.doc_title = filename
@@ -399,8 +399,8 @@ async def test_worker_converts_excel_and_csv_documents_by_reusing_origin_url(
 async def test_worker_routes_data_query_csv_to_relational_ingestion_without_converted_url(
     monkeypatch,
 ):
-    from app.modules.document import processing
-    from app.modules.document.processing import convert_uploaded_document
+    from app.domains.document.services import conversion as processing
+    from app.domains.document.services.conversion import convert_uploaded_document
 
     document = _data_query_document(file_type=DocumentFileType.CSV.value)
     repository = FakeRepository(document)
@@ -440,8 +440,8 @@ async def test_worker_routes_data_query_csv_to_relational_ingestion_without_conv
 
 @pytest.mark.asyncio
 async def test_worker_treats_already_stored_data_query_document_as_terminal(monkeypatch):
-    from app.modules.document import processing
-    from app.modules.document.processing import convert_uploaded_document
+    from app.domains.document.services import conversion as processing
+    from app.domains.document.services.conversion import convert_uploaded_document
 
     document = _data_query_document(status=DocumentStatus.STORED.value)
     repository = FakeRepository(document)
@@ -470,9 +470,9 @@ async def test_worker_treats_already_stored_data_query_document_as_terminal(monk
 
 @pytest.mark.asyncio
 async def test_data_query_busy_document_lock_leaves_kafka_message_uncommitted(monkeypatch):
-    from app.modules.document.events import DocumentConvertRequested
-    from app.modules.document.errors import DocumentConversionLockBusy
-    from app.modules.document.workers import conversion as conversion_worker
+    from app.contracts.document.events import DocumentConvertRequested
+    from app.domains.document.shared.errors import DocumentConversionLockBusy
+    from app.domains.document.workers import conversion_consumer as conversion_worker
 
     class BusyLock:
         def acquire(self, *, blocking):
@@ -504,7 +504,7 @@ async def test_data_query_busy_document_lock_leaves_kafka_message_uncommitted(mo
 
 @pytest.mark.asyncio
 async def test_worker_converts_pdf_from_original_object_and_uploads_markdown():
-    from app.modules.document.processing import convert_uploaded_document
+    from app.domains.document.services.conversion import convert_uploaded_document
 
     document = _document(file_type=DocumentFileType.PDF.value)
     repository = FakeRepository(document)
@@ -558,8 +558,8 @@ async def test_worker_converts_pdf_from_original_object_and_uploads_markdown():
 
 @pytest.mark.asyncio
 async def test_locked_worker_uses_kafka_runtime_resources(monkeypatch):
-    from app.modules.document import processing as processing_module
-    from app.modules.document.workers import conversion as conversion_worker
+    from app.domains.document.services import conversion as processing_module
+    from app.domains.document.workers import conversion_consumer as conversion_worker
 
     calls = []
 
@@ -598,7 +598,7 @@ async def test_locked_worker_uses_kafka_runtime_resources(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_conversion_uses_runtime_redis_client_and_per_document_lock(monkeypatch):
-    from app.modules.document.workers import conversion as conversion_worker
+    from app.domains.document.workers import conversion_consumer as conversion_worker
 
     calls = []
     redis_client = object()
@@ -648,8 +648,8 @@ async def test_conversion_uses_runtime_redis_client_and_per_document_lock(monkey
 async def test_conversion_message_does_not_initialize_or_close_runtime_owned_resources(
     monkeypatch,
 ):
-    from app.db import session as session_module
-    from app.modules.document.workers import conversion as conversion_worker
+    from app.infrastructure.db import session as session_module
+    from app.domains.document.workers import conversion_consumer as conversion_worker
 
     async def fail_db_lifecycle(*args, **kwargs):
         raise AssertionError("conversion hot path must not own DB engine lifecycle")
@@ -675,7 +675,7 @@ async def test_conversion_message_does_not_initialize_or_close_runtime_owned_res
 
 
 def test_conversion_hot_path_uses_runtime_repository_without_db_lifecycle():
-    from app.modules.document.workers import conversion as conversion_worker
+    from app.domains.document.workers import conversion_consumer as conversion_worker
 
     source = inspect.getsource(conversion_worker.run_locked_document_conversion)
 
@@ -686,7 +686,7 @@ def test_conversion_hot_path_uses_runtime_repository_without_db_lifecycle():
 
 
 def test_conversion_hot_path_uses_runtime_owned_external_resources():
-    from app.modules.document.workers import conversion as conversion_worker
+    from app.domains.document.workers import conversion_consumer as conversion_worker
 
     source = inspect.getsource(conversion_worker.run_locked_document_conversion)
 
@@ -701,7 +701,7 @@ def test_conversion_hot_path_uses_runtime_owned_external_resources():
 
 
 def test_conversion_worker_removes_legacy_lazy_runtime_resource_helpers():
-    from app.modules.document.workers import conversion as conversion_worker
+    from app.domains.document.workers import conversion_consumer as conversion_worker
 
     source = inspect.getsource(conversion_worker)
 
@@ -714,7 +714,7 @@ def test_conversion_worker_removes_legacy_lazy_runtime_resource_helpers():
 async def test_image_describer_invokes_langchain_with_human_message():
     from langchain_core.messages import HumanMessage
 
-    from app.workers.kafka_worker import RuntimeImageDescriber
+    from app.entrypoints.document_worker import RuntimeImageDescriber
 
     class FakeModel:
         def __init__(self):
@@ -753,7 +753,7 @@ async def test_image_describer_invokes_langchain_with_human_message():
 
 @pytest.mark.asyncio
 async def test_kafka_worker_runtime_initializes_converter_factory_at_startup(monkeypatch):
-    from app.workers import kafka_worker
+    from app.entrypoints import document_worker as kafka_worker
 
     converter_factory = object()
     calls = []
@@ -833,7 +833,7 @@ async def test_worker_rolls_back_to_uploaded_when_pdf_conversion_fails(
     storage_failure_key,
     mineru_failure,
 ):
-    from app.modules.document.processing import convert_uploaded_document
+    from app.domains.document.services.conversion import convert_uploaded_document
 
     document = _document(file_type=DocumentFileType.PDF.value)
     repository = FakeRepository(document)
@@ -867,7 +867,7 @@ async def test_worker_rolls_back_to_uploaded_when_pdf_conversion_fails(
 
 @pytest.mark.asyncio
 async def test_worker_marks_converted_when_pdf_asset_upload_fails():
-    from app.modules.document.processing import convert_uploaded_document
+    from app.domains.document.services.conversion import convert_uploaded_document
 
     document = _document(file_type=DocumentFileType.PDF.value)
     repository = FakeRepository(document)
@@ -911,7 +911,7 @@ async def test_worker_marks_converted_when_pdf_asset_upload_fails():
 
 @pytest.mark.asyncio
 async def test_worker_skips_conversion_when_state_transition_conflicts():
-    from app.modules.document.processing import convert_uploaded_document
+    from app.domains.document.services.conversion import convert_uploaded_document
 
     document = _document(file_type=DocumentFileType.PDF.value)
     repository = FakeRepository(document, start_conflict=True)
@@ -936,7 +936,7 @@ async def test_worker_skips_conversion_when_state_transition_conflicts():
 
 @pytest.mark.asyncio
 async def test_worker_lock_runs_conversion_once_and_releases_lock():
-    from app.modules.document.processing import convert_document_with_lock
+    from app.domains.document.services.conversion import convert_document_with_lock
 
     document = _document(file_type=DocumentFileType.PLAIN_TEXT.value)
     repository = FakeRepository(document)
@@ -964,7 +964,7 @@ async def test_worker_lock_runs_conversion_once_and_releases_lock():
 
 @pytest.mark.asyncio
 async def test_worker_lock_skips_conversion_when_lock_is_busy():
-    from app.modules.document.processing import convert_document_with_lock
+    from app.domains.document.services.conversion import convert_document_with_lock
 
     document = _document(file_type=DocumentFileType.PLAIN_TEXT.value)
     repository = FakeRepository(document)

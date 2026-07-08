@@ -1,9 +1,9 @@
-from io import BytesIO
+﻿from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
 
-from app.modules.document.file_types import DocumentFileType
+from app.domains.document.shared.file_types import DocumentFileType
 
 
 EXPECTED_HEADERS = [
@@ -41,7 +41,7 @@ class FakeIdGenerator:
 def test_markdown_header_parent_splitter_extends_langchain_text_splitter():
     from langchain_text_splitters.base import TextSplitter
 
-    from app.modules.document.chunking import MarkdownHeaderParentTextSplitter
+    from app.domains.document.components.splitters import MarkdownHeaderParentTextSplitter
 
     splitter = MarkdownHeaderParentTextSplitter(chunk_size=100, overlap=0)
 
@@ -50,7 +50,7 @@ def test_markdown_header_parent_splitter_extends_langchain_text_splitter():
 
 
 def test_document_splitter_factory_maps_file_type_to_single_splitter():
-    from app.modules.document import chunking
+    from app.domains.document.components import splitters as chunking
 
     factory = chunking.create_default_document_splitter_factory()
 
@@ -77,7 +77,7 @@ def test_document_splitter_factory_maps_file_type_to_single_splitter():
 
 
 def test_document_splitter_factory_rejects_duplicate_file_type_mapping():
-    from app.modules.document import chunking
+    from app.domains.document.components import splitters as chunking
 
     factory = chunking.DocumentSplitterFactory()
     factory.register(
@@ -93,8 +93,8 @@ def test_document_splitter_factory_rejects_duplicate_file_type_mapping():
 
 
 def test_document_splitter_factory_rejects_unregistered_file_type():
-    from app.modules.document import chunking
-    from app.modules.document.errors import ChunkSplittingFailed
+    from app.domains.document.components import splitters as chunking
+    from app.domains.document.shared.errors import ChunkSplittingFailed
 
     factory = chunking.create_default_document_splitter_factory()
 
@@ -103,7 +103,7 @@ def test_document_splitter_factory_rejects_unregistered_file_type():
 
 
 def test_markdown_header_splitter_uses_stable_configuration(monkeypatch):
-    from app.modules.document import chunking
+    from app.domains.document.components import splitters as chunking
 
     captured = {}
 
@@ -139,7 +139,7 @@ def test_markdown_header_splitter_uses_stable_configuration(monkeypatch):
 
 
 def test_recursive_splitter_uses_request_parameters_and_stable_separators(monkeypatch):
-    from app.modules.document import chunking
+    from app.domains.document.components import splitters as chunking
 
     captured = {}
 
@@ -204,7 +204,7 @@ def test_recursive_splitter_uses_request_parameters_and_stable_separators(monkey
 
 
 def test_recursive_splitter_is_reused_for_multiple_oversized_sections(monkeypatch):
-    from app.modules.document import chunking
+    from app.domains.document.components import splitters as chunking
 
     constructed = []
     split_inputs = []
@@ -258,7 +258,7 @@ def test_recursive_splitter_is_reused_for_multiple_oversized_sections(monkeypatc
 
 
 def test_splitter_returns_normal_section_when_within_chunk_size():
-    from app.modules.document.chunking import split_markdown_into_chunks
+    from app.domains.document.components.splitters import split_markdown_into_chunks
 
     chunks = split_markdown_into_chunks(
         "# Guide\nshort content",
@@ -276,7 +276,7 @@ def test_splitter_returns_normal_section_when_within_chunk_size():
 
 
 def test_splitter_returns_parent_and_children_for_oversized_section():
-    from app.modules.document.chunking import split_markdown_into_chunks
+    from app.domains.document.components.splitters import split_markdown_into_chunks
 
     markdown = "# Guide\nalpha beta gamma delta epsilon zeta eta theta"
 
@@ -303,7 +303,7 @@ def test_splitter_returns_parent_and_children_for_oversized_section():
 
 
 def test_splitter_discards_empty_chunks(monkeypatch):
-    from app.modules.document import chunking
+    from app.domains.document.components import splitters as chunking
 
     class FakeMarkdownHeaderTextSplitter:
         def __init__(self, **kwargs):
@@ -333,7 +333,7 @@ def test_splitter_discards_empty_chunks(monkeypatch):
 
 
 def test_splitter_returns_zero_segments_for_empty_markdown():
-    from app.modules.document.chunking import split_markdown_into_chunks
+    from app.domains.document.components.splitters import split_markdown_into_chunks
 
     assert (
         split_markdown_into_chunks(
@@ -397,7 +397,7 @@ def _html_row(tag, values):
 
 @pytest.mark.asyncio
 async def test_excel2html_splitter_builds_compact_sections_with_repeated_header():
-    from app.modules.document.chunking import Excel2HTMLParentTextSplitter
+    from app.domains.document.components.splitters import Excel2HTMLParentTextSplitter
 
     rows = [["Name", "Dept", "Amount"]] + [
         [f"User {index}", "Sales", index] for index in range(1, 14)
@@ -438,7 +438,7 @@ async def test_excel2html_splitter_builds_compact_sections_with_repeated_header(
 
 @pytest.mark.asyncio
 async def test_excel2html_splitter_escapes_html_skips_empty_sheets_and_keeps_multi_sheet_order():
-    from app.modules.document.chunking import Excel2HTMLParentTextSplitter
+    from app.domains.document.components.splitters import Excel2HTMLParentTextSplitter
 
     storage = FakeTableStorage(
         _xlsx_bytes(
@@ -483,7 +483,7 @@ async def test_excel2html_splitter_escapes_html_skips_empty_sheets_and_keeps_mul
 
 @pytest.mark.asyncio
 async def test_csv_splitter_uses_data_sheet_name_and_encoding_fallback():
-    from app.modules.document.chunking import Excel2HTMLParentTextSplitter
+    from app.domains.document.components.splitters import Excel2HTMLParentTextSplitter
 
     csv_text = "\u59d3\u540d,\u90e8\u95e8\n\u5f20\u4e09,\u9500\u552e\n"
     storage = FakeTableStorage(csv_text.encode("gb18030"))
@@ -506,7 +506,7 @@ async def test_csv_splitter_uses_data_sheet_name_and_encoding_fallback():
 
 @pytest.mark.asyncio
 async def test_excel2html_splitter_returns_parent_and_children_for_oversized_section():
-    from app.modules.document.chunking import Excel2HTMLParentTextSplitter
+    from app.domains.document.components.splitters import Excel2HTMLParentTextSplitter
 
     rows = [["Name", "Notes"], ["Alice", " ".join(["long"] * 80)]]
     storage = FakeTableStorage(_xlsx_bytes([("Notes", rows)]))
@@ -542,7 +542,7 @@ def _document():
 
 
 def _segment_metadata_for_text(text):
-    from app.modules.document.chunking import (
+    from app.domains.document.components.splitters import (
         MarkdownSplitChunk,
         build_segment_drafts,
     )

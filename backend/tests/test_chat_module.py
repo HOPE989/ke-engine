@@ -1,10 +1,10 @@
-from fastapi import APIRouter
+﻿from fastapi import APIRouter
 
 
 def test_chat_module_exposes_function_style_components():
-    from app.modules.chat.router import router
-    from app.modules.chat.schemas import ChatRequest, ChatResponse
-    from app.modules.chat import service as chat_service
+    from app.contracts.agent.http import ChatRequest, ChatResponse
+    from app.services.agent_api.chat_router import router
+    from app.domains.agent.services import chat as chat_service
 
     assert router
     assert isinstance(router, APIRouter)

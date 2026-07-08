@@ -1,9 +1,9 @@
-import pytest
+﻿import pytest
 
 
 @pytest.mark.asyncio
 async def test_start_worker_consumers_owns_runtime_stack_and_runs_document_workers_with_shared_runtime(monkeypatch):
-    from app.workers import kafka_worker
+    from app.entrypoints import document_worker as kafka_worker
 
     calls = []
     settings = object()
@@ -74,7 +74,7 @@ async def test_start_worker_consumers_owns_runtime_stack_and_runs_document_worke
 
 @pytest.mark.asyncio
 async def test_worker_main_configures_logging_before_starting_consumers(monkeypatch):
-    from app.workers import kafka_worker
+    from app.entrypoints import document_worker as kafka_worker
 
     calls = []
 

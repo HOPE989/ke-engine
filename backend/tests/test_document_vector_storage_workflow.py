@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+﻿from types import SimpleNamespace
 
 import pytest
 
@@ -137,7 +137,7 @@ def _segment(segment_id, *, skip_embedding=False):
 
 @pytest.mark.asyncio
 async def test_vector_storage_success_scans_fixed_first_page_and_completes_document():
-    from app.modules.document.vector_storage import store_document_vectors
+    from app.domains.document.services.vectorization import store_document_vectors
 
     repository = FakeRepository(
         batches=[
@@ -175,7 +175,7 @@ async def test_vector_storage_success_scans_fixed_first_page_and_completes_docum
 
 @pytest.mark.asyncio
 async def test_vector_storage_zero_embeddable_or_only_skipped_segments_completes_without_model_calls():
-    from app.modules.document.vector_storage import store_document_vectors
+    from app.domains.document.services.vectorization import store_document_vectors
 
     repository = FakeRepository(batches=[[]], remaining_count=0)
     vector_store = FakeVectorStore()
@@ -196,7 +196,7 @@ async def test_vector_storage_zero_embeddable_or_only_skipped_segments_completes
 
 @pytest.mark.asyncio
 async def test_vector_storage_busy_lock_does_not_open_transaction_or_cleanup():
-    from app.modules.document import vector_storage
+    from app.domains.document.services import vectorization as vector_storage
 
     repository = FakeRepository(batches=[[]])
     vector_store = FakeVectorStore()
@@ -223,7 +223,7 @@ async def test_vector_storage_busy_lock_does_not_open_transaction_or_cleanup():
     ],
 )
 async def test_vector_storage_model_or_elasticsearch_failure_rolls_back_and_cleans_doc_id(error):
-    from app.modules.document import vector_storage
+    from app.domains.document.services import vectorization as vector_storage
 
     repository = FakeRepository(batches=[[_segment(1)]])
     vector_store = FakeVectorStore(add_errors=[error])
@@ -244,8 +244,8 @@ async def test_vector_storage_model_or_elasticsearch_failure_rolls_back_and_clea
 
 @pytest.mark.asyncio
 async def test_vector_storage_returned_id_mismatch_cleans_returned_ids_and_doc_id():
-    from app.modules.document import vector_storage
-    from app.modules.document.vector_store import VectorStoreIdCountMismatch
+    from app.domains.document.services import vectorization as vector_storage
+    from app.domains.document.components.vector_store import VectorStoreIdCountMismatch
 
     repository = FakeRepository(batches=[[_segment(1), _segment(2)]])
     vector_store = FakeVectorStore(
@@ -267,8 +267,8 @@ async def test_vector_storage_returned_id_mismatch_cleans_returned_ids_and_doc_i
 
 @pytest.mark.asyncio
 async def test_vector_storage_db_update_failure_rolls_back_and_cleans_vectors():
-    from app.modules.document import vector_storage
-    from app.modules.document.errors import DocumentStateConflict
+    from app.domains.document.services import vectorization as vector_storage
+    from app.domains.document.shared.errors import DocumentStateConflict
 
     repository = FakeRepository(
         batches=[[_segment(1), _segment(2)]],
@@ -291,7 +291,7 @@ async def test_vector_storage_db_update_failure_rolls_back_and_cleans_vectors():
 
 @pytest.mark.asyncio
 async def test_vector_storage_double_check_failure_rolls_back_and_cleans_vectors():
-    from app.modules.document import vector_storage
+    from app.domains.document.services import vectorization as vector_storage
 
     repository = FakeRepository(
         batches=[[_segment(1)], []],

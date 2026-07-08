@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+﻿from collections.abc import AsyncIterator
 from types import SimpleNamespace
 
 import pytest
@@ -6,7 +6,7 @@ from httpx import ASGITransport, AsyncClient
 from starlette.datastructures import UploadFile
 
 from app.core import config
-from app.main import create_app
+from app.services.document_api.app import create_app
 
 
 DOCUMENT_ENV = "\n".join(
@@ -47,7 +47,7 @@ def patch_router_dependencies(app, document_router, monkeypatch):
         conversion_dispatcher=object(),
         redis_client=object(),
     )
-    app.state.document_runtime = runtime
+    app.state.document_deps = runtime
 
 
 class FakeMagikaOutput:
@@ -94,7 +94,7 @@ class RecordingDataQueryRepository:
     async def create_data_query_document_with_table_reservation(self, **kwargs):
         self.events.append({"action": "reserve", **kwargs})
         if self.conflict:
-            from app.modules.document.errors import DataQueryTableNameConflict
+            from app.domains.document.shared.errors import DataQueryTableNameConflict
 
             raise DataQueryTableNameConflict()
         return SimpleNamespace(
@@ -162,7 +162,7 @@ async def validation_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncC
     workflow_calls = []
 
     try:
-        from app.modules.document import router as document_router
+        from app.services.document_api import document_router
 
         async def fail_if_workflow_is_called(**kwargs):
             workflow_calls.append(kwargs)
@@ -196,8 +196,8 @@ async def client_with_capturing_workflow(
     captured = {}
 
     try:
-        from app.modules.document import router as document_router
-        from app.modules.document.schemas import DocumentMetadata
+        from app.services.document_api import document_router
+        from app.contracts.document.http import DocumentMetadata
 
         async def capture_upload(**kwargs):
             upload = kwargs["upload"]
@@ -252,7 +252,7 @@ async def client_with_data_query_runtime(
         redis_client=object(),
     )
     app.state.settings = config.get_settings()
-    app.state.document_runtime = runtime
+    app.state.document_deps = runtime
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -449,7 +449,7 @@ async def test_unreadable_upload_stream_returns_invalid_request_before_workflow(
 
 @pytest.mark.asyncio
 async def test_upload_validation_stops_reading_when_size_limit_is_exceeded():
-    from app.modules.document.schemas import (
+    from app.domains.document.shared.schemas import (
         DocumentFileTooLarge,
         validate_document_upload,
     )
@@ -634,7 +634,7 @@ async def test_data_query_non_spreadsheet_upload_returns_415_before_persistence(
     client_with_data_query_runtime,
     monkeypatch,
 ):
-    from app.modules.document import router as document_router
+    from app.services.document_api import document_router
 
     lock = RecordingUploadLock()
     monkeypatch.setattr(
@@ -668,7 +668,7 @@ async def test_data_query_upload_lock_busy_returns_409_before_persistence(
     client_with_data_query_runtime,
     monkeypatch,
 ):
-    from app.modules.document import router as document_router
+    from app.services.document_api import document_router
 
     lock = RecordingUploadLock(acquired=False)
     monkeypatch.setattr(
@@ -703,7 +703,7 @@ async def test_data_query_upload_lock_failure_returns_503_before_persistence(
     client_with_data_query_runtime,
     monkeypatch,
 ):
-    from app.modules.document import router as document_router
+    from app.services.document_api import document_router
 
     lock = RecordingUploadLock(failure=RuntimeError("redis down"))
     monkeypatch.setattr(
@@ -738,7 +738,7 @@ async def test_duplicate_data_query_table_name_returns_409_before_storage(
     client_with_data_query_runtime,
     monkeypatch,
 ):
-    from app.modules.document import router as document_router
+    from app.services.document_api import document_router
 
     lock = RecordingUploadLock()
     monkeypatch.setattr(
@@ -775,7 +775,7 @@ async def test_data_query_override_intent_reaches_reservation_workflow(
     client_with_data_query_runtime,
     monkeypatch,
 ):
-    from app.modules.document import router as document_router
+    from app.services.document_api import document_router
 
     lock = RecordingUploadLock()
     monkeypatch.setattr(
@@ -815,7 +815,7 @@ async def test_data_query_original_storage_failure_deletes_new_reservation(
     client_with_data_query_runtime,
     monkeypatch,
 ):
-    from app.modules.document import router as document_router
+    from app.services.document_api import document_router
 
     lock = RecordingUploadLock()
     monkeypatch.setattr(
@@ -853,7 +853,7 @@ async def test_data_query_upload_release_failure_after_success_does_not_mask_acc
     client_with_data_query_runtime,
     monkeypatch,
 ):
-    from app.modules.document import router as document_router
+    from app.services.document_api import document_router
 
     lock = RecordingUploadLock(release_failure=RuntimeError("redis release failed"))
     monkeypatch.setattr(

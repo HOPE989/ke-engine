@@ -1,13 +1,13 @@
-from io import BytesIO
+﻿from io import BytesIO
 import importlib
 from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
 
-from app.modules.document.errors import DocumentConversionFailed
-from app.modules.document.file_types import DocumentFileType
-from app.modules.document.models import DocumentStatus
+from app.domains.document.shared.errors import DocumentConversionFailed
+from app.domains.document.shared.file_types import DocumentFileType
+from app.domains.document.shared.models import DocumentStatus
 
 
 def make_zip(entries: dict[str, bytes | str]) -> bytes:
@@ -20,10 +20,10 @@ def make_zip(entries: dict[str, bytes | str]) -> bytes:
 
 def load_converters_module():
     try:
-        return importlib.import_module("app.modules.document.converters")
+        return importlib.import_module("app.domains.document.components.converters")
     except ModuleNotFoundError as exc:
-        if exc.name == "app.modules.document.converters":
-            pytest.fail("app.modules.document.converters module is missing")
+        if exc.name == "app.domains.document.components.converters":
+            pytest.fail("app.domains.document.components.converters module is missing")
         raise
 
 

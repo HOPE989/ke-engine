@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+﻿from types import SimpleNamespace
 
 
 class FakeIdGenerator:
@@ -26,7 +26,7 @@ def _split_chunk(
     parent_chunk_id=None,
     metadata=None,
 ):
-    from app.modules.document.chunking import MarkdownSplitChunk
+    from app.domains.document.components.splitters import MarkdownSplitChunk
 
     return MarkdownSplitChunk(
         chunk_id=chunk_id,
@@ -38,7 +38,7 @@ def _split_chunk(
 
 
 def test_segment_drafts_allocate_snowflake_id_and_reuse_string_chunk_id():
-    from app.modules.document.chunking import build_segment_drafts
+    from app.domains.document.components.splitters import build_segment_drafts
 
     drafts = build_segment_drafts(
         document=_document(),
@@ -57,7 +57,7 @@ def test_segment_drafts_allocate_snowflake_id_and_reuse_string_chunk_id():
 
 
 def test_segment_drafts_assign_zero_based_order_including_parent_rows():
-    from app.modules.document.chunking import build_segment_drafts
+    from app.domains.document.components.splitters import build_segment_drafts
 
     drafts = build_segment_drafts(
         document=_document(),
@@ -85,7 +85,7 @@ def test_segment_drafts_assign_zero_based_order_including_parent_rows():
 
 
 def test_segment_metadata_contains_required_document_and_chunk_fields():
-    from app.modules.document.chunking import build_segment_drafts
+    from app.domains.document.components.splitters import build_segment_drafts
 
     drafts = build_segment_drafts(
         document=_document(),
@@ -121,7 +121,7 @@ def test_segment_metadata_contains_required_document_and_chunk_fields():
 
 
 def test_segment_metadata_duplicates_selected_database_fields():
-    from app.modules.document.chunking import build_segment_drafts
+    from app.domains.document.components.splitters import build_segment_drafts
 
     drafts = build_segment_drafts(
         document=_document(),

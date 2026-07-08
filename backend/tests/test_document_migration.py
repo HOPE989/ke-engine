@@ -1,4 +1,4 @@
-import importlib.util
+﻿import importlib.util
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -454,7 +454,7 @@ def test_data_query_migration_creates_table_meta_schema(monkeypatch):
 
 
 def test_document_models_include_data_query_spreadsheet_schema_fields():
-    from app.modules.document.models import DocumentStatus, KnowledgeDocument, TableMeta
+    from app.domains.document.shared.models import DocumentStatus, KnowledgeDocument, TableMeta
 
     assert DocumentStatus.STORED.value == "STORED"
     document_columns = KnowledgeDocument.__table__.c

@@ -1,10 +1,10 @@
-import json
+﻿import json
 
 import pytest
 
 
 def test_document_convert_requested_serializes_doc_id_as_string():
-    from app.modules.document.events import (
+    from app.contracts.document.events import (
         DOCUMENT_CONVERT_REQUESTED_TOPIC,
         DocumentConvertRequested,
     )
@@ -21,7 +21,7 @@ def test_document_convert_requested_serializes_doc_id_as_string():
 
 
 def test_document_embed_store_requested_serializes_doc_id_as_string():
-    from app.modules.document.events import (
+    from app.contracts.document.events import (
         DOCUMENT_EMBED_STORE_REQUESTED_TOPIC,
         DocumentEmbedStoreRequested,
     )
@@ -40,7 +40,7 @@ def test_document_embed_store_requested_serializes_doc_id_as_string():
 
 
 def test_document_convert_requested_rejects_wrong_event_type():
-    from app.modules.document.events import DocumentConvertRequested
+    from app.contracts.document.events import DocumentConvertRequested
 
     with pytest.raises(ValueError, match="unsupported event_type"):
         DocumentConvertRequested.from_json(

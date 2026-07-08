@@ -1,9 +1,9 @@
-import pytest
+﻿import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core import config
-from app.main import create_app
-from app.modules.chat import service as chat_service_module
+from app.services.agent_api.app import create_app
+from app.domains.agent.services import chat as chat_service_module
 
 
 @pytest.mark.asyncio

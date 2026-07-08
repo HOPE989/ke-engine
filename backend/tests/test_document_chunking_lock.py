@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 
 
 class FakeLock:
@@ -53,7 +53,7 @@ def test_document_chunking_lock_factory_uses_document_chunk_key(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_document_chunk_lock_helper_acquires_and_releases_lock():
-    from app.modules.document.chunking import run_with_document_chunk_lock
+    from app.domains.document.components.splitters import run_with_document_chunk_lock
 
     calls = []
 
@@ -73,8 +73,8 @@ async def test_document_chunk_lock_helper_acquires_and_releases_lock():
 
 @pytest.mark.asyncio
 async def test_document_chunk_lock_helper_rejects_busy_lock_without_operation():
-    from app.modules.document.chunking import run_with_document_chunk_lock
-    from app.modules.document.errors import DocumentStateConflict
+    from app.domains.document.components.splitters import run_with_document_chunk_lock
+    from app.domains.document.shared.errors import DocumentStateConflict
 
     calls = []
 
@@ -93,8 +93,8 @@ async def test_document_chunk_lock_helper_rejects_busy_lock_without_operation():
 
 @pytest.mark.asyncio
 async def test_document_chunk_lock_helper_maps_lock_infrastructure_failure():
-    from app.modules.document.chunking import run_with_document_chunk_lock
-    from app.modules.document.errors import ChunkLockUnavailable
+    from app.domains.document.components.splitters import run_with_document_chunk_lock
+    from app.domains.document.shared.errors import ChunkLockUnavailable
 
     async def operation():
         raise AssertionError("operation must not run when lock infrastructure fails")
@@ -110,7 +110,7 @@ async def test_document_chunk_lock_helper_maps_lock_infrastructure_failure():
 
 @pytest.mark.asyncio
 async def test_document_chunk_lock_helper_ignores_release_failure_after_success():
-    from app.modules.document.chunking import run_with_document_chunk_lock
+    from app.domains.document.components.splitters import run_with_document_chunk_lock
 
     async def operation():
         return "chunked"
@@ -126,7 +126,7 @@ async def test_document_chunk_lock_helper_ignores_release_failure_after_success(
 
 @pytest.mark.asyncio
 async def test_document_chunk_lock_helper_preserves_operation_failure_when_release_fails():
-    from app.modules.document.chunking import run_with_document_chunk_lock
+    from app.domains.document.components.splitters import run_with_document_chunk_lock
 
     operation_error = RuntimeError("markdown failed")
 

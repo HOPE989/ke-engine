@@ -1,14 +1,14 @@
-from collections.abc import AsyncIterator
+﻿from collections.abc import AsyncIterator
 from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core import config
-from app.main import create_app
-from app.modules.document import workflow
-from app.modules.document.file_types import DocumentFileType
-from app.modules.document.models import DocumentStatus
+from app.services.document_api.app import create_app
+from app.domains.document.services import upload as workflow
+from app.domains.document.shared.file_types import DocumentFileType
+from app.domains.document.shared.models import DocumentStatus
 
 
 DOCUMENT_ENV = "\n".join(
@@ -169,7 +169,7 @@ def _patch_router_dependencies(
         id_generator=id_generator,
         conversion_dispatcher=conversion_dispatcher,
     )
-    app.state.document_runtime = runtime
+    app.state.document_deps = runtime
 
 
 @pytest.mark.asyncio

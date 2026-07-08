@@ -1,6 +1,6 @@
-import pytest
+﻿import pytest
 
-from app.modules.document import markdown as markdown_module
+from app.domains.document.components import markdown_assets as markdown_module
 
 
 def test_parse_markdown_image_references_captures_supported_inline_images():

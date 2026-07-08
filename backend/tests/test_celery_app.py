@@ -1,9 +1,9 @@
-from types import SimpleNamespace
+﻿from types import SimpleNamespace
 
 
 def test_create_celery_app_uses_redis_json_and_utc(monkeypatch):
     from app.infrastructure import celery_app
-    from app.modules.document.tasks.vector_storage_compensation import (
+    from app.domains.document.tasks.vector_storage_compensation import (
         DOCUMENT_VECTOR_STORAGE_COMPENSATION_INTERVAL_SECONDS,
         DOCUMENT_VECTOR_STORAGE_COMPENSATION_TASK_NAME,
     )
@@ -15,7 +15,7 @@ def test_create_celery_app_uses_redis_json_and_utc(monkeypatch):
     )
 
     app = celery_app.create_celery_app(
-        include=["app.modules.document.tasks.vector_storage_compensation"]
+        include=["app.domains.document.tasks.vector_storage_compensation"]
     )
 
     assert app.main == "ke_engine"
@@ -25,7 +25,7 @@ def test_create_celery_app_uses_redis_json_and_utc(monkeypatch):
     assert app.conf.result_serializer == "json"
     assert app.conf.timezone == "UTC"
     assert app.conf.enable_utc is True
-    assert app.conf.include == ["app.modules.document.tasks.vector_storage_compensation"]
+    assert app.conf.include == ["app.domains.document.tasks.vector_storage_compensation"]
     assert app.conf.beat_schedule == {
         "document-vector-storage-compensation": {
             "task": DOCUMENT_VECTOR_STORAGE_COMPENSATION_TASK_NAME,

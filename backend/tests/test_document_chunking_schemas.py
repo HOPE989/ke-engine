@@ -1,11 +1,10 @@
-import pytest
+﻿import pytest
 from pydantic import ValidationError
 
 
 def _schema_symbols():
-    from app.modules.document.schemas import (
-        DocumentChunkRequest,
-        DocumentChunkResponse,
+    from app.contracts.document.http import DocumentChunkRequest, DocumentChunkResponse
+    from app.domains.document.shared.schemas import (
         InvalidDocumentChunkRequest,
         validate_document_chunk_request,
     )

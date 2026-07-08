@@ -1,4 +1,4 @@
-"""MinerU miner 工厂与官方/本地 API 调用封装。"""
+﻿"""MinerU miner 工厂与官方/本地 API 调用封装。"""
 
 import asyncio
 import logging
@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from app.modules.document.errors import DocumentConversionFailed
+from app.domains.document.shared.errors import DocumentConversionFailed
 
 logger = logging.getLogger(__name__)
 

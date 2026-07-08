@@ -1,4 +1,4 @@
-import inspect
+﻿import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -109,7 +109,8 @@ def test_mineru_client_is_created_from_startup_settings(monkeypatch):
 
 
 def test_upload_workflow_accepts_preowned_dependencies_without_resource_wrapper():
-    from app.modules.document import workflow
+    from app.domains.document.services import upload as workflow
+    from app.domains.document.services import conversion as conversion_workflow
 
     assert not hasattr(workflow, "DocumentUploadResources")
     upload_signature = inspect.signature(workflow.upload_document)
@@ -121,7 +122,7 @@ def test_upload_workflow_accepts_preowned_dependencies_without_resource_wrapper(
         "id_generator",
         "conversion_dispatcher",
     ]
-    convert_signature = inspect.signature(workflow.convert_pdf_document)
+    convert_signature = inspect.signature(conversion_workflow.convert_pdf_document)
     assert list(convert_signature.parameters) == [
         "doc_id",
         "upload",
@@ -131,16 +132,20 @@ def test_upload_workflow_accepts_preowned_dependencies_without_resource_wrapper(
     ]
 
     source = inspect.getsource(workflow)
+    conversion_source = inspect.getsource(conversion_workflow)
     for forbidden_constructor in ["Minio(", "Magika(", "httpx.AsyncClient("]:
         assert forbidden_constructor not in source
+        assert forbidden_constructor not in conversion_source
     assert "from app.modules.document.mineru import" not in source
+    assert "from app.modules.document.mineru import" not in conversion_source
     assert "request_mineru_zip" not in source
-    assert "mineru_client.request_zip(" in source
+    assert "request_mineru_zip" not in conversion_source
+    assert "mineru_client.request_zip(" in conversion_source
     assert "await conversion_dispatcher.dispatch(" in source
 
 
 def test_document_repository_owns_short_lived_sessions():
-    from app.modules.document import repository
+    from app.domains.document.repositories import document_repository as repository
 
     assert hasattr(repository, "DocumentRepository")
     assert not hasattr(repository, "create_init_document")
@@ -156,11 +161,11 @@ def test_document_repository_owns_short_lived_sessions():
     assert "async with self._session_factory() as session" in source
 
 
-def test_api_deps_define_document_module_runtime_without_api_runtime():
-    from app.api import deps
+def test_api_deps_define_document_module_dependencies_without_api_runtime():
+    from app.services.document_api import deps
 
     assert not hasattr(deps, "ApiRuntime")
-    signature = inspect.signature(deps.DocumentRuntime)
+    signature = inspect.signature(deps.DocumentApiDeps)
 
     assert list(signature.parameters) == [
         "repository",
@@ -175,10 +180,10 @@ def test_api_deps_define_document_module_runtime_without_api_runtime():
 
 
 def test_runtime_state_is_module_scoped_inside_api_process():
-    from app.api import deps
-    from app.workers import celery_worker, kafka_worker
+    from app.services.document_api import deps
+    from app.entrypoints import celery_worker, document_worker as kafka_worker
 
-    assert hasattr(deps, "DocumentRuntime")
+    assert hasattr(deps, "DocumentApiDeps")
     assert not hasattr(deps, "ApiRuntime")
     assert hasattr(kafka_worker, "KafkaWorkerRuntime")
     assert hasattr(celery_worker, "CeleryWorkerRuntime")
@@ -198,7 +203,7 @@ def test_runtime_state_is_module_scoped_inside_api_process():
 
 
 def test_worker_runtime_contexts_are_typed_stage_views_not_lifecycle_owners():
-    from app.workers import celery_worker, kafka_worker
+    from app.entrypoints import celery_worker, document_worker as kafka_worker
 
     assert set(kafka_worker.KafkaWorkerRuntime.__dataclass_fields__) == {
         "settings",
@@ -237,8 +242,8 @@ def test_worker_runtime_contexts_are_typed_stage_views_not_lifecycle_owners():
 
 
 @pytest.mark.asyncio
-async def test_runtime_resource_stack_runs_explicit_cleanup_callbacks_in_reverse_order():
-    from app.api.deps import RuntimeResourceStack
+async def test_api_resource_cleanup_stack_runs_explicit_callbacks_in_reverse_order():
+    from app.services.document_api.deps import ResourceCleanupStack
 
     calls = []
 
@@ -251,7 +256,7 @@ async def test_runtime_resource_stack_runs_explicit_cleanup_callbacks_in_reverse
     def dispose_resource():
         calls.append("dispose")
 
-    async with RuntimeResourceStack() as stack:
+    async with ResourceCleanupStack() as stack:
         stack.push_cleanup(close_resource)
         stack.push_cleanup(aclose_resource)
         stack.push_cleanup(dispose_resource)
@@ -261,11 +266,11 @@ async def test_runtime_resource_stack_runs_explicit_cleanup_callbacks_in_reverse
 
 
 @pytest.mark.asyncio
-async def test_runtime_database_helper_initializes_session_factory_and_registers_cleanup(
+async def test_database_deps_helper_initializes_session_factory_and_registers_cleanup(
     monkeypatch,
 ):
-    from app.db import session as session_module
-    from app.api import deps
+    from app.infrastructure.db import session as session_module
+    from app.services.document_api import deps
 
     calls = []
 
@@ -283,8 +288,8 @@ async def test_runtime_database_helper_initializes_session_factory_and_registers
     monkeypatch.setattr(session_module, "close_engine", fake_close_engine)
     monkeypatch.setattr(session_module, "get_session_factory", fake_get_session_factory)
 
-    async with deps.RuntimeResourceStack() as stack:
-        session_factory = await deps.initialize_runtime_database(
+    async with deps.ResourceCleanupStack() as stack:
+        session_factory = await deps.initialize_database_deps(
             stack=stack,
             settings=SimpleNamespace(database_url="postgresql+asyncpg://db/app"),
         )
@@ -302,8 +307,8 @@ async def test_runtime_database_helper_initializes_session_factory_and_registers
 
 
 def test_worker_document_execution_paths_do_not_own_db_engine_lifecycle():
-    from app.modules.document.tasks import vector_storage_compensation
-    from app.modules.document.workers import conversion, vector_storage
+    from app.domains.document.tasks import vector_storage_compensation
+    from app.domains.document.workers import conversion_consumer as conversion, vectorization_consumer as vector_storage
 
     hot_path_sources = [
         inspect.getsource(conversion.run_locked_document_conversion),
@@ -318,8 +323,8 @@ def test_worker_document_execution_paths_do_not_own_db_engine_lifecycle():
 
 @pytest.mark.asyncio
 async def test_kafka_worker_runtime_groups_startup_document_resources(monkeypatch):
-    from app.db import session as session_module
-    from app.workers import kafka_worker
+    from app.infrastructure.db import session as session_module
+    from app.entrypoints import document_worker as kafka_worker
 
     calls = []
 
@@ -374,11 +379,11 @@ async def test_kafka_worker_runtime_groups_startup_document_resources(monkeypatc
     monkeypatch.setattr(session_module, "init_engine", fake_init_engine)
     monkeypatch.setattr(session_module, "close_engine", fake_close_engine)
     monkeypatch.setattr(session_module, "get_session_factory", fake_get_session_factory)
-    monkeypatch.setattr("app.modules.document.repository.DocumentRepository", FakeRepository)
+    monkeypatch.setattr("app.domains.document.repositories.document_repository.DocumentRepository", FakeRepository)
     monkeypatch.setattr("app.infrastructure.redis_lock.create_redis_client", lambda url: FakeRedis())
     monkeypatch.setattr("app.infrastructure.minio.get_minio_client", lambda: minio_client)
     monkeypatch.setattr("app.infrastructure.minio.ensure_minio_bucket", fake_ensure_minio_bucket)
-    monkeypatch.setattr("app.modules.document.storage.DocumentObjectStorage", FakeStorage)
+    monkeypatch.setattr("app.domains.document.components.storage.DocumentObjectStorage", FakeStorage)
     monkeypatch.setattr("app.infrastructure.mineru.create_mineru_client", lambda cfg: mineru_client)
     monkeypatch.setattr(
         kafka_worker,
@@ -387,15 +392,15 @@ async def test_kafka_worker_runtime_groups_startup_document_resources(monkeypatc
         raising=False,
     )
     monkeypatch.setattr(
-        "app.modules.document.vector_store.create_embedding_model",
+        "app.domains.document.components.vector_store.create_embedding_model",
         lambda cfg: embedding_model,
     )
     monkeypatch.setattr(
-        "app.modules.document.vector_store.create_elasticsearch_store",
+        "app.domains.document.components.vector_store.create_elasticsearch_store",
         lambda *, settings, embedding_model: es_store,
     )
     monkeypatch.setattr(
-        "app.modules.document.vector_store.ElasticsearchVectorStoreAdapter",
+        "app.domains.document.components.vector_store.ElasticsearchVectorStoreAdapter",
         FakeAdapter,
     )
 
@@ -421,7 +426,7 @@ async def test_kafka_worker_runtime_groups_startup_document_resources(monkeypatc
 
 
 def test_runtime_module_does_not_own_kafka_worker_host_context_manager():
-    from app.workers import kafka_worker
+    from app.entrypoints import document_worker as kafka_worker
 
     source = inspect.getsource(kafka_worker)
 
@@ -431,7 +436,7 @@ def test_runtime_module_does_not_own_kafka_worker_host_context_manager():
 
 @pytest.mark.asyncio
 async def test_celery_worker_runtime_groups_startup_document_resources(monkeypatch):
-    from app.workers import celery_worker
+    from app.entrypoints import celery_worker
 
     calls = []
     settings = SimpleNamespace(
@@ -498,7 +503,7 @@ async def test_celery_worker_runtime_groups_startup_document_resources(monkeypat
 
 
 def test_api_deps_avoid_redundant_document_app_state_getters():
-    from app.api import deps
+    from app.services.document_api import deps
 
     assert not hasattr(deps, "DbSession")
     assert not hasattr(deps, "_require")
@@ -507,25 +512,25 @@ def test_api_deps_avoid_redundant_document_app_state_getters():
     assert not hasattr(deps, "get_document_file_detector")
 
 
-def test_api_deps_assemble_settings_and_document_runtime_state():
-    from app.api import deps
+def test_api_deps_assemble_settings_and_document_dependency_state():
+    from app.services.document_api import deps
 
     source = inspect.getsource(deps)
     assert "def get_config(request: Request)" in source
     assert "UploadLimits" not in source
-    assert "def get_document_runtime(" in source
+    assert "def get_document_deps(" in source
     assert "def get_api_runtime(" not in source
     assert "async def application_lifespan_resources" in source
     assert "async def api_runtime" not in source
     assert "async def document_runtime" not in source
     assert "document_upload_runtime" not in source
-    assert "initialize_runtime_database(" in source
+    assert "initialize_database_deps(" in source
     assert "DocumentRepository(session_factory)" in source
-    assert "DocumentRuntime(" in source
+    assert "DocumentApiDeps(" in source
     assert "ApiRuntime(" not in source
     assert "application.state.settings" in source
     assert "application.state.api_runtime" not in source
-    assert "application.state.document_runtime" in source
+    assert "application.state.document_deps" in source
     assert "DocumentObjectStorage(" in source
     assert "get_minio_client()" in source
     assert "ensure_minio_bucket(" in source
@@ -541,7 +546,7 @@ def test_api_deps_assemble_settings_and_document_runtime_state():
 
 @pytest.mark.asyncio
 async def test_application_lifespan_resources_close_engine_when_startup_fails(monkeypatch):
-    from app.api import deps
+    from app.services.document_api import deps
 
     calls = []
 
@@ -561,11 +566,11 @@ async def test_application_lifespan_resources_close_engine_when_startup_fails(mo
     def explode_minio_client():
         raise RuntimeError("minio unavailable")
 
-    monkeypatch.setattr("app.db.session.init_engine", fake_init_engine)
-    monkeypatch.setattr("app.db.session.close_engine", fake_close_engine)
-    monkeypatch.setattr("app.db.session.get_session_factory", fake_get_session_factory)
+    monkeypatch.setattr("app.infrastructure.db.session.init_engine", fake_init_engine)
+    monkeypatch.setattr("app.infrastructure.db.session.close_engine", fake_close_engine)
+    monkeypatch.setattr("app.infrastructure.db.session.get_session_factory", fake_get_session_factory)
     monkeypatch.setattr(
-        "app.modules.document.repository.DocumentRepository",
+        "app.domains.document.repositories.document_repository.DocumentRepository",
         FakeDocumentRepository,
     )
     monkeypatch.setattr("app.infrastructure.minio.get_minio_client", explode_minio_client)
@@ -590,12 +595,12 @@ async def test_application_lifespan_resources_close_engine_when_startup_fails(mo
         ("close_engine", None),
     ]
     assert not hasattr(app.state, "settings")
-    assert not hasattr(app.state, "document_runtime")
+    assert not hasattr(app.state, "document_deps")
 
 
 @pytest.mark.asyncio
-async def test_application_lifespan_resources_assemble_document_runtime_before_serving(monkeypatch):
-    from app.api import deps
+async def test_application_lifespan_resources_assemble_document_deps_before_serving(monkeypatch):
+    from app.services.document_api import deps
 
     calls = []
 
@@ -650,11 +655,11 @@ async def test_application_lifespan_resources_assemble_document_runtime_before_s
         calls.append(("create_redis_client", redis_url))
         return FakeRedisClient()
 
-    monkeypatch.setattr("app.db.session.init_engine", fake_init_engine)
-    monkeypatch.setattr("app.db.session.close_engine", fake_close_engine)
-    monkeypatch.setattr("app.db.session.get_session_factory", fake_get_session_factory)
+    monkeypatch.setattr("app.infrastructure.db.session.init_engine", fake_init_engine)
+    monkeypatch.setattr("app.infrastructure.db.session.close_engine", fake_close_engine)
+    monkeypatch.setattr("app.infrastructure.db.session.get_session_factory", fake_get_session_factory)
     monkeypatch.setattr(
-        "app.modules.document.repository.DocumentRepository",
+        "app.domains.document.repositories.document_repository.DocumentRepository",
         FakeDocumentRepository,
     )
     minio_client = object()
@@ -662,7 +667,7 @@ async def test_application_lifespan_resources_assemble_document_runtime_before_s
     monkeypatch.setattr("app.infrastructure.minio.ensure_minio_bucket", fake_ensure_minio_bucket)
     monkeypatch.setattr("app.infrastructure.magika.get_magika_client", lambda: object())
     monkeypatch.setattr(
-        "app.modules.document.storage.DocumentObjectStorage",
+        "app.domains.document.components.storage.DocumentObjectStorage",
         FakeDocumentObjectStorage,
     )
     monkeypatch.setattr(
@@ -672,15 +677,15 @@ async def test_application_lifespan_resources_assemble_document_runtime_before_s
     monkeypatch.setattr("app.infrastructure.kafka.create_kafka_producer", lambda bootstrap_servers: "producer")
     monkeypatch.setattr("app.infrastructure.redis_lock.create_redis_client", fake_create_redis_client)
     monkeypatch.setattr(
-        "app.modules.document.dispatcher.KafkaDocumentConversionDispatcher",
+        "app.domains.document.components.dispatcher.KafkaDocumentConversionDispatcher",
         FakeKafkaDocumentConversionDispatcher,
     )
     monkeypatch.setattr(
-        "app.modules.document.dispatcher.KafkaDocumentEmbedStoreDispatcher",
+        "app.domains.document.components.dispatcher.KafkaDocumentEmbedStoreDispatcher",
         FakeKafkaDocumentEmbedStoreDispatcher,
     )
     monkeypatch.setattr(
-        "app.modules.document.chunking.create_default_document_splitter_factory",
+        "app.domains.document.components.splitters.create_default_document_splitter_factory",
         fake_create_default_document_splitter_factory,
     )
 
@@ -709,16 +714,16 @@ async def test_application_lifespan_resources_assemble_document_runtime_before_s
         ]
         assert app.state.settings is settings
         assert not hasattr(app.state, "api_runtime")
-        assert app.state.document_runtime.storage.bucket == "documents"
-        assert isinstance(app.state.document_runtime.repository, FakeDocumentRepository)
-        assert app.state.document_runtime.embed_store_dispatcher is not None
-        assert app.state.document_runtime.splitter_factory == "splitter-factory"
-        assert app.state.document_runtime.redis_client is not None
-        assert not hasattr(app.state.document_runtime, "settings")
-        assert not hasattr(app.state.document_runtime, "session_factory")
+        assert app.state.document_deps.storage.bucket == "documents"
+        assert isinstance(app.state.document_deps.repository, FakeDocumentRepository)
+        assert app.state.document_deps.embed_store_dispatcher is not None
+        assert app.state.document_deps.splitter_factory == "splitter-factory"
+        assert app.state.document_deps.redis_client is not None
+        assert not hasattr(app.state.document_deps, "settings")
+        assert not hasattr(app.state.document_deps, "session_factory")
 
     assert not hasattr(app.state, "settings")
-    assert not hasattr(app.state, "document_runtime")
+    assert not hasattr(app.state, "document_deps")
     assert calls[-2:] == [
         ("redis_close", None),
         ("close_engine", None),
@@ -726,7 +731,7 @@ async def test_application_lifespan_resources_assemble_document_runtime_before_s
 
 
 def test_document_router_reads_config_through_api_deps():
-    from app.modules.document import router
+    from app.services.document_api import document_router as router
 
     source = inspect.getsource(router)
     assert "get_config" in source
@@ -736,16 +741,16 @@ def test_document_router_reads_config_through_api_deps():
     assert "get_settings()" not in source
 
 
-def test_document_router_reads_document_runtime_through_api_deps():
-    from app.modules.document import router
+def test_document_router_reads_document_deps_through_api_deps():
+    from app.services.document_api import document_router as router
 
     source = inspect.getsource(router)
-    assert "from app.api.deps import" in source
+    assert "from app.services.document_api.deps import" in source
     assert "from app.runtime import" not in source
-    assert "Depends(get_document_runtime)" in source
+    assert "Depends(get_document_deps)" in source
     assert "request.app.state" not in source
-    assert "document_runtime" in source
-    assert "DocumentRuntime" in source
+    assert "document_deps" in source
+    assert "DocumentApiDeps" in source
     assert "ApiRuntime" not in source
     assert "get_document_repository" not in source
     assert "get_document_storage" not in source
@@ -756,15 +761,16 @@ def test_process_runtime_is_not_exported_from_document_module():
     import importlib.util
 
     assert importlib.util.find_spec("app.runtime") is None
-    assert importlib.util.find_spec("app.modules.document.runtime") is None
+    assert importlib.util.find_spec("app.modules") is None
+    assert importlib.util.find_spec("app.services.document_api.runtime") is None
 
 
 def test_runtime_owner_modules_do_not_import_global_runtime_module():
-    from app.api import deps
-    from app.modules.document import router
-    from app.modules.document.tasks import vector_storage_compensation
-    from app.modules.document.workers import conversion, vector_storage
-    from app.workers import celery_worker, kafka_worker
+    from app.services.document_api import deps
+    from app.services.document_api import document_router as router
+    from app.domains.document.tasks import vector_storage_compensation
+    from app.domains.document.workers import conversion_consumer as conversion, vectorization_consumer as vector_storage
+    from app.entrypoints import celery_worker, document_worker as kafka_worker
 
     for module in [
         deps,
@@ -779,8 +785,8 @@ def test_runtime_owner_modules_do_not_import_global_runtime_module():
 
 
 def test_worker_type_checking_imports_document_cycle_prevention_comment():
-    from app.modules.document.tasks import vector_storage_compensation
-    from app.modules.document.workers import conversion, vector_storage
+    from app.domains.document.tasks import vector_storage_compensation
+    from app.domains.document.workers import conversion_consumer as conversion, vectorization_consumer as vector_storage
 
     for module in [conversion, vector_storage, vector_storage_compensation]:
         source = inspect.getsource(module)
@@ -791,16 +797,18 @@ def test_worker_type_checking_imports_document_cycle_prevention_comment():
         assert "循环依赖" in snippet
 
 
-def test_main_keeps_app_api_modules_layout_but_uses_lifespan_runtime():
-    from app import main
+def test_document_api_app_owns_document_router_and_lifespan_deps():
+    from app.services.document_api import app
 
-    source = inspect.getsource(main)
-    assert "from app.api.v1.router import api_router" in source
+    source = inspect.getsource(app)
+    assert "from app.api" not in source
+    assert "from app.services.document_api.router import router" in source
     assert "lifespan=" in source
-    assert "from app.api.deps import application_lifespan_resources" in source
+    assert "from app.services.document_api.deps import application_lifespan_resources" in source
     assert "async with application_lifespan_resources(application, startup_settings)" in source
     assert "api_runtime" not in source
     assert "document_runtime" not in source
+    assert "document_deps" not in source
     assert "document_upload_runtime" not in source
     for implementation_detail in [
         "init_engine",
@@ -810,3 +818,15 @@ def test_main_keeps_app_api_modules_layout_but_uses_lifespan_runtime():
         "get_magika_client",
     ]:
         assert implementation_detail not in source
+
+
+def test_agent_api_app_does_not_own_document_deps():
+    from app.services.agent_api import app
+
+    source = inspect.getsource(app)
+    assert "from app.api" not in source
+    assert "from app.services.agent_api.router import router" in source
+    assert "application_lifespan_resources" not in source
+    assert "document_runtime" not in source
+    assert "document_deps" not in source
+    assert "DocumentRepository" not in source

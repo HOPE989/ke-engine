@@ -1,4 +1,4 @@
-from io import BytesIO
+﻿from io import BytesIO
 import sys
 from types import SimpleNamespace
 
@@ -20,8 +20,8 @@ def make_workbook(sheets: list[tuple[str, list[list[object | None]]]]) -> bytes:
 
 
 def test_excel_parser_accepts_one_data_sheet_and_ignores_empty_extra_sheets():
-    from app.modules.document.data_query_spreadsheet import parse_data_query_spreadsheet
-    from app.modules.document.file_types import DocumentFileType
+    from app.domains.document.services.data_query import parse_data_query_spreadsheet
+    from app.domains.document.shared.file_types import DocumentFileType
 
     dataset = parse_data_query_spreadsheet(
         file_type=DocumentFileType.EXCEL.value,
@@ -40,8 +40,8 @@ def test_excel_parser_accepts_one_data_sheet_and_ignores_empty_extra_sheets():
 
 
 def test_excel_parser_accepts_legacy_xls_by_filename(monkeypatch):
-    from app.modules.document.data_query_spreadsheet import parse_data_query_spreadsheet
-    from app.modules.document.file_types import DocumentFileType
+    from app.domains.document.services.data_query import parse_data_query_spreadsheet
+    from app.domains.document.shared.file_types import DocumentFileType
 
     class FakeSheet:
         name = "Legacy Sales"
@@ -76,11 +76,11 @@ def test_excel_parser_accepts_legacy_xls_by_filename(monkeypatch):
 
 
 def test_excel_parser_rejects_invalid_xlsx_as_domain_error():
-    from app.modules.document.data_query_spreadsheet import (
+    from app.domains.document.services.data_query import (
         DataQuerySpreadsheetInvalid,
         parse_data_query_spreadsheet,
     )
-    from app.modules.document.file_types import DocumentFileType
+    from app.domains.document.shared.file_types import DocumentFileType
 
     with pytest.raises(DataQuerySpreadsheetInvalid, match="invalid xlsx workbook"):
         parse_data_query_spreadsheet(
@@ -110,11 +110,11 @@ def test_excel_parser_rejects_empty_header_only_or_multiple_data_sheets(
     workbook_bytes,
     reason,
 ):
-    from app.modules.document.data_query_spreadsheet import (
+    from app.domains.document.services.data_query import (
         DataQuerySpreadsheetInvalid,
         parse_data_query_spreadsheet,
     )
-    from app.modules.document.file_types import DocumentFileType
+    from app.domains.document.shared.file_types import DocumentFileType
 
     with pytest.raises(DataQuerySpreadsheetInvalid, match=reason):
         parse_data_query_spreadsheet(
@@ -124,11 +124,11 @@ def test_excel_parser_rejects_empty_header_only_or_multiple_data_sheets(
 
 
 def test_excel_parser_rejects_header_only_sheet_even_with_data_sheet():
-    from app.modules.document.data_query_spreadsheet import (
+    from app.domains.document.services.data_query import (
         DataQuerySpreadsheetInvalid,
         parse_data_query_spreadsheet,
     )
-    from app.modules.document.file_types import DocumentFileType
+    from app.domains.document.shared.file_types import DocumentFileType
 
     with pytest.raises(DataQuerySpreadsheetInvalid, match="header-only sheet"):
         parse_data_query_spreadsheet(
@@ -143,8 +143,8 @@ def test_excel_parser_rejects_header_only_sheet_even_with_data_sheet():
 
 
 def test_csv_parser_returns_single_data_table():
-    from app.modules.document.data_query_spreadsheet import parse_data_query_spreadsheet
-    from app.modules.document.file_types import DocumentFileType
+    from app.domains.document.services.data_query import parse_data_query_spreadsheet
+    from app.domains.document.shared.file_types import DocumentFileType
 
     dataset = parse_data_query_spreadsheet(
         file_type=DocumentFileType.CSV.value,
@@ -158,11 +158,11 @@ def test_csv_parser_returns_single_data_table():
 
 @pytest.mark.parametrize("content", [b"", b"Customer,Amount\n"])
 def test_csv_parser_rejects_files_without_data_rows(content):
-    from app.modules.document.data_query_spreadsheet import (
+    from app.domains.document.services.data_query import (
         DataQuerySpreadsheetInvalid,
         parse_data_query_spreadsheet,
     )
-    from app.modules.document.file_types import DocumentFileType
+    from app.domains.document.shared.file_types import DocumentFileType
 
     with pytest.raises(DataQuerySpreadsheetInvalid, match="data rows"):
         parse_data_query_spreadsheet(
@@ -172,7 +172,7 @@ def test_csv_parser_rejects_files_without_data_rows(content):
 
 
 def test_data_query_table_plan_generates_safe_names_columns_metadata_and_sql():
-    from app.modules.document.data_query_spreadsheet import (
+    from app.domains.document.services.data_query import (
         ParsedDataQueryTable,
         build_create_table_sql,
         build_data_query_table_plan,
@@ -221,7 +221,7 @@ def test_data_query_table_plan_generates_safe_names_columns_metadata_and_sql():
 
 
 def test_physical_table_name_rejects_logical_name_that_exceeds_postgres_identifier_limit():
-    from app.modules.document.data_query_spreadsheet import build_physical_table_name
+    from app.domains.document.services.data_query import build_physical_table_name
 
     with pytest.raises(ValueError, match="invalid table name"):
         build_physical_table_name(namespace="alice", table_name="a" * 48)
@@ -251,9 +251,9 @@ class RecordingRepository:
 
 @pytest.mark.asyncio
 async def test_ingestion_workflow_builds_plan_and_imports_single_table_metadata():
-    from app.modules.document.data_query_spreadsheet import ingest_data_query_spreadsheet_document
-    from app.modules.document.file_types import DocumentFileType
-    from app.modules.document.models import DocumentStatus, KnowledgeBaseType
+    from app.domains.document.services.data_query import ingest_data_query_spreadsheet_document
+    from app.domains.document.shared.file_types import DocumentFileType
+    from app.domains.document.shared.models import DocumentStatus, KnowledgeBaseType
 
     content = b"Customer,Amount\nAlice,10\n"
     document = SimpleNamespace(

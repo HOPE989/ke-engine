@@ -1,4 +1,4 @@
-import inspect
+﻿import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -6,7 +6,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_scan_stale_chunked_document_ids_uses_celery_runtime_repository(monkeypatch):
-    from app.modules.document.tasks import vector_storage_compensation as task
+    from app.domains.document.tasks import vector_storage_compensation as task
 
     calls = []
 
@@ -18,8 +18,8 @@ async def test_scan_stale_chunked_document_ids_uses_celery_runtime_repository(mo
     async def fail_db_lifecycle(*args, **kwargs):
         raise AssertionError("Celery compensation scan must use runtime-owned DB resources")
 
-    monkeypatch.setattr("app.db.session.init_engine", fail_db_lifecycle)
-    monkeypatch.setattr("app.db.session.close_engine", fail_db_lifecycle)
+    monkeypatch.setattr("app.infrastructure.db.session.init_engine", fail_db_lifecycle)
+    monkeypatch.setattr("app.infrastructure.db.session.close_engine", fail_db_lifecycle)
 
     result = await task._scan_stale_chunked_document_ids(
         runtime=SimpleNamespace(
@@ -33,7 +33,7 @@ async def test_scan_stale_chunked_document_ids_uses_celery_runtime_repository(mo
 
 @pytest.mark.asyncio
 async def test_compensation_runs_vector_storage_for_each_stale_document(monkeypatch):
-    from app.modules.document.tasks import vector_storage_compensation as task
+    from app.domains.document.tasks import vector_storage_compensation as task
 
     calls = []
     runtime = object()
@@ -70,7 +70,7 @@ async def test_compensation_runs_vector_storage_for_each_stale_document(monkeypa
 
 @pytest.mark.asyncio
 async def test_compensation_counts_unexpected_document_exception_and_continues(monkeypatch):
-    from app.modules.document.tasks import vector_storage_compensation as task
+    from app.domains.document.tasks import vector_storage_compensation as task
 
     calls = []
     runtime = object()
@@ -102,8 +102,8 @@ async def test_compensation_counts_unexpected_document_exception_and_continues(m
 
 
 def test_celery_task_wrapper_submits_async_compensation_to_runtime_loop(monkeypatch):
-    from app.modules.document.tasks import vector_storage_compensation as task
-    from app.workers import celery_worker
+    from app.domains.document.tasks import vector_storage_compensation as task
+    from app.entrypoints import celery_worker
 
     calls = []
     runtime = object()
@@ -135,7 +135,7 @@ def test_celery_task_wrapper_submits_async_compensation_to_runtime_loop(monkeypa
 
 
 def test_celery_task_wrapper_does_not_call_asyncio_run():
-    from app.modules.document.tasks import vector_storage_compensation as task
+    from app.domains.document.tasks import vector_storage_compensation as task
 
     source = inspect.getsource(task.compensate_stale_chunked_document_vectors_task)
 
@@ -145,7 +145,7 @@ def test_celery_task_wrapper_does_not_call_asyncio_run():
 def test_shutdown_celery_worker_runtime_releases_resources_and_closes_loop(monkeypatch):
     import asyncio as real_asyncio
 
-    from app.workers import celery_worker
+    from app.entrypoints import celery_worker
 
     calls = []
 
@@ -213,7 +213,7 @@ def test_shutdown_celery_worker_runtime_releases_resources_and_closes_loop(monke
 
 
 def test_compensation_task_uses_runner_without_kafka_commit_or_low_level_store():
-    from app.modules.document.tasks import vector_storage_compensation as task
+    from app.domains.document.tasks import vector_storage_compensation as task
 
     source = inspect.getsource(task)
 
@@ -224,7 +224,7 @@ def test_compensation_task_uses_runner_without_kafka_commit_or_low_level_store()
 
 
 def test_compensation_module_does_not_own_worker_process_lifecycle_hooks():
-    from app.modules.document.tasks import vector_storage_compensation as task
+    from app.domains.document.tasks import vector_storage_compensation as task
 
     source = inspect.getsource(task)
 

@@ -1,13 +1,13 @@
-from collections.abc import AsyncIterator
+﻿from collections.abc import AsyncIterator
 from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core import config
-from app.main import create_app
-from app.modules.document.models import DocumentStatus
-from app.modules.document.schemas import DocumentChunkResponse
+from app.services.document_api.app import create_app
+from app.domains.document.shared.models import DocumentStatus
+from app.contracts.document.http import DocumentChunkResponse
 
 
 DOCUMENT_ENV = "\n".join(
@@ -46,7 +46,7 @@ async def chunk_api_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncCl
     app = create_app()
     calls = {"workflow": [], "exception": None}
 
-    from app.modules.document import router as document_router
+    from app.services.document_api import document_router
 
     async def fake_chunk_document(**kwargs):
         calls["workflow"].append(kwargs)
@@ -72,7 +72,7 @@ async def chunk_api_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[AsyncCl
         redis_client="redis-client",
         splitter_factory="splitter-factory",
     )
-    app.state.document_runtime = runtime
+    app.state.document_deps = runtime
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -161,7 +161,7 @@ async def test_chunk_endpoint_maps_workflow_errors(
     status_code,
     message,
 ):
-    from app.modules.document import errors
+    from app.domains.document.shared import errors
 
     client, calls = chunk_api_client
     calls["exception"] = getattr(errors, exception_name)()
@@ -212,7 +212,7 @@ async def embed_store_api_client(tmp_path, monkeypatch) -> AsyncIterator[tuple[A
         redis_client="redis-client",
         splitter_factory=object(),
     )
-    app.state.document_runtime = runtime
+    app.state.document_deps = runtime
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

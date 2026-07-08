@@ -1,8 +1,8 @@
-from types import SimpleNamespace
+﻿from types import SimpleNamespace
 
 import pytest
 
-from app.modules.document.errors import DocumentConversionFailed
+from app.domains.document.shared.errors import DocumentConversionFailed
 
 
 def _settings(**overrides):

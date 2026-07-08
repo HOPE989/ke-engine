@@ -1,4 +1,4 @@
-"""Alembic 迁移运行环境配置。"""
+﻿"""Alembic 迁移运行环境配置。"""
 
 import asyncio
 from logging.config import fileConfig
@@ -8,8 +8,8 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
-from app.db.base import Base
-from app.modules.document import models as document_models  # noqa: F401
+from app.infrastructure.db.base import Base
+from app.domains.document.shared import models as document_models  # noqa: F401
 
 config = context.config
 

@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import logging
 from types import SimpleNamespace
 
@@ -25,7 +25,7 @@ def test_snowflake_id_generator_returns_monotonic_64_bit_ids(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_conversion_dispatcher_produces_kafka_event():
-    from app.modules.document import dispatcher
+    from app.domains.document.components import dispatcher
 
     calls = []
 
@@ -54,7 +54,7 @@ async def test_conversion_dispatcher_produces_kafka_event():
 
 @pytest.mark.asyncio
 async def test_embed_store_dispatcher_produces_kafka_event():
-    from app.modules.document import dispatcher
+    from app.domains.document.components import dispatcher
 
     calls = []
 
@@ -139,7 +139,7 @@ def _worker_settings():
 
 @pytest.mark.asyncio
 async def test_worker_skips_runtime_initialization_when_document_lock_is_busy(monkeypatch):
-    from app.modules.document.workers import conversion
+    from app.domains.document.workers import conversion_consumer as conversion
 
     calls = []
     monkeypatch.setattr(
@@ -150,7 +150,7 @@ async def test_worker_skips_runtime_initialization_when_document_lock_is_busy(mo
     async def unexpected_init_engine(database_url):
         raise AssertionError("busy lock must not initialize database runtime")
 
-    monkeypatch.setattr("app.db.session.init_engine", unexpected_init_engine)
+    monkeypatch.setattr("app.infrastructure.db.session.init_engine", unexpected_init_engine)
     monkeypatch.setattr(
         "app.infrastructure.mineru.create_mineru_client",
         lambda settings: (_ for _ in ()).throw(
@@ -179,7 +179,7 @@ async def test_worker_skips_runtime_initialization_when_document_lock_is_busy(mo
 
 @pytest.mark.asyncio
 async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatch):
-    from app.modules.document.workers import conversion
+    from app.domains.document.workers import conversion_consumer as conversion
 
     calls = []
     monkeypatch.setattr(
@@ -193,8 +193,8 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
     async def fake_close_engine():
         calls.append(("close_engine", None))
 
-    monkeypatch.setattr("app.db.session.init_engine", fake_init_engine)
-    monkeypatch.setattr("app.db.session.close_engine", fake_close_engine)
+    monkeypatch.setattr("app.infrastructure.db.session.init_engine", fake_init_engine)
+    monkeypatch.setattr("app.infrastructure.db.session.close_engine", fake_close_engine)
     monkeypatch.setattr(
         "app.infrastructure.mineru.create_mineru_client",
         lambda settings: (_ for _ in ()).throw(
@@ -237,7 +237,7 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
 
 @pytest.mark.asyncio
 async def test_document_conversion_consumer_subscribes_without_managing_topics(monkeypatch, caplog):
-    from app.modules.document.workers import conversion
+    from app.domains.document.workers import conversion_consumer as conversion
 
     calls = []
 
@@ -259,7 +259,7 @@ async def test_document_conversion_consumer_subscribes_without_managing_topics(m
     monkeypatch.setattr(conversion, "create_kafka_consumer", fake_create_kafka_consumer)
     runtime = SimpleNamespace(settings=SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"))
 
-    with caplog.at_level(logging.INFO, logger="app.modules.document.workers.conversion"):
+    with caplog.at_level(logging.INFO, logger="app.domains.document.workers.conversion_consumer"):
         with pytest.raises(RuntimeError, match="stop consumer"):
             await conversion.run_document_conversion_consumer(runtime)
 
@@ -276,7 +276,7 @@ async def test_document_conversion_consumer_subscribes_without_managing_topics(m
 
 @pytest.mark.asyncio
 async def test_document_conversion_consumer_logs_kafka_error_details(monkeypatch, caplog):
-    from app.modules.document.workers import conversion
+    from app.domains.document.workers import conversion_consumer as conversion
 
     class FakeError:
         def __str__(self):
@@ -305,7 +305,7 @@ async def test_document_conversion_consumer_logs_kafka_error_details(monkeypatch
     monkeypatch.setattr(conversion, "create_kafka_consumer", lambda **kwargs: FakeConsumer())
     runtime = SimpleNamespace(settings=SimpleNamespace(kafka_bootstrap_servers="kafka.example:9092"))
 
-    with caplog.at_level(logging.WARNING, logger="app.modules.document.workers.conversion"):
+    with caplog.at_level(logging.WARNING, logger="app.domains.document.workers.conversion_consumer"):
         with pytest.raises(RuntimeError, match="stop consumer"):
             await conversion.run_document_conversion_consumer(runtime)
 
@@ -314,7 +314,7 @@ async def test_document_conversion_consumer_logs_kafka_error_details(monkeypatch
 
 @pytest.mark.asyncio
 async def test_handle_document_conversion_event_commits_after_success(monkeypatch, caplog):
-    from app.modules.document.workers import conversion
+    from app.domains.document.workers import conversion_consumer as conversion
 
     calls = []
 
@@ -339,7 +339,7 @@ async def test_handle_document_conversion_event_commits_after_success(monkeypatc
     monkeypatch.setattr(conversion.time, "perf_counter", lambda: next(monotonic_times))
 
     message = FakeMessage()
-    with caplog.at_level(logging.INFO, logger="app.modules.document.workers.conversion"):
+    with caplog.at_level(logging.INFO, logger="app.domains.document.workers.conversion_consumer"):
         await conversion.handle_document_conversion_message(
             message=message,
             consumer=FakeConsumer(),
@@ -353,7 +353,7 @@ async def test_handle_document_conversion_event_commits_after_success(monkeypatc
 
 @pytest.mark.asyncio
 async def test_handle_document_conversion_event_does_not_commit_on_conversion_failure(monkeypatch, caplog):
-    from app.modules.document.workers import conversion
+    from app.domains.document.workers import conversion_consumer as conversion
 
     class FakeMessage:
         def value(self):
@@ -375,7 +375,7 @@ async def test_handle_document_conversion_event_does_not_commit_on_conversion_fa
     monotonic_times = iter([200.0, 200.25])
     monkeypatch.setattr(conversion.time, "perf_counter", lambda: next(monotonic_times))
 
-    with caplog.at_level(logging.ERROR, logger="app.modules.document.workers.conversion"):
+    with caplog.at_level(logging.ERROR, logger="app.domains.document.workers.conversion_consumer"):
         with pytest.raises(RuntimeError, match="conversion failed"):
             await conversion.handle_document_conversion_message(
                 message=FakeMessage(),

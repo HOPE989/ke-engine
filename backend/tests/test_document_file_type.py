@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 
 
 class FakeMagikaOutput:
@@ -26,11 +26,11 @@ class FakeMagikaClient:
 
 
 def _file_type_modules():
-    from app.modules.document.errors import (
+    from app.domains.document.shared.errors import (
         FileTypeDetectionFailed,
         UnsupportedDocumentFileType,
     )
-    from app.modules.document.file_types import (
+    from app.domains.document.shared.file_types import (
         DocumentFileType,
         detect_document_file_type,
     )

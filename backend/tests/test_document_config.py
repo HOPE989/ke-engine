@@ -1,4 +1,4 @@
-import importlib.util
+﻿import importlib.util
 import inspect
 from pathlib import Path
 
@@ -232,7 +232,7 @@ def test_settings_document_startup_and_request_time_boundaries():
 
 
 def test_api_get_config_reads_startup_settings_from_application_state():
-    from app.api import deps
+    from app.services.document_api import deps
 
     source = inspect.getsource(deps.get_config)
 
@@ -245,7 +245,7 @@ def test_api_get_config_reads_startup_settings_from_application_state():
 def test_api_get_config_does_not_call_full_request_settings_loader(monkeypatch):
     from types import SimpleNamespace
 
-    from app.api import deps
+    from app.services.document_api import deps
     from app.core import config as config_module
 
     startup_settings = SimpleNamespace(max_upload_size_mb=37)

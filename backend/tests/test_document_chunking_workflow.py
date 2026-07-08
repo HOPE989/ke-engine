@@ -1,10 +1,10 @@
-from io import BytesIO
+﻿from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
 
-from app.modules.document.file_types import DocumentFileType
-from app.modules.document.models import DocumentStatus
+from app.domains.document.shared.file_types import DocumentFileType
+from app.domains.document.shared.models import DocumentStatus
 
 
 class FakeRepository:
@@ -29,7 +29,7 @@ class FakeRepository:
 
 class FailingCompleteRepository(FakeRepository):
     async def complete_chunking(self, *, doc_id, segment_drafts):
-        from app.modules.document.errors import ChunkPersistenceFailed
+        from app.domains.document.shared.errors import ChunkPersistenceFailed
 
         self.completed.append({"doc_id": doc_id, "segment_drafts": segment_drafts})
         raise ChunkPersistenceFailed()
@@ -37,7 +37,7 @@ class FailingCompleteRepository(FakeRepository):
 
 class StaleStateCompleteRepository(FakeRepository):
     async def complete_chunking(self, *, doc_id, segment_drafts):
-        from app.modules.document.errors import ChunkPersistenceFailed
+        from app.domains.document.shared.errors import ChunkPersistenceFailed
 
         raise ChunkPersistenceFailed()
 
@@ -92,7 +92,7 @@ class RecordingSplitter:
         self.calls = []
 
     async def split_chunks(self, *, document, storage, id_generator):
-        from app.modules.document.chunking import MarkdownSplitChunk
+        from app.domains.document.components.splitters import MarkdownSplitChunk
 
         self.calls.append(
             {
@@ -163,8 +163,8 @@ def _xlsx_bytes(rows):
 
 
 async def _chunk_document(**overrides):
-    from app.modules.document.chunking import create_default_document_splitter_factory
-    from app.modules.document.workflow import chunk_document
+    from app.domains.document.components.splitters import create_default_document_splitter_factory
+    from app.domains.document.services.chunking import chunk_document
 
     values = {
         "doc_id": 42,
@@ -183,7 +183,7 @@ async def _chunk_document(**overrides):
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_rejects_missing_document_after_locking():
-    from app.modules.document.errors import DocumentNotFound
+    from app.domains.document.shared.errors import DocumentNotFound
 
     lock = FakeLock()
     repository = FakeRepository(None)
@@ -206,7 +206,7 @@ async def test_chunk_workflow_rejects_missing_document_after_locking():
     ],
 )
 async def test_chunk_workflow_rejects_non_converted_document(status):
-    from app.modules.document.errors import DocumentStateConflict
+    from app.domains.document.shared.errors import DocumentStateConflict
 
     repository = FakeRepository(_document(status=status))
     lock = FakeLock()
@@ -244,7 +244,7 @@ async def test_chunk_workflow_returns_already_chunked_document_after_locking():
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_rejects_converted_document_without_url():
-    from app.modules.document.errors import DocumentStateConflict
+    from app.domains.document.shared.errors import DocumentStateConflict
 
     repository = FakeRepository(_document(converted_doc_url=None))
     storage = FakeStorage()
@@ -258,7 +258,7 @@ async def test_chunk_workflow_rejects_converted_document_without_url():
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_rejects_invalid_converted_url():
-    from app.modules.document.errors import DocumentStateConflict
+    from app.domains.document.shared.errors import DocumentStateConflict
 
     repository = FakeRepository(
         _document(converted_doc_url="https://other.example.com/documents/documents/42.md")
@@ -272,7 +272,7 @@ async def test_chunk_workflow_rejects_invalid_converted_url():
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_rejects_busy_lock_without_starting_chunking():
-    from app.modules.document.errors import DocumentStateConflict
+    from app.domains.document.shared.errors import DocumentStateConflict
 
     repository = FakeRepository(_document())
     lock = FakeLock(acquired=False)
@@ -418,7 +418,7 @@ async def test_chunk_workflow_does_not_dispatch_vector_storage_when_persistence_
         async def dispatch(self, doc_id):
             calls.append(("dispatch", doc_id))
 
-    from app.modules.document.errors import ChunkPersistenceFailed
+    from app.domains.document.shared.errors import ChunkPersistenceFailed
 
     with pytest.raises(ChunkPersistenceFailed):
         await _chunk_document(
@@ -453,7 +453,7 @@ async def test_chunk_workflow_reads_document_after_lock_and_returns_chunked_stat
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_rejects_cross_document_converted_url():
-    from app.modules.document.errors import DocumentStateConflict
+    from app.domains.document.shared.errors import DocumentStateConflict
 
     storage = FakeStorage()
     repository = FakeRepository(
@@ -491,7 +491,7 @@ async def test_chunk_workflow_zero_segment_result_still_marks_chunked():
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_maps_redis_unavailable_before_processing():
-    from app.modules.document.errors import ChunkLockUnavailable
+    from app.domains.document.shared.errors import ChunkLockUnavailable
 
     repository = FakeRepository(_document())
 
@@ -503,7 +503,7 @@ async def test_chunk_workflow_maps_redis_unavailable_before_processing():
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_leaves_converted_on_markdown_download_failure():
-    from app.modules.document.errors import ConvertedMarkdownUnavailable
+    from app.domains.document.shared.errors import ConvertedMarkdownUnavailable
 
     repository = FakeRepository(_document())
 
@@ -518,7 +518,7 @@ async def test_chunk_workflow_leaves_converted_on_markdown_download_failure():
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_preserves_business_error_when_lock_release_fails():
-    from app.modules.document.errors import ConvertedMarkdownUnavailable
+    from app.domains.document.shared.errors import ConvertedMarkdownUnavailable
 
     repository = FakeRepository(_document())
     lock = FakeLock(release_error=OSError("redis release failed"))
@@ -536,7 +536,7 @@ async def test_chunk_workflow_preserves_business_error_when_lock_release_fails()
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_leaves_converted_on_non_utf8_markdown():
-    from app.modules.document.errors import ConvertedMarkdownInvalid
+    from app.domains.document.shared.errors import ConvertedMarkdownInvalid
 
     repository = FakeRepository(_document())
 
@@ -551,7 +551,7 @@ async def test_chunk_workflow_leaves_converted_on_non_utf8_markdown():
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_maps_splitter_failure_without_rollback():
-    from app.modules.document.errors import ChunkSplittingFailed
+    from app.domains.document.shared.errors import ChunkSplittingFailed
 
     repository = FakeRepository(_document())
 
@@ -566,7 +566,7 @@ async def test_chunk_workflow_maps_splitter_failure_without_rollback():
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_maps_persistence_failure_without_rollback():
-    from app.modules.document.errors import ChunkPersistenceFailed
+    from app.domains.document.shared.errors import ChunkPersistenceFailed
 
     repository = FailingCompleteRepository(_document())
 
@@ -578,7 +578,7 @@ async def test_chunk_workflow_maps_persistence_failure_without_rollback():
 
 @pytest.mark.asyncio
 async def test_chunk_workflow_maps_stale_chunked_state_at_persistence_boundary():
-    from app.modules.document.errors import ChunkPersistenceFailed
+    from app.domains.document.shared.errors import ChunkPersistenceFailed
 
     repository = StaleStateCompleteRepository(_document(status=DocumentStatus.CONVERTED.value))
 
