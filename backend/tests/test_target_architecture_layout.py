@@ -12,6 +12,7 @@ def test_target_architecture_files_exist():
     app_root = _backend_app_root()
     expected_files = [
         "entrypoints/document_api.py",
+        "entrypoints/chat_api.py",
         "entrypoints/document_worker.py",
         "entrypoints/celery_worker.py",
         "services/document_api/app.py",
@@ -43,6 +44,24 @@ def test_target_architecture_files_exist():
         "contracts/chat/__init__.py",
         "contracts/chat/http.py",
         "contracts/chat/stream.py",
+        "services/chat_api/__init__.py",
+        "services/chat_api/app.py",
+        "services/chat_api/deps.py",
+        "services/chat_api/router.py",
+        "services/chat_api/streaming.py",
+        "domains/chat/graph/__init__.py",
+        "domains/chat/graph/builder.py",
+        "domains/chat/graph/context.py",
+        "domains/chat/graph/state.py",
+        "domains/chat/graph/nodes/__init__.py",
+        "domains/chat/graph/nodes/llm.py",
+        "domains/chat/repositories/__init__.py",
+        "domains/chat/repositories/conversation_repository.py",
+        "domains/chat/repositories/message_repository.py",
+        "domains/chat/services/__init__.py",
+        "domains/chat/services/conversation.py",
+        "domains/chat/services/runtime.py",
+        "domains/chat/shared/models.py",
         "infrastructure/db/session.py",
         "infrastructure/db/base.py",
         "infrastructure/kafka.py",
@@ -50,6 +69,7 @@ def test_target_architecture_files_exist():
         "infrastructure/minio.py",
         "infrastructure/elasticsearch.py",
         "infrastructure/llm.py",
+        "infrastructure/langgraph.py",
         "infrastructure/celery_app.py",
         "core/config.py",
         "core/logging.py",
@@ -92,13 +112,21 @@ def test_target_architecture_public_imports_are_available():
     from app.domains.document.components.validators import validate_document_upload
     from app.domains.document.repositories.segment_repository import SegmentRepository
     from app.domains.document.repositories.table_repository import TableRepository
-    from app.entrypoints import celery_worker, document_api, document_worker
+    from app.entrypoints import celery_worker, chat_api, document_api, document_worker
+    from app.contracts.chat import CompletionRequest, MetadataPayload
+    from app.domains.chat.graph import build_chat_graph
+    from app.domains.chat.repositories.conversation_repository import ConversationRepository
+    from app.domains.chat.repositories.message_repository import MessageRepository
+    from app.domains.chat.services.runtime import CompletionProducerRegistry
+    from app.infrastructure.langgraph import postgres_checkpointer
+    from app.services.chat_api.deps import ChatApiDeps
     from app.infrastructure.db.session import get_session_factory
     from app.contracts.document.events import DocumentConvertRequested
     from app.contracts.document.http import DocumentMetadata
     from app.services.document_api.deps import DocumentApiDeps
 
     assert document_api.app
+    assert chat_api.app
     assert callable(document_worker.main)
     assert celery_worker.celery_app
     assert callable(build_segment_drafts)
@@ -114,6 +142,51 @@ def test_target_architecture_public_imports_are_available():
     assert MockIdentityProvider
     assert Principal
     assert callable(get_current_principal)
+    assert CompletionRequest
+    assert MetadataPayload
+    assert callable(build_chat_graph)
+    assert ConversationRepository
+    assert MessageRepository
+    assert CompletionProducerRegistry
+    assert callable(postgres_checkpointer)
+    assert ChatApiDeps
+
+
+def test_chat_runtime_uses_one_database_configuration_without_checkpoint_orm():
+    backend_root = _backend_app_root().parent
+    app_root = _backend_app_root()
+    env_example = (backend_root / ".env.example").read_text(encoding="utf-8")
+    config = (backend_root / "config.yaml").read_text(encoding="utf-8")
+
+    assert env_example.count("DATABASE_URL=") == 1
+    assert "OPENAI_API_KEY=" in env_example
+    assert "openai_model:" in config
+    assert "CHECKPOINT_DATABASE_URL" not in env_example
+    assert "LANGGRAPH_DATABASE_URL" not in env_example
+    assert "checkpoint_database_url" not in config
+    assert "langgraph_database_url" not in config
+
+    production_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in app_root.rglob("*.py")
+    )
+    assert "MemorySaver" not in production_sources
+
+    migrations_root = backend_root / "alembic" / "versions"
+    checkpoint_migrations = [
+        path
+        for path in migrations_root.glob("*.py")
+        if "checkpoint" in path.name.lower()
+        or "langgraph" in path.name.lower()
+        or "checkpoint" in path.read_text(encoding="utf-8").lower()
+        or "langgraph" in path.read_text(encoding="utf-8").lower()
+    ]
+    assert checkpoint_migrations == []
+
+    chat_models = (app_root / "domains" / "chat" / "shared" / "models.py").read_text(
+        encoding="utf-8"
+    )
+    assert "checkpoint" not in chat_models.lower()
 
 
 def test_service_api_layers_do_not_keep_runtime_or_error_mapping_shells():

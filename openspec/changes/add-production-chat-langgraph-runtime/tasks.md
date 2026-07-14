@@ -260,12 +260,12 @@
 
 **Interfaces:** `make dev-chat-api` 启动 `app.entrypoints.chat_api:app`；环境样例包含 Chat model/API 配置和既有 `DATABASE_URL`，不新增第二个数据库 URL。
 
-- [ ] 14.1 RED — 扩展 Makefile/entrypoint/layout 测试，断言存在 `dev-chat-api`、Chat entrypoint、目标模块和唯一数据库配置；断言没有 `domains/agent`、Chat checkpoint ORM/Alembic migration、MemorySaver production fallback 或新的 checkpoint database setting。
-- [ ] 14.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_backend_makefile.py tests/test_target_architecture_layout.py tests/test_service_entrypoints.py -q`；预期因启动命令或最终布局尚未声明而失败。
-- [ ] 14.3 GREEN — 增加 `CHAT_API_PORT` 与 `dev-chat-api` target，补齐环境样例和最终公开 imports；不启动实现范围外的 stop/archive/concurrency/idempotency/heartbeat/replay 功能。
-- [ ] 14.4 GREEN VERIFY — 重跑 14.2 命令；预期全部通过。
-- [ ] 14.5 REFACTOR VERIFY — 运行全部 Chat 测试：`cd backend && uv run python -m pytest tests/test_chat_*.py -q`；预期全部通过。
-- [ ] 14.6 REGRESSION VERIFY — 运行完整后端测试：`make test-backend`；预期全部通过，无 Document/Identity 回归。
-- [ ] 14.7 SPEC VERIFY — 运行 `openspec validate add-production-chat-langgraph-runtime --strict`；预期 `Change 'add-production-chat-langgraph-runtime' is valid`。
-- [ ] 14.8 SCOPE VERIFY — 搜索并人工核对没有未授权实现：`rg -n "MemorySaver|Last-Event-ID|heartbeat|idempotency|archive|stop" backend/app backend/tests`；只允许规格否定测试、错误消息或既有无关代码命中。
-- [ ] 14.9 COMMIT — 提交 operability 与最终验证调整，提交信息：`chore(chat): finalize runtime operability`。
+- [x] 14.1 RED — 扩展 Makefile/entrypoint/layout 测试，断言存在 `dev-chat-api`、Chat entrypoint、目标模块和唯一数据库配置；断言没有 `domains/agent`、Chat checkpoint ORM/Alembic migration、MemorySaver production fallback 或新的 checkpoint database setting。
+- [x] 14.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_backend_makefile.py tests/test_target_architecture_layout.py tests/test_service_entrypoints.py -q`；确认因缺少 `CHAT_API_PORT`、`dev-chat-api` 和最终公开 import 声明而失败（3 failed, 11 passed）。
+- [x] 14.3 GREEN — 增加 `CHAT_API_PORT` 与 `dev-chat-api` target，补齐环境样例和最终公开 imports；未启动实现范围外的 stop/archive/concurrency/idempotency/heartbeat/replay 功能。
+- [x] 14.4 GREEN VERIFY — 重跑 14.2 命令；14 个测试全部通过。
+- [x] 14.5 REFACTOR VERIFY — PowerShell 不展开 pytest 通配符，改为先解析同一 `tests/test_chat_*.py` 文件集合后运行；79 个通过、1 个跳过。
+- [x] 14.6 REGRESSION VERIFY — 运行完整后端测试：`make test-backend`；484 个通过、3 个跳过，无 Document/Identity 回归。
+- [x] 14.7 SPEC VERIFY — 运行 `openspec validate add-production-chat-langgraph-runtime --strict`；确认 `Change 'add-production-chat-langgraph-runtime' is valid`。
+- [x] 14.8 SCOPE VERIFY — 搜索并人工核对没有未授权实现；命中仅为 Chat 否定测试、规定的 `finish_reason="stop"`，以及既有 Document/Celery 的归档文件与停止逻辑。
+- [x] 14.9 COMMIT — 提交 operability 与最终验证调整，提交信息：`chore(chat): finalize runtime operability`。

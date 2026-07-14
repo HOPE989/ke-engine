@@ -5,11 +5,12 @@ DB_USER ?= ke_engine
 
 API_HOST ?= 127.0.0.1
 DOCUMENT_API_PORT ?= 8000
+CHAT_API_PORT ?= 8001
 CELERY_BEAT_SCHEDULE ?= .runtime/celerybeat-schedule
 
 .DEFAULT_GOAL := help
 
-.PHONY: help backend-sync dev dev-document-api dev-worker dev-celery-worker dev-celery-beat dev-infra dev-all-infra db-init kafka-topics-init kafka-topics-list test-backend
+.PHONY: help backend-sync dev dev-document-api dev-chat-api dev-worker dev-celery-worker dev-celery-beat dev-infra dev-all-infra db-init kafka-topics-init kafka-topics-list test-backend
 
 help:
 	@echo "Available targets:"
@@ -20,6 +21,7 @@ help:
 	@echo "  make kafka-topics-init Create local Kafka topics"
 	@echo "  make kafka-topics-list List local Kafka topics"
 	@echo "  make dev-document-api Start Document API on API_HOST/DOCUMENT_API_PORT"
+	@echo "  make dev-chat-api     Start Chat API on API_HOST/CHAT_API_PORT"
 	@echo "  make dev-worker       Start Kafka document conversion worker"
 	@echo "  make dev-celery-worker Start Celery worker for scheduled compensation tasks"
 	@echo "  make dev-celery-beat  Start Celery beat scheduler"
@@ -51,6 +53,9 @@ kafka-topics-list:
 
 dev-document-api:
 	cd $(BACKEND_DIR) && $(UV) run uvicorn app.entrypoints.document_api:app --reload --host $(API_HOST) --port $(DOCUMENT_API_PORT)
+
+dev-chat-api:
+	cd $(BACKEND_DIR) && $(UV) run uvicorn app.entrypoints.chat_api:app --reload --host $(API_HOST) --port $(CHAT_API_PORT)
 
 dev-worker:
 	cd $(BACKEND_DIR) && $(UV) run python -m app.entrypoints.document_worker
