@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: 公共请求身份模型
-系统 SHALL 提供统一的请求级 `Principal`，至少包含稳定用户标识 `user_id` 和当前租户标识 `tenant_id`，供不同 API 服务以相同方式消费身份。
+系统 SHALL 提供统一的请求级 `Principal`，至少包含稳定用户标识 `user_id` 和当前租户标识 `tenant_id`，供 Document API 业务路由稳定消费身份。
 
 #### Scenario: 身份模型包含用户和租户
 - **WHEN** 身份提供器成功恢复一次请求的身份
@@ -44,10 +44,10 @@ IdentityMiddleware MUST NOT 读取请求体或包装下游响应流，并 SHALL 
 - **THEN** 流式处理使用请求入口生成的同一个 Principal，且 Middleware 不拦截持续输出
 
 ### Requirement: 公开健康检查绕过身份处理
-系统 SHALL 允许每个 API 应用将 `/health` 声明为公开精确路径，公开路径请求不要求生成 Principal。
+系统 SHALL 允许 Document API 将 `/health` 声明为公开精确路径，公开路径请求不要求生成 Principal。
 
 #### Scenario: 无身份访问健康检查
-- **WHEN** 客户端请求 Agent API 或 Document API 的 `/health`
+- **WHEN** 客户端请求 Document API 的 `/health`
 - **THEN** 请求不调用 Mock 身份提供器并正常进入健康检查路由
 
 ### Requirement: Dependency 统一暴露当前身份
@@ -61,12 +61,8 @@ IdentityMiddleware MUST NOT 读取请求体或包装下游响应流，并 SHALL 
 - **WHEN** 当前请求没有 `request.state.principal` 却调用身份 Dependency
 - **THEN** 系统返回 HTTP 401
 
-### Requirement: 两个 API 服务共享身份链路
-Agent API 和 Document API SHALL 分别显式注册同一公共 IdentityMiddleware，并默认装配 Mock 身份提供器。
-
-#### Scenario: Agent API 消费 Mock 身份
-- **WHEN** 受保护请求进入 Agent API
-- **THEN** Agent API 路由能够通过公共 Dependency 取得 Mock Principal
+### Requirement: Document API 消费公共身份链路
+Document API SHALL 显式注册公共 IdentityMiddleware，并默认装配 Mock 身份提供器。
 
 #### Scenario: Document API 消费 Mock 身份
 - **WHEN** 受保护请求进入 Document API
@@ -76,5 +72,5 @@ Agent API 和 Document API SHALL 分别显式注册同一公共 IdentityMiddlewa
 系统 MUST NOT 在本阶段调用统一门户、IAM 或 `/who`，也 MUST NOT 要求真实 `user-info`、JWT 或新增身份 Settings 才能完成请求身份恢复。
 
 #### Scenario: 本地独立运行身份链路
-- **WHEN** 开发者在没有门户和 IAM 连接的本地环境启动任一 API 服务
+- **WHEN** 开发者在没有门户和 IAM 连接的本地环境启动 Document API
 - **THEN** 受保护请求仍可通过默认 Mock 身份完成 Principal 恢复

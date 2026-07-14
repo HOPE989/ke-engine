@@ -12,12 +12,11 @@
 
 ## 3. API 服务装配与清理
 
-- [ ] 3.1 增加服务装配失败测试，证明 Agent API 和 Document API 都注册公共身份链路且 `/health` 保持公开
-- [ ] 3.2 在 Agent API 和 Document API 的 `create_app()` 中显式注册 IdentityMiddleware 和默认 MockIdentityProvider
-- [ ] 3.3 删除未被业务使用的身份契约、密码哈希实现、密码哈希配置及对应占位测试，并确认不存在残留导入
+- [ ] 3.1 增加服务装配失败测试，证明 Document API 注册公共身份链路且 `/health` 保持公开
+- [ ] 3.2 在 Document API 的 `create_app()` 中显式注册 IdentityMiddleware 和默认 MockIdentityProvider
 
 ## 4. 验证
 
-- [ ] 4.1 运行公共身份模块及两个 API 服务的定向测试，确认默认身份、Header 覆盖、请求上下文和公开路径行为符合 spec
+- [ ] 4.1 运行公共身份模块及 Document API 的定向测试，确认默认身份、Header 覆盖、请求上下文和公开路径行为符合 spec
 - [ ] 4.2 运行完整后端测试套件，确认身份 Middleware 装配和残留清理未破坏现有功能
 - [ ] 4.3 运行 OpenSpec 校验并确认变更制品和实现任务保持一致
