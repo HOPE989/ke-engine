@@ -91,12 +91,12 @@
 
 **Interfaces:** `ChatApiDeps(session_factory, id_generator, graph, model, producer_registry)` 存于 `app.state.chat_deps`；`application_lifespan_resources(application, settings)` 按数据库 → 模型 → checkpointer → Graph → producer registry 顺序初始化，按相反顺序释放；`create_app() -> FastAPI`；entrypoint 导出 `app`。
 
-- [ ] 4.1 RED — 添加 lifespan 测试，使用 fakes 记录初始化/关闭顺序，断言 Graph 只在 model 和 saver 就绪后编译、依赖挂载到 `app.state`、关闭时先处理 producer 再关闭 saver；模型或 saver 初始化异常必须让启动失败且不得创建内存 saver。
-- [ ] 4.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_api_lifespan.py tests/test_service_entrypoints.py -q`；预期因 Chat API app/deps/entrypoint 尚不存在而失败。
-- [ ] 4.3 GREEN — 按现有 Document API 的 `AsyncExitStack` 模式实现 Chat lifespan、依赖访问器、app factory、健康检查和 entrypoint；生产 Graph 只在 lifespan 内编译。
-- [ ] 4.4 GREEN VERIFY — 重跑 4.2 命令；预期全部通过。
-- [ ] 4.5 REFACTOR — 复用现有数据库 session 初始化方式，但保持 Chat 与 Document API 的资源集合独立；运行 `cd backend && uv run python -m pytest tests/test_chat_api_lifespan.py tests/test_service_entrypoints.py tests/test_document_async_infrastructure.py -q`。
-- [ ] 4.6 COMMIT — 提交生命周期与测试，提交信息：`feat(chat): assemble lifespan-managed graph runtime`。
+- [x] 4.1 RED — 添加 lifespan 测试，使用 fakes 记录初始化/关闭顺序，断言 Graph 只在 model 和 saver 就绪后编译、依赖挂载到 `app.state`、关闭时先处理 producer 再关闭 saver；模型或 saver 初始化异常必须让启动失败且不得创建内存 saver。
+- [x] 4.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_api_lifespan.py tests/test_service_entrypoints.py -q`；预期因 Chat API app/deps/entrypoint 尚不存在而失败。
+- [x] 4.3 GREEN — 按现有 Document API 的 `AsyncExitStack` 模式实现 Chat lifespan、依赖访问器、app factory、健康检查和 entrypoint；生产 Graph 只在 lifespan 内编译。
+- [x] 4.4 GREEN VERIFY — 重跑 4.2 命令；预期全部通过。
+- [x] 4.5 REFACTOR — 复用现有数据库 session 初始化方式，但保持 Chat 与 Document API 的资源集合独立；运行 `cd backend && uv run python -m pytest tests/test_chat_api_lifespan.py tests/test_service_entrypoints.py tests/test_document_async_infrastructure.py -q`。
+- [x] 4.6 COMMIT — 提交生命周期与测试，提交信息：`feat(chat): assemble lifespan-managed graph runtime`。
 
 ## 5. Owned conversation and message queries
 
