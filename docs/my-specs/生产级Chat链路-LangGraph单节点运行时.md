@@ -1,4 +1,6 @@
-# 生产级单节点 Chat LangGraph 运行链路设计
+# 生产级单节点 Chat LangGraph 运行链路设计（讨论草稿）
+
+> 本文档用于保留前期讨论结论，正式需求、设计与实施任务以对应的 OpenSpec change 为准。
 
 ## 背景
 
