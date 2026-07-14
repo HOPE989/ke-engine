@@ -108,12 +108,12 @@
 
 **Interfaces:** repositories 接收当前 `AsyncSession`；`ConversationCursor(updated_at, id)` 与 `MessageCursor(created_at, id)` 编解码为 opaque cursor；conversation 查询始终包含 `user_id` 和非 DELETED 约束；message 查询先通过 owner-scoped conversation 条件限制。
 
-- [ ] 5.1 RED — 添加 repository 测试：会话按 `(updated_at DESC, id DESC)` keyset 分页、消息按 `(created_at ASC, id ASC)` keyset 分页、第二页无重复/遗漏、他人会话不可见、历史 SQL 只读业务表且不引用 checkpoint 表名。
-- [ ] 5.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_repositories.py -q`；预期因 repository 和 cursor 接口尚不存在而失败。
-- [ ] 5.3 GREEN — 实现 owner-scoped repository 查询和 cursor 编解码；不引入 offset pagination，不读取 LangGraph saver。
-- [ ] 5.4 GREEN VERIFY — 重跑 5.2 命令；预期全部通过。
-- [ ] 5.5 REFACTOR — 抽取每个 repository 内部的 cursor predicate，保留会话与消息不同排序方向；运行 `cd backend && uv run python -m pytest tests/test_chat_repositories.py tests/test_chat_persistence.py -q`。
-- [ ] 5.6 COMMIT — 提交查询 repository 与测试，提交信息：`feat(chat): query owned conversations and messages`。
+- [x] 5.1 RED — 添加 repository 测试：会话按 `(updated_at DESC, id DESC)` keyset 分页、消息按 `(created_at ASC, id ASC)` keyset 分页、第二页无重复/遗漏、他人会话不可见、历史 SQL 只读业务表且不引用 checkpoint 表名。
+- [x] 5.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_repositories.py -q`；预期因 repository 和 cursor 接口尚不存在而失败。
+- [x] 5.3 GREEN — 实现 owner-scoped repository 查询和 cursor 编解码；不引入 offset pagination，不读取 LangGraph saver。
+- [x] 5.4 GREEN VERIFY — 重跑 5.2 命令；预期全部通过。
+- [x] 5.5 REFACTOR — 抽取每个 repository 内部的 cursor predicate，保留会话与消息不同排序方向；运行 `cd backend && uv run python -m pytest tests/test_chat_repositories.py tests/test_chat_persistence.py -q`。
+- [x] 5.6 COMMIT — 提交查询 repository 与测试，提交信息：`feat(chat): query owned conversations and messages`。
 
 ## 6. Transactional user-turn acceptance
 
