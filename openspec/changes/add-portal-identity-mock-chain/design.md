@@ -25,11 +25,26 @@
 
 ## Decisions
 
-### 1. 使用一个轻量公共身份模块
+### 1. 使用独立的公共身份包
 
-第一阶段将 `Principal`、Mock Provider、纯 ASGI Middleware 和 FastAPI Dependency 放在同一公共身份模块中，避免提前拆分多层目录和抽象。Document API 直接导入并注册该模块。
+身份能力统一放在 `backend/app/identity/`，按稳定职责拆分：
 
-备选方案是立即建立包含 `providers/`、`errors.py`、`config.py` 等文件的完整身份包；当前只有一个 Mock 实现，拆分收益不足，待真实门户 Provider 加入时再按复杂度重构。
+```text
+identity/
+├── __init__.py
+├── principal.py
+├── config.py
+├── errors.py
+├── dependencies.py
+├── middleware.py
+├── provider.py
+└── providers/
+    ├── __init__.py
+    ├── mock.py
+    └── portal.py
+```
+
+`config.py` 只保存默认 Mock 身份和 Header 名称，不引入 Settings；`errors.py` 保存缺失当前身份的请求异常；`provider.py` 定义 Provider 协议。`providers/portal.py` 只保留真实门户 Provider 的明确归属，本阶段不实现、不导出也不装配。Document API 通过 `app.identity` 的公共导入注册身份链路。
 
 ### 2. Middleware 控制流程，Provider 只负责生成身份
 
@@ -45,7 +60,7 @@ HTTP Request
     -> Route
 ```
 
-Middleware 负责公开路径判断和请求上下文写入；Mock Provider 只根据 Header 与默认值生成 `Principal`。Provider 通过构造参数交给 Middleware，不引入抽象基类或依赖注入容器。
+Middleware 负责公开路径判断和请求上下文写入；Mock Provider 只根据 Header 与默认值生成 `Principal`。Provider 通过构造参数交给 Middleware，并遵循轻量 `IdentityProvider` Protocol，不引入抽象基类或依赖注入容器。
 
 ### 3. Mock 身份零配置可用
 
@@ -76,12 +91,12 @@ Document API 在自己的 `create_app()` 中注册 Middleware，并将 `/health`
 
 - [固定 Mock 身份不具备真实安全性] → 明确限定为链路演练，不把本阶段实现视为正式门户鉴权能力。
 - [没有 Settings 意味着无法运行时切换 Provider] → 当前刻意选择代码装配；正式门户接入时再引入真实 Provider 和必要配置。
-- [单模块未来可能变大] → 当前优先最小实现，只有真实门户解析、`/who` 或多种 Provider 出现后才拆包。
+- [文件分层多于当前 Mock 功能] → 每个文件都对应已确认的稳定职责；真实门户文件不提供占位实现，避免当前链路误用。
 - [默认身份会让受保护接口在无 Header 时通过] → 这是本阶段本地联调的预期行为，由测试明确固化，正式接入时必须替换。
 
 ## Migration Plan
 
-1. 加入公共身份模块及其单元测试。
+1. 加入公共身份包及其单元测试。
 2. 在 Document API 中注册 Middleware。
 3. 增加服务级测试，确认健康检查绕过且受保护请求可以读取 Principal。
 4. 运行完整后端测试；回滚时移除 Document API 的 Middleware 注册即可。

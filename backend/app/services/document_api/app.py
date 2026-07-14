@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
+from app.identity import IdentityMiddleware, MockIdentityProvider
 from app.services.document_api.deps import application_lifespan_resources
 from app.services.document_api.router import router
 
@@ -32,6 +33,11 @@ def create_app() -> FastAPI:
         version=settings.app_version,
         debug=settings.debug,
         lifespan=lifespan,
+    )
+    application.add_middleware(
+        IdentityMiddleware,
+        provider=MockIdentityProvider(),
+        public_paths={"/health"},
     )
     register_exception_handlers(application)
     application.include_router(router, prefix=settings.api_v1_prefix)

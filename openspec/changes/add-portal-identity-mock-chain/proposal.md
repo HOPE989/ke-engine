@@ -24,6 +24,6 @@
 
 ## Impact
 
-- 影响 `backend/app` 下的公共身份模块和 Document API 应用装配。
+- 影响 `backend/app/identity/` 公共身份包和 Document API 应用装配。
 - 不增加第三方依赖，不修改数据库结构，不增加对外身份接口，不修改现有业务资源授权规则。
 - 后续真实门户接入可通过新增或替换 Identity Provider 完成，Middleware、Dependency 和业务侧读取方式保持不变。

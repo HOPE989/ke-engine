@@ -54,6 +54,16 @@ def test_target_architecture_files_exist():
         "common/response.py",
         "common/pagination.py",
         "common/enums.py",
+        "identity/__init__.py",
+        "identity/principal.py",
+        "identity/config.py",
+        "identity/errors.py",
+        "identity/dependencies.py",
+        "identity/middleware.py",
+        "identity/provider.py",
+        "identity/providers/__init__.py",
+        "identity/providers/mock.py",
+        "identity/providers/portal.py",
     ]
 
     missing = [path for path in expected_files if not (app_root / path).is_file()]
@@ -73,6 +83,7 @@ def test_target_architecture_files_exist():
 
 
 def test_target_architecture_public_imports_are_available():
+    from app.identity import IdentityMiddleware, MockIdentityProvider, Principal, get_current_principal
     from app.domains.document.components.segment_builder import build_segment_drafts
     from app.domains.document.components.storage_keys import original_object_key
     from app.domains.document.components.validators import validate_document_upload
@@ -96,6 +107,10 @@ def test_target_architecture_public_imports_are_available():
     assert DocumentConvertRequested
     assert DocumentMetadata
     assert DocumentApiDeps
+    assert IdentityMiddleware
+    assert MockIdentityProvider
+    assert Principal
+    assert callable(get_current_principal)
 
 
 def test_service_api_layers_do_not_keep_runtime_or_error_mapping_shells():
