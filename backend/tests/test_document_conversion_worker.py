@@ -714,7 +714,7 @@ def test_conversion_worker_removes_legacy_lazy_runtime_resource_helpers():
 async def test_image_describer_invokes_langchain_with_human_message():
     from langchain_core.messages import HumanMessage
 
-    from app.entrypoints.document_worker import RuntimeImageDescriber
+    from app.domains.document.components.image_describer import RuntimeImageDescriber
 
     class FakeModel:
         def __init__(self):

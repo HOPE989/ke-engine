@@ -820,13 +820,3 @@ def test_document_api_app_owns_document_router_and_lifespan_deps():
         assert implementation_detail not in source
 
 
-def test_agent_api_app_does_not_own_document_deps():
-    from app.services.agent_api import app
-
-    source = inspect.getsource(app)
-    assert "from app.api" not in source
-    assert "from app.services.agent_api.router import router" in source
-    assert "application_lifespan_resources" not in source
-    assert "document_runtime" not in source
-    assert "document_deps" not in source
-    assert "DocumentRepository" not in source

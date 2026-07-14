@@ -11,8 +11,10 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.domains.document.components.image_describer import RuntimeImageDescriber
 from app.domains.document.workers.conversion_consumer import run_document_conversion_consumer
 from app.domains.document.workers.vectorization_consumer import run_document_vector_storage_consumer
+from app.infrastructure.llm import create_chat_model
 
 
 class RuntimeResourceStack:
@@ -44,62 +46,10 @@ class RuntimeResourceStack:
         self._stack.push_async_callback(cleanup)
 
 
-class RuntimeImageDescriber:
-    """Kafka worker 持有的图片描述模型适配器。
-
-    PDF 转换时只调用这个适配器；底层 chat model 在 Kafka worker 启动期构造，避免每条
-    conversion message 重复初始化外部模型客户端。
-    """
-
-    def __init__(self, *, model: Any) -> None:
-        self._model = model
-
-    async def describe_image(self, *, filename: str, content: bytes, content_type: str) -> str:
-        """调用启动期创建的图片理解模型，返回一条中文图片描述。"""
-
-        import base64
-
-        from langchain_core.messages import HumanMessage
-
-        encoded = base64.b64encode(content).decode("ascii")
-        response = await self._model.ainvoke(
-            [
-                HumanMessage(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": f"请用一句简洁中文描述图片 {filename} 的主要内容。",
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{content_type};base64,{encoded}",
-                            },
-                        },
-                    ],
-                )
-            ]
-        )
-        return str(response.content)
-
-
 def create_runtime_image_describer(settings: Any) -> RuntimeImageDescriber:
     """按 Kafka worker 启动期配置创建图片描述模型。"""
 
-    from langchain_openai import ChatOpenAI
-
-    api_key = _clean_value(getattr(settings, "openai_api_key", None))
-    if api_key is None:
-        raise RuntimeError("OPENAI_API_KEY is required for document image description")
-
-    kwargs: dict[str, str] = {
-        "api_key": api_key,
-        "model": "qwen3.6-flash",
-    }
-    base_url = _clean_value(getattr(settings, "openai_base_url", None))
-    if base_url is not None:
-        kwargs["base_url"] = base_url
-    return RuntimeImageDescriber(model=ChatOpenAI(**kwargs))
+    return RuntimeImageDescriber(model=create_chat_model(settings, model="qwen3.6-flash"))
 
 
 async def initialize_runtime_database(*, stack: RuntimeResourceStack, settings: Any) -> Any:
@@ -296,13 +246,6 @@ def _push_named_cleanup(stack: RuntimeResourceStack, resource: Any, name: str) -
     callback = getattr(resource, name, None)
     if callback is not None:
         stack.push_cleanup(callback)
-
-
-def _clean_value(value: str | None) -> str | None:
-    if value is None:
-        return None
-    cleaned = value.strip()
-    return cleaned or None
 
 
 async def start_worker_consumers() -> None:
