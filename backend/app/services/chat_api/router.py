@@ -3,9 +3,11 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
+from starlette.responses import StreamingResponse
 
 from app.common.response import APIResponse, success_response
 from app.contracts.chat.http import (
+    CompletionRequest,
     ConversationPage,
     ConversationSummary,
     MessagePage,
@@ -13,10 +15,67 @@ from app.contracts.chat.http import (
 )
 from app.core.exceptions import AppException
 from app.domains.chat.repositories import ConversationRepository, MessageRepository
+from app.domains.chat.services.conversation import ConversationNotFound, ConversationService
+from app.domains.chat.services.runtime import CompletionProducer
 from app.identity import Principal, get_current_principal
 from app.services.chat_api.deps import ChatApiDeps, get_chat_deps
+from app.services.chat_api.streaming import encode_sse
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+@router.post("/completions")
+async def create_completion(
+    request: CompletionRequest,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    chat_deps: Annotated[ChatApiDeps, Depends(get_chat_deps)],
+) -> StreamingResponse:
+    try:
+        turn = await ConversationService(
+            chat_deps.session_factory,
+            chat_deps.id_generator,
+        ).accept_user_turn(
+            user_id=principal.user_id,
+            content=request.content,
+            conversation_id=(
+                int(request.conversation_id)
+                if request.conversation_id is not None
+                else None
+            ),
+        )
+    except ConversationNotFound as exc:
+        raise AppException("conversation not found", status.HTTP_404_NOT_FOUND) from exc
+
+    subscriber = chat_deps.producer_registry.start(
+        producer_factory=lambda publisher: CompletionProducer(
+            graph=chat_deps.graph,
+            model=chat_deps.model,
+            session_factory=chat_deps.session_factory,
+            id_generator=chat_deps.id_generator,
+            publisher=publisher,
+        ),
+        turn=turn,
+        user_id=principal.user_id,
+    )
+
+    async def event_stream():
+        try:
+            while True:
+                event, payload = await subscriber.receive()
+                yield encode_sse(event, payload)
+                if event in {"completed", "error"}:
+                    break
+        finally:
+            subscriber.detach()
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/conversations", response_model=APIResponse[ConversationPage])

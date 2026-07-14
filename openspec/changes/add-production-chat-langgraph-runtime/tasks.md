@@ -219,16 +219,16 @@
 
 **Interfaces:** `POST /api/v1/chat/completions` 接收 `CompletionRequest`；先 `accept_user_turn()` 提交业务事务，再注册 producer 并返回 `StreamingResponse(media_type="text/event-stream")`；headers 包含 `Cache-Control: no-cache` 和 `X-Accel-Buffering: no`。
 
-- [ ] 12.1 RED — 添加 API 测试：首条消息自动创建会话；第一帧必为 metadata 且含 string conversation/user message ID；已有会话复用 ID；空白 content 不创建数据；foreign conversation 返回 404；headers 禁缓存/代理缓冲；请求 schema 不接受 model、幂等键或客户端 thread ID。
-- [ ] 12.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_api.py -k "metadata or validation or ownership or headers" -q`；预期因 completion endpoint 尚不存在而失败。
-- [ ] 12.3 GREEN — 实现 completion route 和 metadata-first bridge；确保业务事务提交失败时不打开成功 SSE 流，metadata 发布后才允许 producer 调用 Graph。
-- [ ] 12.4 GREEN VERIFY — 重跑 12.2 命令；预期全部通过。
-- [ ] 12.5 RED — 增加流终态 API 测试：成功序列为 metadata → content_delta* → completed；Graph 或 ASSISTANT commit 失败为 metadata → content_delta* → error；两种终态互斥；流中无 heartbeat、SSE id 或 replay 声明。
-- [ ] 12.6 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_api.py -k "terminal or heartbeat or replay" -q`；预期新增终态测试失败。
-- [ ] 12.7 GREEN — 连接 route subscriber 与 producer terminal events，只实现当前连接的 live stream，不实现 `Last-Event-ID`、重连恢复或服务端自动 retry。
-- [ ] 12.8 GREEN VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_api.py -q`；预期 completion API 测试全部通过。
-- [ ] 12.9 REFACTOR — 保持 route 只负责身份、输入、事务启动与 transport，Graph 编排继续位于 runtime service；运行 `cd backend && uv run python -m pytest tests/test_chat_completion_api.py tests/test_chat_query_api.py tests/test_chat_completion_producer.py -q`。
-- [ ] 12.10 COMMIT — 提交 completion API 与测试，提交信息：`feat(chat): expose metadata-first completion stream`。
+- [x] 12.1 RED — 添加 API 测试：首条消息自动创建会话；第一帧必为 metadata 且含 string conversation/user message ID；已有会话复用 ID；空白 content 不创建数据；foreign conversation 返回 404；headers 禁缓存/代理缓冲；请求 schema 不接受 model、幂等键或客户端 thread ID。
+- [x] 12.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_api.py -k "metadata or validation or ownership or headers" -q`；预期因 completion endpoint 尚不存在而失败。
+- [x] 12.3 GREEN — 实现 completion route 和 metadata-first bridge；确保业务事务提交失败时不打开成功 SSE 流，metadata 发布后才允许 producer 调用 Graph。
+- [x] 12.4 GREEN VERIFY — 重跑 12.2 命令；预期全部通过。
+- [x] 12.5 RED — 增加流终态 API 测试：成功序列为 metadata → content_delta* → completed；Graph 或 ASSISTANT commit 失败为 metadata → content_delta* → error；两种终态互斥；流中无 heartbeat、SSE id 或 replay 声明。
+- [x] 12.6 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_api.py -k "terminal or heartbeat or replay" -q`；预期新增终态测试失败。
+- [x] 12.7 GREEN — 连接 route subscriber 与 producer terminal events，只实现当前连接的 live stream，不实现 `Last-Event-ID`、重连恢复或服务端自动 retry。
+- [x] 12.8 GREEN VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_api.py -q`；预期 completion API 测试全部通过。
+- [x] 12.9 REFACTOR — 保持 route 只负责身份、输入、事务启动与 transport，Graph 编排继续位于 runtime service；运行 `cd backend && uv run python -m pytest tests/test_chat_completion_api.py tests/test_chat_query_api.py tests/test_chat_completion_producer.py -q`。
+- [x] 12.10 COMMIT — 提交 completion API 与测试，提交信息：`feat(chat): expose metadata-first completion stream`。
 
 ## 13. Real PostgreSQL checkpoint integration
 
