@@ -154,12 +154,12 @@
 
 **Interfaces:** `CompletionProducer.run(turn: AcceptedUserTurn, user_id: str) -> None`；调用 compiled graph 的 `astream_events()`，input 只含当前 USER message，config 使用 `{"configurable": {"thread_id": str(conversation_id)}}`，context 注入 model；producer 汇总 text chunk，通过 message repository 保存 ASSISTANT 后发布 `completed`。
 
-- [ ] 8.1 RED — 添加成功路径测试：metadata 在 graph 开始前发布；Graph 收到十进制 string thread ID；delta 保持顺序；完整 ASSISTANT 以 USER message 为 parent 保存；只有保存事务提交后才发布含 string `assistant_message_id` 和 `finish_reason=stop` 的 `completed`；成功后不发布 `error`。
-- [ ] 8.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_producer.py -k success -q`；预期因 completion runtime 尚不存在而失败。
-- [ ] 8.3 GREEN — 实现只覆盖成功路径的 producer、单 subscriber 发布接口和 ASSISTANT 持久化；不实现失败吞吐、断连优化或进程恢复。
-- [ ] 8.4 GREEN VERIFY — 重跑 8.2 命令；预期全部通过。
-- [ ] 8.5 REFACTOR — 分离 Graph event consumption、answer accumulation 和 ASSISTANT commit 三个私有步骤；运行 `cd backend && uv run python -m pytest tests/test_chat_completion_producer.py -k success tests/test_chat_sse_adapter.py -q`。
-- [ ] 8.6 COMMIT — 提交成功 producer 与测试，提交信息：`feat(chat): persist successful streamed completions`。
+- [x] 8.1 RED — 添加成功路径测试：metadata 在 graph 开始前发布；Graph 收到十进制 string thread ID；delta 保持顺序；完整 ASSISTANT 以 USER message 为 parent 保存；只有保存事务提交后才发布含 string `assistant_message_id` 和 `finish_reason=stop` 的 `completed`；成功后不发布 `error`。
+- [x] 8.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_producer.py -k success -q`；预期因 completion runtime 尚不存在而失败。
+- [x] 8.3 GREEN — 实现只覆盖成功路径的 producer、单 subscriber 发布接口和 ASSISTANT 持久化；不实现失败吞吐、断连优化或进程恢复。
+- [x] 8.4 GREEN VERIFY — 重跑 8.2 命令；预期全部通过。
+- [x] 8.5 REFACTOR — 分离 Graph event consumption、answer accumulation 和 ASSISTANT commit 三个私有步骤；运行 `cd backend && uv run python -m pytest tests/test_chat_completion_producer.py -k success tests/test_chat_sse_adapter.py -q`。
+- [x] 8.6 COMMIT — 提交成功 producer 与测试，提交信息：`feat(chat): persist successful streamed completions`。
 
 ## 9. Completion producer failure boundary
 

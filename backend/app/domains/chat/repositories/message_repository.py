@@ -44,6 +44,24 @@ class MessageRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    def add_assistant(
+        self,
+        *,
+        message_id: int,
+        conversation_id: int,
+        parent_message_id: int,
+        content: str,
+    ) -> Message:
+        message = Message(
+            id=message_id,
+            conversation_id=conversation_id,
+            parent_message_id=parent_message_id,
+            role="ASSISTANT",
+            content=content,
+        )
+        self._session.add(message)
+        return message
+
     async def list_owned(
         self,
         *,
