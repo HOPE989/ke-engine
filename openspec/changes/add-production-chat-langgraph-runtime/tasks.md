@@ -57,12 +57,12 @@
 
 **Interfaces:** `ChatState(MessagesState)`；`ChatRuntimeContext(model: BaseChatModel)`；`async llm_node(state: ChatState, runtime: Runtime[ChatRuntimeContext]) -> dict[str, list[BaseMessage]]`；`build_chat_graph() -> StateGraph` 返回未编译 builder，稳定节点名为 `llm`。
 
-- [ ] 2.1 RED — 在 `test_chat_graph.py` 添加单一切片测试：Graph 只有 `START -> llm -> END`；fake model 收到 state messages；节点返回的 `AIMessage` 通过 `MessagesState` 合并；导入模块不创建模型、不读 settings、不打开数据库；节点没有 retry policy。
-- [ ] 2.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_graph.py -q`；预期因 graph 模块和接口尚不存在而失败。
-- [ ] 2.3 GREEN — 实现 `ChatState`、runtime context、最小 `llm_node` 和 builder；只满足单节点图与注入模型，不加入 checkpoint、SSE、重试或业务持久化。
-- [ ] 2.4 GREEN VERIFY — 重跑 2.2 命令；预期全部通过。
-- [ ] 2.5 REFACTOR — 固定公开 import 和节点常量，消除 builder 与 node 的循环依赖；运行 `cd backend && uv run python -m pytest tests/test_chat_graph.py tests/test_target_architecture_layout.py -q`。
-- [ ] 2.6 COMMIT — 提交 Graph 与测试，提交信息：`feat(chat): add minimal langgraph topology`。
+- [x] 2.1 RED — 在 `test_chat_graph.py` 添加单一切片测试：Graph 只有 `START -> llm -> END`；fake model 收到 state messages；节点返回的 `AIMessage` 通过 `MessagesState` 合并；导入模块不创建模型、不读 settings、不打开数据库；节点没有 retry policy。
+- [x] 2.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_graph.py -q`；预期因 graph 模块和接口尚不存在而失败。
+- [x] 2.3 GREEN — 实现 `ChatState`、runtime context、最小 `llm_node` 和 builder；只满足单节点图与注入模型，不加入 checkpoint、SSE、重试或业务持久化。
+- [x] 2.4 GREEN VERIFY — 重跑 2.2 命令；预期全部通过。
+- [x] 2.5 REFACTOR — 固定公开 import 和节点常量，消除 builder 与 node 的循环依赖；运行 `cd backend && uv run python -m pytest tests/test_chat_graph.py tests/test_target_architecture_layout.py -q`。
+- [x] 2.6 COMMIT — 提交 Graph 与测试，提交信息：`feat(chat): add minimal langgraph topology`。
 
 ## 3. PostgreSQL checkpointer resource
 
