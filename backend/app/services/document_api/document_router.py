@@ -16,7 +16,7 @@ from app.common.response import APIResponse, success_response
 from app.contracts.document.http import DocumentChunkRequest, DocumentChunkResponse, DocumentMetadata
 from app.core.config import Settings
 from app.core.exceptions import AppException
-from app.infrastructure.redis_lock import data_query_upload_lock, document_chunking_lock
+from app.infrastructure.redis import data_query_upload_lock, document_chunking_lock
 from app.services.document_api.deps import DocumentApiDeps, get_config, get_document_deps
 from app.domains.document.shared.errors import (
     ChunkLockUnavailable,

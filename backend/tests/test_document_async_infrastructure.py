@@ -143,7 +143,7 @@ async def test_worker_skips_runtime_initialization_when_document_lock_is_busy(mo
 
     calls = []
     monkeypatch.setattr(
-        "app.infrastructure.redis_lock.document_conversion_lock",
+        "app.infrastructure.redis.document_conversion_lock",
         lambda **kwargs: FakeLock(calls, acquired=False),
     )
 
@@ -183,7 +183,7 @@ async def test_worker_plain_text_path_does_not_initialize_pdf_runtime(monkeypatc
 
     calls = []
     monkeypatch.setattr(
-        "app.infrastructure.redis_lock.document_conversion_lock",
+        "app.infrastructure.redis.document_conversion_lock",
         lambda **kwargs: FakeLock(calls, acquired=True),
     )
 

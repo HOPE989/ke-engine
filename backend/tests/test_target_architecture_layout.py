@@ -28,6 +28,7 @@ def test_target_architecture_files_exist():
         "domains/document/components/splitters.py",
         "domains/document/components/segment_builder.py",
         "domains/document/components/markdown_assets.py",
+        "domains/document/components/image_describer.py",
         "domains/document/repositories/document_repository.py",
         "domains/document/repositories/segment_repository.py",
         "domains/document/repositories/table_repository.py",
@@ -60,6 +61,8 @@ def test_target_architecture_files_exist():
     missing = [path for path in expected_files if not (app_root / path).is_file()]
 
     assert missing == []
+    assert not (app_root / "infrastructure" / "redis_lock.py").exists()
+    assert not (app_root / "domains" / "document" / "components" / "vector_store.py").exists()
     for removed_path in [
         "entrypoints/agent_api.py",
         "services/agent_api",

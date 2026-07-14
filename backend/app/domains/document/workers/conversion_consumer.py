@@ -98,7 +98,7 @@ async def run_document_conversion(*, doc_id: int, runtime: KafkaWorkerRuntime) -
     3. 函数不负责打开或关闭 DB engine，数据库生命周期由 worker 进程 runtime 统一管理。
     """
 
-    from app.infrastructure.redis_lock import document_conversion_lock
+    from app.infrastructure.redis import document_conversion_lock
 
     conversion_context = runtime.conversion
     lock = document_conversion_lock(

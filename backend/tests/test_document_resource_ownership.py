@@ -380,7 +380,7 @@ async def test_kafka_worker_runtime_groups_startup_document_resources(monkeypatc
     monkeypatch.setattr(session_module, "close_engine", fake_close_engine)
     monkeypatch.setattr(session_module, "get_session_factory", fake_get_session_factory)
     monkeypatch.setattr("app.domains.document.repositories.document_repository.DocumentRepository", FakeRepository)
-    monkeypatch.setattr("app.infrastructure.redis_lock.create_redis_client", lambda url: FakeRedis())
+    monkeypatch.setattr("app.infrastructure.redis.create_redis_client", lambda url: FakeRedis())
     monkeypatch.setattr("app.infrastructure.minio.get_minio_client", lambda: minio_client)
     monkeypatch.setattr("app.infrastructure.minio.ensure_minio_bucket", fake_ensure_minio_bucket)
     monkeypatch.setattr("app.domains.document.components.storage.DocumentObjectStorage", FakeStorage)
@@ -392,15 +392,15 @@ async def test_kafka_worker_runtime_groups_startup_document_resources(monkeypatc
         raising=False,
     )
     monkeypatch.setattr(
-        "app.domains.document.components.vector_store.create_embedding_model",
+        "app.infrastructure.llm.create_embedding_model",
         lambda cfg: embedding_model,
     )
     monkeypatch.setattr(
-        "app.domains.document.components.vector_store.create_elasticsearch_store",
+        "app.infrastructure.elasticsearch.create_elasticsearch_store",
         lambda *, settings, embedding_model: es_store,
     )
     monkeypatch.setattr(
-        "app.domains.document.components.vector_store.ElasticsearchVectorStoreAdapter",
+        "app.infrastructure.elasticsearch.ElasticsearchVectorStoreAdapter",
         FakeAdapter,
     )
 
@@ -675,7 +675,7 @@ async def test_application_lifespan_resources_assemble_document_deps_before_serv
         FakeSnowflakeIdGenerator,
     )
     monkeypatch.setattr("app.infrastructure.kafka.create_kafka_producer", lambda bootstrap_servers: "producer")
-    monkeypatch.setattr("app.infrastructure.redis_lock.create_redis_client", fake_create_redis_client)
+    monkeypatch.setattr("app.infrastructure.redis.create_redis_client", fake_create_redis_client)
     monkeypatch.setattr(
         "app.domains.document.components.dispatcher.KafkaDocumentConversionDispatcher",
         FakeKafkaDocumentConversionDispatcher,

@@ -22,7 +22,7 @@ class FakeLock:
 
 
 def test_document_chunking_lock_factory_uses_document_chunk_key(monkeypatch):
-    from app.infrastructure import redis_lock
+    from app.infrastructure import redis as redis_lock
 
     captured = {}
 

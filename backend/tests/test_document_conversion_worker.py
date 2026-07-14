@@ -479,7 +479,7 @@ async def test_data_query_busy_document_lock_leaves_kafka_message_uncommitted(mo
             return False
 
     monkeypatch.setattr(
-        "app.infrastructure.redis_lock.document_conversion_lock",
+        "app.infrastructure.redis.document_conversion_lock",
         lambda **kwargs: BusyLock(),
     )
     runtime = SimpleNamespace(
@@ -619,7 +619,7 @@ async def test_conversion_uses_runtime_redis_client_and_per_document_lock(monkey
         calls.append(("run_locked", doc_id, runtime))
 
     monkeypatch.setattr(
-        "app.infrastructure.redis_lock.document_conversion_lock",
+        "app.infrastructure.redis.document_conversion_lock",
         fake_document_conversion_lock,
     )
     monkeypatch.setattr(
@@ -661,7 +661,7 @@ async def test_conversion_message_does_not_initialize_or_close_runtime_owned_res
     monkeypatch.setattr(session_module, "init_engine", fail_db_lifecycle)
     monkeypatch.setattr(session_module, "close_engine", fail_db_lifecycle)
     monkeypatch.setattr(
-        "app.infrastructure.redis_lock.document_conversion_lock",
+        "app.infrastructure.redis.document_conversion_lock",
         lambda **kwargs: BusyLock(),
     )
     runtime = SimpleNamespace(

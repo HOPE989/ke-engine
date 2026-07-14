@@ -54,7 +54,7 @@ def _index_not_found_error(index_name="custom-vector-index"):
 
 
 def test_embedding_model_uses_fixed_model_chunk_size_and_configured_dimensions(monkeypatch):
-    from app.domains.document.components import vector_store
+    from app.infrastructure import llm as vector_store
 
     captured = {}
 
@@ -78,7 +78,7 @@ def test_embedding_model_uses_fixed_model_chunk_size_and_configured_dimensions(m
 
 
 def test_elasticsearch_store_uses_configured_index_and_dimensions(monkeypatch):
-    from app.domains.document.components import vector_store
+    from app.infrastructure import elasticsearch as vector_store
 
     captured = {}
     embedding_model = object()
@@ -107,7 +107,7 @@ def test_elasticsearch_store_uses_configured_index_and_dimensions(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_adapter_stores_segment_text_as_page_content_and_metadata_separately():
-    from app.domains.document.components.vector_store import ElasticsearchVectorStoreAdapter
+    from app.infrastructure.elasticsearch import ElasticsearchVectorStoreAdapter
 
     class FakeStore:
         def __init__(self):
@@ -136,8 +136,8 @@ async def test_adapter_stores_segment_text_as_page_content_and_metadata_separate
 
 @pytest.mark.asyncio
 async def test_adapter_preserves_returned_ids_order_and_rejects_count_mismatch():
-    from app.domains.document.components import vector_store
-    from app.domains.document.components.vector_store import ElasticsearchVectorStoreAdapter
+    from app.infrastructure import elasticsearch as vector_store
+    from app.infrastructure.elasticsearch import ElasticsearchVectorStoreAdapter
 
     class FakeStore:
         async def aadd_documents(self, documents):
@@ -154,7 +154,7 @@ async def test_adapter_preserves_returned_ids_order_and_rejects_count_mismatch()
 
 @pytest.mark.asyncio
 async def test_adapter_can_delete_vectors_by_ids_and_metadata_doc_id():
-    from app.domains.document.components.vector_store import ElasticsearchVectorStoreAdapter
+    from app.infrastructure.elasticsearch import ElasticsearchVectorStoreAdapter
 
     class FakeStore:
         def __init__(self):
@@ -196,7 +196,7 @@ async def test_adapter_can_delete_vectors_by_ids_and_metadata_doc_id():
 
 @pytest.mark.asyncio
 async def test_adapter_treats_missing_index_as_no_vectors_to_delete_by_doc_id():
-    from app.domains.document.components.vector_store import ElasticsearchVectorStoreAdapter
+    from app.infrastructure.elasticsearch import ElasticsearchVectorStoreAdapter
 
     class FakeClient:
         def __init__(self):
@@ -226,7 +226,7 @@ async def test_adapter_treats_missing_index_as_no_vectors_to_delete_by_doc_id():
 
 
 def test_ensure_vector_index_creates_mapping_with_configured_dimensions():
-    from app.domains.document.components import vector_store
+    from app.infrastructure import elasticsearch as vector_store
 
     class FakeIndices:
         def __init__(self):
@@ -262,7 +262,7 @@ def test_ensure_vector_index_creates_mapping_with_configured_dimensions():
 
 
 def test_ensure_vector_index_rejects_dimension_mismatch():
-    from app.domains.document.components import vector_store
+    from app.infrastructure import elasticsearch as vector_store
 
     class FakeIndices:
         def exists(self, *, index):

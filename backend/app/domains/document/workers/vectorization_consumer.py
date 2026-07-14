@@ -145,7 +145,7 @@ async def run_document_vector_storage_with_runtime(
     3. 返回值继续表达 Kafka commit 决策，Celery 调用方只复用业务结果而不触碰 offset。
     """
 
-    from app.infrastructure.redis_lock import document_embed_store_lock
+    from app.infrastructure.redis import document_embed_store_lock
 
     vector_context = _get_vector_storage_context(runtime)
     document = await vector_context.repository.get_document(doc_id)

@@ -231,7 +231,7 @@ async def test_runtime_injected_vector_storage_uses_runtime_resources_and_per_do
         return True
 
     monkeypatch.setattr(
-        "app.infrastructure.redis_lock.document_embed_store_lock",
+        "app.infrastructure.redis.document_embed_store_lock",
         fake_document_embed_store_lock,
     )
     monkeypatch.setattr(
@@ -293,7 +293,7 @@ def test_runtime_injected_vector_storage_does_not_construct_runtime_owned_resour
 )
 async def test_vector_storage_event_retryable_failures_do_not_commit(monkeypatch, error):
     from app.domains.document.services import vectorization as workflow
-    from app.domains.document.components.vector_store import VectorStoreIdCountMismatch
+    from app.infrastructure.elasticsearch import VectorStoreIdCountMismatch
     from app.domains.document.workers import vectorization_consumer as vector_storage
 
     if error == "busy":

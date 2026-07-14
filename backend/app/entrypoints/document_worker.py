@@ -164,7 +164,7 @@ def _create_worker_repository(session_factory: Any) -> Any:
 
 
 def _create_worker_redis_client(*, stack: RuntimeResourceStack, settings: Any) -> Any:
-    from app.infrastructure.redis_lock import create_redis_client
+    from app.infrastructure.redis import create_redis_client
 
     redis_client = create_redis_client(settings.redis_url)
     stack.push_cleanup(redis_client.close)
@@ -208,7 +208,7 @@ def _create_document_converter_factory() -> Any:
 
 
 def _create_worker_embedding_model(*, settings: Any) -> Any:
-    from app.domains.document.components.vector_store import create_embedding_model
+    from app.infrastructure.llm import create_embedding_model
 
     return create_embedding_model(settings)
 
@@ -219,7 +219,7 @@ def _create_worker_vector_store(
     settings: Any,
     embedding_model: Any,
 ) -> Any:
-    from app.domains.document.components.vector_store import (
+    from app.infrastructure.elasticsearch import (
         ElasticsearchVectorStoreAdapter,
         create_elasticsearch_store,
     )

@@ -100,7 +100,7 @@ async def application_lifespan_resources(
     from app.infrastructure.kafka import create_kafka_producer
     from app.infrastructure.magika import get_magika_client
     from app.infrastructure.minio import ensure_minio_bucket, get_minio_client
-    from app.infrastructure.redis_lock import create_redis_client
+    from app.infrastructure.redis import create_redis_client
     from app.infrastructure.snowflake import SnowflakeIdGenerator
 
     async with ResourceCleanupStack() as stack:

@@ -245,7 +245,7 @@ async def test_vector_storage_model_or_elasticsearch_failure_rolls_back_and_clea
 @pytest.mark.asyncio
 async def test_vector_storage_returned_id_mismatch_cleans_returned_ids_and_doc_id():
     from app.domains.document.services import vectorization as vector_storage
-    from app.domains.document.components.vector_store import VectorStoreIdCountMismatch
+    from app.infrastructure.elasticsearch import VectorStoreIdCountMismatch
 
     repository = FakeRepository(batches=[[_segment(1), _segment(2)]])
     vector_store = FakeVectorStore(
