@@ -40,7 +40,6 @@ def test_target_architecture_files_exist():
         "domains/document/workers/vectorization_consumer.py",
         "contracts/document/http.py",
         "contracts/document/events.py",
-        "contracts/identity/http.py",
         "infrastructure/db/session.py",
         "infrastructure/db/base.py",
         "infrastructure/kafka.py",
@@ -52,7 +51,6 @@ def test_target_architecture_files_exist():
         "core/config.py",
         "core/logging.py",
         "core/exceptions.py",
-        "core/security.py",
         "common/response.py",
         "common/pagination.py",
         "common/enums.py",
@@ -63,6 +61,8 @@ def test_target_architecture_files_exist():
     assert missing == []
     assert not (app_root / "infrastructure" / "redis_lock.py").exists()
     assert not (app_root / "domains" / "document" / "components" / "vector_store.py").exists()
+    assert not (app_root / "contracts" / "identity").exists()
+    assert not (app_root / "core" / "security.py").exists()
     for removed_path in [
         "entrypoints/agent_api.py",
         "services/agent_api",
@@ -82,7 +82,6 @@ def test_target_architecture_public_imports_are_available():
     from app.infrastructure.db.session import get_session_factory
     from app.contracts.document.events import DocumentConvertRequested
     from app.contracts.document.http import DocumentMetadata
-    from app.contracts.identity.http import IdentityPrincipal
     from app.services.document_api.deps import DocumentApiDeps
 
     assert document_api.app
@@ -96,7 +95,6 @@ def test_target_architecture_public_imports_are_available():
     assert callable(get_session_factory)
     assert DocumentConvertRequested
     assert DocumentMetadata
-    assert IdentityPrincipal
     assert DocumentApiDeps
 
 
@@ -123,7 +121,7 @@ def test_contracts_are_grouped_by_domain_not_transport():
     assert not (app_root / "contracts" / "mcp").exists()
     assert (app_root / "contracts" / "document").is_dir()
     assert not (app_root / "contracts" / "agent").exists()
-    assert (app_root / "contracts" / "identity").is_dir()
+    assert not (app_root / "contracts" / "identity").exists()
 
 
 def test_contract_modules_do_not_reexport_domain_types():

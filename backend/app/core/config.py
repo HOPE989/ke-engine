@@ -123,7 +123,6 @@ class Settings(BaseSettings):
         validation_alias="SNOWFLAKE_WORKER_ID",
         description="startup-only: Snowflake worker id is fixed for generated document ids.",
     )
-    password_hash_iterations: int = 260_000
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openai_base_url: str | None = Field(default=None, validation_alias="OPENAI_BASE_URL")
     openai_model: str | None = Field(default=None, validation_alias="OPENAI_MODEL")
