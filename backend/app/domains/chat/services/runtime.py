@@ -4,7 +4,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from app.contracts.chat.stream import CompletedPayload, MetadataPayload
+from app.contracts.chat.stream import CompletedPayload, ErrorPayload, MetadataPayload
 from app.domains.chat.graph import ChatRuntimeContext
 from app.domains.chat.repositories import MessageRepository
 from app.domains.chat.services.conversation import AcceptedUserTurn
@@ -36,12 +36,20 @@ class CompletionProducer:
             ),
         )
 
-        answer = await self._accumulate_answer(turn)
-        assistant_message_id = await self._commit_assistant(turn, answer)
-        await self._publisher.publish(
-            "completed",
-            CompletedPayload(assistant_message_id=assistant_message_id),
-        )
+        try:
+            answer = await self._accumulate_answer(turn)
+            assistant_message_id = await self._commit_assistant(turn, answer)
+        except Exception:
+            terminal_event = "error"
+            terminal_payload = ErrorPayload(
+                code="COMPLETION_FAILED",
+                message="Completion failed",
+                retryable=False,
+            )
+        else:
+            terminal_event = "completed"
+            terminal_payload = CompletedPayload(assistant_message_id=assistant_message_id)
+        await self._publisher.publish(terminal_event, terminal_payload)
 
     async def _consume_graph_events(self, turn: AcceptedUserTurn):
         async for event in self._graph.astream_events(

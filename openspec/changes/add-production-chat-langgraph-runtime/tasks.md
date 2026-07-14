@@ -169,12 +169,12 @@
 
 **Interfaces:** producer 的公开接口保持不变；异常统一投影成一个 `error` terminal event；只有 ASSISTANT commit 成功才能发布 `completed`。
 
-- [ ] 9.1 RED — 增加失败路径测试：Graph 在部分 delta 后抛错时 USER 保留、ASSISTANT 不写入、发布一个 `error` 且无 `completed`；ASSISTANT commit 失败时同样只发 `error`；不得自动第二次调用 Graph；错误事件不得暴露堆栈、DSN 或密钥。
-- [ ] 9.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_producer.py -k "failure or error" -q`；预期新增断言失败，同时既有 success 测试继续通过。
-- [ ] 9.3 GREEN — 在 producer 最小增加异常终态和敏感信息隔离；不保存部分 ASSISTANT，不给 LLM node 增加 retry policy，不修改 checkpoint 内部表。
-- [ ] 9.4 GREEN VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_producer.py -q`；预期成功和失败测试全部通过。
-- [ ] 9.5 REFACTOR — 用单一 terminal transition 防止 `completed/error` 双发；重跑 9.4 命令并确认 terminal 计数断言仍通过。
-- [ ] 9.6 COMMIT — 提交失败边界与测试，提交信息：`feat(chat): enforce completion failure boundary`。
+- [x] 9.1 RED — 增加失败路径测试：Graph 在部分 delta 后抛错时 USER 保留、ASSISTANT 不写入、发布一个 `error` 且无 `completed`；ASSISTANT commit 失败时同样只发 `error`；不得自动第二次调用 Graph；错误事件不得暴露堆栈、DSN 或密钥。
+- [x] 9.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_producer.py -k "failure or error" -q`；预期新增断言失败，同时既有 success 测试继续通过。
+- [x] 9.3 GREEN — 在 producer 最小增加异常终态和敏感信息隔离；不保存部分 ASSISTANT，不给 LLM node 增加 retry policy，不修改 checkpoint 内部表。
+- [x] 9.4 GREEN VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_producer.py -q`；预期成功和失败测试全部通过。
+- [x] 9.5 REFACTOR — 用单一 terminal transition 防止 `completed/error` 双发；重跑 9.4 命令并确认 terminal 计数断言仍通过。
+- [x] 9.6 COMMIT — 提交失败边界与测试，提交信息：`feat(chat): enforce completion failure boundary`。
 
 ## 10. Subscriber disconnect and producer registry
 
