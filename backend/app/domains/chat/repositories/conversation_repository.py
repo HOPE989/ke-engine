@@ -44,6 +44,14 @@ class ConversationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def get_owned(self, *, conversation_id: int, user_id: str) -> Conversation | None:
+        statement = select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id,
+            Conversation.status != ConversationStatus.DELETED.value,
+        )
+        return (await self._session.execute(statement)).scalar_one_or_none()
+
     async def list_owned(
         self,
         *,

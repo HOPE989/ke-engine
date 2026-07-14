@@ -124,12 +124,12 @@
 
 **Interfaces:** `AcceptedUserTurn(conversation_id: int, user_message_id: int, content: str)`；`ConversationService.accept_user_turn(user_id: str, content: str, conversation_id: int | None) -> AcceptedUserTurn`；新会话与 USER 消息在同一 `session.begin()` 中提交，现有会话先 owner-scoped 查询再追加并更新 `updated_at`。
 
-- [ ] 6.1 RED — 添加 service 测试：无 conversation ID 时创建 ACTIVE 会话并从规范化首条消息截取 255 字符标题；有 ID 时追加到本人会话；空白 content 在开启事务前拒绝；不存在或他人会话产生同一 not-found 领域错误；conversation 与 USER message 任一写入失败时整笔回滚。
-- [ ] 6.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_conversation_service.py -q`；预期因 conversation service 尚不存在而失败。
-- [ ] 6.3 GREEN — 使用现有 Snowflake generator、models 和 repositories 实现最小事务服务；返回值只包含启动 Graph 所需的稳定输入，不启动 Graph、不创建 SSE。
-- [ ] 6.4 GREEN VERIFY — 重跑 6.2 命令；预期全部通过。
-- [ ] 6.5 REFACTOR — 将标题规范化和 ID 分配保持为纯函数/注入依赖，减少事务测试的时钟耦合；运行 `cd backend && uv run python -m pytest tests/test_chat_conversation_service.py tests/test_chat_repositories.py tests/test_chat_persistence.py -q`。
-- [ ] 6.6 COMMIT — 提交用户轮次事务与测试，提交信息：`feat(chat): persist accepted user turns atomically`。
+- [x] 6.1 RED — 添加 service 测试：无 conversation ID 时创建 ACTIVE 会话并从规范化首条消息截取 255 字符标题；有 ID 时追加到本人会话；空白 content 在开启事务前拒绝；不存在或他人会话产生同一 not-found 领域错误；conversation 与 USER message 任一写入失败时整笔回滚。
+- [x] 6.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_conversation_service.py -q`；预期因 conversation service 尚不存在而失败。
+- [x] 6.3 GREEN — 使用现有 Snowflake generator、models 和 repositories 实现最小事务服务；返回值只包含启动 Graph 所需的稳定输入，不启动 Graph、不创建 SSE。
+- [x] 6.4 GREEN VERIFY — 重跑 6.2 命令；预期全部通过。
+- [x] 6.5 REFACTOR — 将标题规范化和 ID 分配保持为纯函数/注入依赖，减少事务测试的时钟耦合；运行 `cd backend && uv run python -m pytest tests/test_chat_conversation_service.py tests/test_chat_repositories.py tests/test_chat_persistence.py -q`。
+- [x] 6.6 COMMIT — 提交用户轮次事务与测试，提交信息：`feat(chat): persist accepted user turns atomically`。
 
 ## 7. Application-owned SSE event adapter
 
