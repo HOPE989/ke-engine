@@ -818,5 +818,3 @@ def test_document_api_app_owns_document_router_and_lifespan_deps():
         "get_magika_client",
     ]:
         assert implementation_detail not in source
-
-
