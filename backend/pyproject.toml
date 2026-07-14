@@ -39,3 +39,4 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+markers = ["integration: tests requiring local infrastructure"]

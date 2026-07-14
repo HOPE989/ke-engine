@@ -241,13 +241,13 @@
 
 **Interfaces:** 使用本地 `DATABASE_URL` 和唯一测试 thread IDs；fake model 提供确定输出；测试只通过 saver/compiled Graph 公开 API 读取 state，不直接查询 checkpoint 表。
 
-- [ ] 13.1 RED — 启动 PostgreSQL：`docker compose up -d postgres`；添加 integration 测试，覆盖 `setup()`、同一 thread 两轮读取前轮消息、不同 thread 隔离、失败 node 的部分输出不成为完整 AIMessage、失败后可用 state 停留在最后成功 superstep。
-- [ ] 13.2 RED — 增加故障一致性 integration 测试：先提交 USER 业务消息，再让可控 fake model 发出部分 chunk 后阻塞；中止该次运行并使用同一 saver/thread 重新加载，断言部分 AIMessage 不存在、业务表只有 USER、系统没有自动恢复扫描或第二次模型调用。
-- [ ] 13.3 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py -m integration -q`；预期至少一个真实 checkpoint/故障边界因集成尚未完成而失败；连接或 Docker 错误必须先修复环境后再确认 RED。
-- [ ] 13.4 GREEN — 只修复 integration 暴露的 saver、config、context、Graph 编译或 producer 边界问题；不得增加 checkpoint 业务 repository、逐 token checkpoint、失败扫描或自动恢复。
-- [ ] 13.5 GREEN VERIFY — 重跑 13.3 命令；预期全部通过，并确认没有真实 OpenAI 请求。
-- [ ] 13.6 REFACTOR — 将 integration fixture 的隔离 schema、thread ID、fake model 和资源清理集中到测试 fixture；运行 `cd backend && uv run python -m pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_chat_langgraph_infrastructure.py tests/test_chat_graph.py -q`。
-- [ ] 13.7 COMMIT — 提交 PostgreSQL integration 测试及必要修复，提交信息：`test(chat): verify postgres checkpoint semantics`。
+- [x] 13.1 RED — 启动 PostgreSQL：`docker compose up -d postgres`；添加 integration 测试，覆盖 `setup()`、同一 thread 两轮读取前轮消息、不同 thread 隔离、失败 node 的部分输出不成为完整 AIMessage、失败后可用 state 停留在最后成功 superstep。
+- [x] 13.2 RED — 增加故障一致性 integration 测试：先提交 USER 业务消息，再让可控 fake model 发出部分 chunk 后阻塞；中止该次运行并使用同一 saver/thread 重新加载，断言部分 AIMessage 不存在、业务表只有 USER、系统没有自动恢复扫描或第二次模型调用。
+- [x] 13.3 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py -m integration -q`；完整真实集成场景首次运行即通过，经用户明确许可不人为制造 RED。
+- [x] 13.4 GREEN — integration 未暴露 saver、config、context、Graph 编译或 producer 边界缺陷，无需修改生产代码。
+- [x] 13.5 GREEN VERIFY — 重跑 13.3 命令；预期全部通过，并确认没有真实 OpenAI 请求。
+- [x] 13.6 REFACTOR — 将 integration fixture 的隔离 schema、thread ID、fake model 和资源清理集中到测试 fixture；运行 `cd backend && uv run python -m pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_chat_langgraph_infrastructure.py tests/test_chat_graph.py -q`。
+- [x] 13.7 COMMIT — 提交 PostgreSQL integration 测试及必要修复，提交信息：`test(chat): verify postgres checkpoint semantics`。
 
 ## 14. End-to-end regression, operability, and OpenSpec handoff
 
