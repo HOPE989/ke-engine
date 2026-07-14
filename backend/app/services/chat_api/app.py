@@ -10,6 +10,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
 from app.identity import IdentityMiddleware, MockIdentityProvider
 from app.services.chat_api.deps import application_lifespan_resources
+from app.services.chat_api.router import router
 
 
 @asynccontextmanager
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
         public_paths={"/health"},
     )
     register_exception_handlers(application)
+    application.include_router(router, prefix=settings.api_v1_prefix)
 
     @application.get("/health", tags=["health"])
     async def health_check() -> dict[str, str]:

@@ -202,12 +202,12 @@
 
 **Interfaces:** `GET /api/v1/chat/conversations`；`GET /api/v1/chat/conversations/{conversation_id}/messages`；两者从 `Principal` 取得 user ID，通过 service/repository 读取业务表，使用 cursor/limit，missing 与 foreign-owned conversation 均映射为 404。
 
-- [ ] 11.1 RED — 添加 API 测试：会话 newest-first、消息 chronological、next cursor、全部 ID 为 string、只返回当前用户数据、missing/foreign 都是相同 404、fake checkpointer 若被读取立即让测试失败。
-- [ ] 11.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_query_api.py -q`；预期因 Chat router 尚未提供查询端点而失败。
-- [ ] 11.3 GREEN — 实现两个查询端点、依赖装配和领域错误映射；只返回 contracts 定义字段，不从 checkpoint 组装历史。
-- [ ] 11.4 GREEN VERIFY — 重跑 11.2 命令；预期全部通过。
-- [ ] 11.5 REFACTOR — 复用当前身份依赖和统一响应约定，不复制 IdentityMiddleware；运行 `cd backend && uv run python -m pytest tests/test_chat_query_api.py tests/test_identity.py tests/test_document_status_query.py -q`。
-- [ ] 11.6 COMMIT — 提交查询 API 与测试，提交信息：`feat(chat): expose conversation query api`。
+- [x] 11.1 RED — 添加 API 测试：会话 newest-first、消息 chronological、next cursor、全部 ID 为 string、只返回当前用户数据、missing/foreign 都是相同 404、fake checkpointer 若被读取立即让测试失败。
+- [x] 11.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_query_api.py -q`；预期因 Chat router 尚未提供查询端点而失败。
+- [x] 11.3 GREEN — 实现两个查询端点、依赖装配和领域错误映射；只返回 contracts 定义字段，不从 checkpoint 组装历史。
+- [x] 11.4 GREEN VERIFY — 重跑 11.2 命令；预期全部通过。
+- [x] 11.5 REFACTOR — 复用当前身份依赖和统一响应约定，不复制 IdentityMiddleware；运行 `cd backend && uv run python -m pytest tests/test_chat_query_api.py tests/test_identity.py tests/test_document_status_query.py -q`。
+- [x] 11.6 COMMIT — 提交查询 API 与测试，提交信息：`feat(chat): expose conversation query api`。
 
 ## 12. Metadata-first completion HTTP API
 
