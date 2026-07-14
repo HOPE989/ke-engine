@@ -139,12 +139,12 @@
 
 **Interfaces:** `encode_sse(event: str, payload: BaseModel) -> bytes`；`project_graph_event(event: dict[str, object]) -> ContentDeltaPayload | None`；只把 LLM message chunk 文本投影成 `content_delta`，其他 lifecycle/diagnostic 事件返回 `None`。
 
-- [ ] 7.1 RED — 添加 adapter 测试：事件名与 JSON data 使用合法 SSE 帧；多个 text chunk 顺序不变；空 chunk 和非公开 LangGraph 事件被忽略；payload 不泄露 `event/name/run_id/tags/metadata` 等内部字段；metadata/completed/error 编码字段固定。
-- [ ] 7.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_sse_adapter.py -q`；预期因 streaming adapter 尚不存在而失败。
-- [ ] 7.3 GREEN — 实现最小 SSE 编码和 `astream_events()` 事件投影纯函数，不加入 heartbeat、event ID 或 replay storage。
-- [ ] 7.4 GREEN VERIFY — 重跑 7.2 命令；预期全部通过。
-- [ ] 7.5 REFACTOR — 将框架事件识别集中在 adapter 内，producer 不解析 LangGraph 原始结构；运行 `cd backend && uv run python -m pytest tests/test_chat_sse_adapter.py tests/test_chat_contracts.py -q`。
-- [ ] 7.6 COMMIT — 提交 SSE adapter 与测试，提交信息：`feat(chat): project graph events to sse`。
+- [x] 7.1 RED — 添加 adapter 测试：事件名与 JSON data 使用合法 SSE 帧；多个 text chunk 顺序不变；空 chunk 和非公开 LangGraph 事件被忽略；payload 不泄露 `event/name/run_id/tags/metadata` 等内部字段；metadata/completed/error 编码字段固定。
+- [x] 7.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_sse_adapter.py -q`；预期因 streaming adapter 尚不存在而失败。
+- [x] 7.3 GREEN — 实现最小 SSE 编码和 `astream_events()` 事件投影纯函数，不加入 heartbeat、event ID 或 replay storage。
+- [x] 7.4 GREEN VERIFY — 重跑 7.2 命令；预期全部通过。
+- [x] 7.5 REFACTOR — 将框架事件识别集中在 adapter 内，producer 不解析 LangGraph 原始结构；运行 `cd backend && uv run python -m pytest tests/test_chat_sse_adapter.py tests/test_chat_contracts.py -q`。
+- [x] 7.6 COMMIT — 提交 SSE adapter 与测试，提交信息：`feat(chat): project graph events to sse`。
 
 ## 8. Completion producer success path
 
