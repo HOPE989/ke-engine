@@ -40,6 +40,9 @@ def test_target_architecture_files_exist():
         "domains/document/workers/vectorization_consumer.py",
         "contracts/document/http.py",
         "contracts/document/events.py",
+        "contracts/chat/__init__.py",
+        "contracts/chat/http.py",
+        "contracts/chat/stream.py",
         "infrastructure/db/session.py",
         "infrastructure/db/base.py",
         "infrastructure/kafka.py",
@@ -135,6 +138,7 @@ def test_contracts_are_grouped_by_domain_not_transport():
     assert not (app_root / "contracts" / "events").exists()
     assert not (app_root / "contracts" / "mcp").exists()
     assert (app_root / "contracts" / "document").is_dir()
+    assert (app_root / "contracts" / "chat").is_dir()
     assert not (app_root / "contracts" / "agent").exists()
     assert not (app_root / "contracts" / "identity").exists()
 

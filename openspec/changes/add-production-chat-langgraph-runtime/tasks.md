@@ -37,12 +37,12 @@
 
 **Interfaces:** `CompletionRequest(conversation_id: str | None, content: str)`；会话/消息 page DTO；`MetadataPayload`、`ContentDeltaPayload`、`CompletedPayload`、`ErrorPayload`；`Settings.openai_model` 是 Chat API 启动必需但其他进程仍可不配置的 startup-only 字段。
 
-- [ ] 1.1 RED — 添加 contract/config/layout 测试：空白 content 校验失败、conversation ID 只接受十进制字符串、所有响应 ID 序列化为字符串、completion 输入不包含 `model`、四种 SSE payload 字段固定、本切片新增的 Chat contract 路径被架构测试声明。
-- [ ] 1.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_contracts.py tests/test_chat_config.py tests/test_target_architecture_layout.py -q`；预期因 Chat contracts/目标模块尚不存在或依赖尚未安装而失败，不接受测试收集本身写错。
-- [ ] 1.3 GREEN — 使用 `uv add langgraph langgraph-checkpoint-postgres "psycopg[binary,pool]"` 更新依赖与 lockfile；创建最小 Pydantic contracts；把 `openai_model` 加入 `STARTUP_ONLY_SETTINGS`，并提供 Chat 启动期显式校验函数，避免 Document API 因未配置模型而启动失败。
-- [ ] 1.4 GREEN VERIFY — 重跑 1.2 的精确命令；预期全部通过。
-- [ ] 1.5 REFACTOR — 去除 contracts 中重复的 ID 转换和字段定义，但不建立通用 transport 大目录；运行 `cd backend && uv run python -m pytest tests/test_chat_contracts.py tests/test_chat_config.py tests/test_target_architecture_layout.py tests/test_project_layout.py -q`。
-- [ ] 1.6 COMMIT — 提交上述文件，提交信息：`feat(chat): define runtime dependencies and contracts`。
+- [x] 1.1 RED — 添加 contract/config/layout 测试：空白 content 校验失败、conversation ID 只接受十进制字符串、所有响应 ID 序列化为字符串、completion 输入不包含 `model`、四种 SSE payload 字段固定、本切片新增的 Chat contract 路径被架构测试声明。
+- [x] 1.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_contracts.py tests/test_chat_config.py tests/test_target_architecture_layout.py -q`；预期因 Chat contracts/目标模块尚不存在或依赖尚未安装而失败，不接受测试收集本身写错。
+- [x] 1.3 GREEN — 使用 `uv add langgraph langgraph-checkpoint-postgres "psycopg[binary,pool]"` 更新依赖与 lockfile；创建最小 Pydantic contracts；把 `openai_model` 加入 `STARTUP_ONLY_SETTINGS`，并提供 Chat 启动期显式校验函数，避免 Document API 因未配置模型而启动失败。
+- [x] 1.4 GREEN VERIFY — 重跑 1.2 的精确命令；预期全部通过。
+- [x] 1.5 REFACTOR — 去除 contracts 中重复的 ID 转换和字段定义，但不建立通用 transport 大目录；运行 `cd backend && uv run python -m pytest tests/test_chat_contracts.py tests/test_chat_config.py tests/test_target_architecture_layout.py tests/test_project_layout.py -q`。
+- [x] 1.6 COMMIT — 提交上述文件，提交信息：`feat(chat): define runtime dependencies and contracts`。
 
 ## 2. Minimal Chat Graph and injected model
 
