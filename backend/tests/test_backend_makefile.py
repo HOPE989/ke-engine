@@ -7,16 +7,16 @@ def test_root_makefile_exposes_backend_dev_targets():
     content = makefile.read_text(encoding="utf-8")
 
     assert "dev-document-api:" in content
-    assert "dev-agent-api:" in content
+    assert "dev-agent-api:" not in content
     assert "dev-worker:" in content
     assert "dev-infra:" in content
     assert "$(UV) run uvicorn app.entrypoints.document_api:app --reload" in content
-    assert "$(UV) run uvicorn app.entrypoints.agent_api:app --reload" in content
+    assert "app.entrypoints.agent_api:app" not in content
     assert "app.main:app" not in content
     assert "dev-api:" not in content
     assert "DOCUMENT_API_PORT ?= 8000" in content
-    assert "AGENT_API_PORT ?= 8001" in content
-    assert "$(MAKE) -j 3 dev-document-api dev-agent-api dev-worker" in content
+    assert "AGENT_API_PORT" not in content
+    assert "$(MAKE) -j 2 dev-document-api dev-worker" in content
     assert "$(UV) run python -m app.entrypoints.document_worker" in content
     assert "docker compose up -d postgres redis minio kafka" in content
     assert "kafka-topics-init:" in content
