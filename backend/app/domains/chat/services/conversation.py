@@ -1,4 +1,8 @@
-"""接收并持久化用户轮次。"""
+"""接收用户输入，并把会话变化与 USER 消息原子持久化。
+
+该 service 是 completion 的业务事务入口。它只确认系统已经接受用户轮次，不启动
+Graph，也不创建 SSE 流；调用方应在事务成功返回后再安排后台生成任务。
+"""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,17 +18,24 @@ from app.domains.chat.shared.models import (
 
 
 class ConversationNotFound(Exception):
-    """会话不存在或不属于当前用户。"""
+    """表示目标会话不存在，或不属于当前用户。
+
+    两种情况共用同一领域错误，避免上层 API 暴露其他用户会话是否真实存在。
+    """
 
 
 @dataclass(frozen=True, slots=True)
 class AcceptedUserTurn:
+    """已经提交的用户轮次，是启动 Graph 所需的最小稳定输入。"""
+
     conversation_id: int
     user_message_id: int
     content: str
 
 
 def _normalize_content(content: str) -> str:
+    """去除首尾空白并拒绝空内容，确保标题与消息使用同一规范化文本。"""
+
     normalized = content.strip()
     if not normalized:
         raise ValueError("content must not be blank")
@@ -32,10 +43,14 @@ def _normalize_content(content: str) -> str:
 
 
 def _title_from_content(content: str) -> str:
+    """从首条规范化消息截取数据库允许的 255 字符会话标题。"""
+
     return content[:255]
 
 
 class ConversationService:
+    """管理“创建或复用会话并追加 USER 消息”的单一业务事务。"""
+
     def __init__(
         self,
         session_factory: Any,
@@ -54,10 +69,20 @@ class ConversationService:
         content: str,
         conversation_id: int | None = None,
     ) -> AcceptedUserTurn:
+        """接受一轮用户输入并返回已提交的业务标识。
+
+        未提供 ``conversation_id`` 时创建 ACTIVE 会话；提供 ID 时只允许更新当前用户
+        拥有且未删除的会话。会话变化和 USER 消息处于同一事务，任一步失败都会整体
+        回滚，调用方因此可以安全地把成功返回视为启动 Graph 的前置条件。
+        """
+
+        # 步骤 1：在打开数据库事务前规范化输入，空内容不会产生任何持久化副作用。
         normalized = _normalize_content(content)
         async with self._session_factory() as session:
             async with session.begin():
                 timestamp = self._now()
+
+                # 步骤 2：创建新会话，或以 owner scope 查询并更新时间戳。
                 if conversation_id is None:
                     conversation_id = self._id_generator.next_id()
                     conversation = Conversation(
@@ -78,6 +103,7 @@ class ConversationService:
                         raise ConversationNotFound()
                     conversation.updated_at = timestamp
 
+                # 步骤 3：在同一事务追加 USER 消息，确保会话与首轮输入不会部分提交。
                 user_message_id = self._id_generator.next_id()
                 session.add(
                     Message(
@@ -90,6 +116,7 @@ class ConversationService:
                     )
                 )
 
+        # 只有事务上下文正常退出后才把稳定 ID 交给 Graph producer。
         return AcceptedUserTurn(
             conversation_id=conversation_id,
             user_message_id=user_message_id,

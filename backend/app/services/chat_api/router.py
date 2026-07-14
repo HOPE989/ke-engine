@@ -1,4 +1,8 @@
-"""Chat 会话与消息 HTTP 查询。"""
+"""Chat completion、会话列表和消息历史的 HTTP transport 层。
+
+路由只处理身份、输入转换、领域错误映射与响应编码。业务事务由领域 service 管理，
+Graph 的执行与终态持久化由后台 producer 管理。
+"""
 
 from typing import Annotated
 
@@ -30,6 +34,13 @@ async def create_completion(
     principal: Annotated[Principal, Depends(get_current_principal)],
     chat_deps: Annotated[ChatApiDeps, Depends(get_chat_deps)],
 ) -> StreamingResponse:
+    """接受一轮用户输入并返回 metadata-first 的实时 SSE 流。
+
+    USER 消息提交失败时不会创建 producer 或返回成功流；会话不存在和不属于当前
+    用户统一映射为 404，避免通过响应差异泄露资源所有权。
+    """
+
+    # 步骤 1：先在业务事务中创建/校验会话并提交 USER 消息。
     try:
         turn = await ConversationService(
             chat_deps.session_factory,
@@ -46,6 +57,7 @@ async def create_completion(
     except ConversationNotFound as exc:
         raise AppException("conversation not found", status.HTTP_404_NOT_FOUND) from exc
 
+    # 步骤 2：业务事务成功后才注册后台 producer；请求协程不直接拥有 Graph task。
     subscriber = chat_deps.producer_registry.start(
         producer_factory=lambda publisher: CompletionProducer(
             graph=chat_deps.graph,
@@ -59,6 +71,8 @@ async def create_completion(
     )
 
     async def event_stream():
+        """转发当前连接的实时事件，并在终态或断连时解除订阅。"""
+
         try:
             while True:
                 event, payload = await subscriber.receive()
@@ -66,8 +80,10 @@ async def create_completion(
                 if event in {"completed", "error"}:
                     break
         finally:
+            # detach 只停止向本连接入队，producer 仍继续生成并持久化完整回答。
             subscriber.detach()
 
+    # 步骤 3：返回禁缓存、禁代理缓冲的 SSE 响应，确保 token 可以及时到达客户端。
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
@@ -85,6 +101,8 @@ async def list_conversations(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     cursor: str | None = None,
 ) -> APIResponse[ConversationPage]:
+    """按更新时间倒序列出当前用户拥有的会话，不读取 checkpoint state。"""
+
     async with chat_deps.session_factory() as session:
         items, next_cursor = await ConversationRepository(session).list_owned(
             user_id=principal.user_id,
@@ -119,6 +137,11 @@ async def list_messages(
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     cursor: str | None = None,
 ) -> APIResponse[MessagePage]:
+    """按时间正序返回当前用户指定会话的业务消息历史。
+
+    查询前再次校验会话所有权；missing 和 foreign-owned conversation 使用相同 404。
+    """
+
     async with chat_deps.session_factory() as session:
         conversation = await ConversationRepository(session).get_owned(
             conversation_id=conversation_id,
