@@ -12,6 +12,7 @@
 
 - 不修改 `backend/app/domains/document/`、`backend/app/services/document_api/`、Document Worker、Celery 或数据库迁移。
 - 保留 `openai_api_key`、`openai_base_url`、`openai_model`、`langchain-openai`、`OpenAIEmbeddings` 和 Document 图片描述能力。
+- 保留 `backend/app/infrastructure/redis_lock.py` 和 `backend/app/domains/document/components/vector_store.py` 中被 Document 实际使用的 Redis/Elasticsearch 实现。
 - 不创建新的 Chat 或 Agent 骨架，不实现 RAG Chat。
 - 保留 `openspec/changes/archive/2026-06-29-add-chat-demo/` 和历史设计文档。
 - 当前门户身份提案只面向 Document API，仍保持默认 Mock、无 Settings、不接真实门户。
@@ -30,7 +31,9 @@
 - Delete: `backend/app/domains/agent/`
 - Delete: `backend/app/services/agent_api/`
 - Delete: `backend/app/entrypoints/agent_api.py`
+- Delete: `backend/app/infrastructure/elasticsearch.py`
 - Delete: `backend/app/infrastructure/llm.py`
+- Delete: `backend/app/infrastructure/redis.py`
 - Delete: `backend/tests/test_agent_domain_layout.py`
 - Delete: `backend/tests/test_chat_api.py`
 - Delete: `backend/tests/test_chat_llm_integration.py`
@@ -54,7 +57,7 @@ assert not (root / "backend" / "app" / "domains" / "agent").exists()
 assert not (root / "backend" / "app" / "contracts" / "agent").exists()
 ```
 
-从 `test_target_architecture_files_exist` 的 `expected_files` 删除所有 `entrypoints/agent_api.py`、`services/agent_api/*`、`domains/agent/*`、`contracts/agent/*` 和 `infrastructure/llm.py` 条目；在同一测试末尾加入：
+从 `test_target_architecture_files_exist` 的 `expected_files` 删除所有 `entrypoints/agent_api.py`、`services/agent_api/*`、`domains/agent/*`、`contracts/agent/*`、`infrastructure/elasticsearch.py`、`infrastructure/llm.py` 和 `infrastructure/redis.py` 条目；在同一测试末尾加入：
 
 ```python
 for removed_path in [
@@ -62,7 +65,9 @@ for removed_path in [
     "services/agent_api",
     "domains/agent",
     "contracts/agent",
+    "infrastructure/elasticsearch.py",
     "infrastructure/llm.py",
+    "infrastructure/redis.py",
 ]:
     assert not (app_root / removed_path).exists()
 ```
@@ -76,11 +81,11 @@ Set-Location backend
 uv run pytest tests/test_project_layout.py tests/test_target_architecture_layout.py -q
 ```
 
-Expected: FAIL，失败信息指出 `agent_api.py`、`services/agent_api`、`domains/agent`、`contracts/agent` 或 `infrastructure/llm.py` 仍然存在。
+Expected: FAIL，失败信息指出 `agent_api.py`、Agent 目录或三个无效基础设施转发壳仍然存在。
 
 - [ ] **Step 3: 删除 Agent/Chat 代码和专属测试**
 
-使用 `apply_patch` 删除 Files 清单中的 Agent/Chat 目录、入口、`infrastructure/llm.py` 和七个专属测试文件。不得删除 `backend/app/domains/document` 下的任何文件。
+使用 `apply_patch` 删除 Files 清单中的 Agent/Chat 目录、入口、`infrastructure/elasticsearch.py`、`infrastructure/llm.py`、`infrastructure/redis.py` 和七个专属测试文件。不得删除 `backend/app/infrastructure/redis_lock.py` 或 `backend/app/domains/document` 下的任何文件。
 
 - [ ] **Step 4: 清理共享测试和 pytest fixture 中的 Agent 引用**
 
@@ -371,6 +376,17 @@ rg -n --hidden --glob '!**/.git/**' --glob '!openspec/changes/archive/**' --glob
 ```
 
 Expected: 无输出。历史归档和历史设计允许保留 Agent/Chat 文本。
+
+继续运行：
+
+```powershell
+Test-Path backend/app/infrastructure/elasticsearch.py
+Test-Path backend/app/infrastructure/llm.py
+Test-Path backend/app/infrastructure/redis.py
+Test-Path backend/app/infrastructure/redis_lock.py
+```
+
+Expected: 前三项为 `False`，`redis_lock.py` 为 `True`。
 
 - [ ] **Step 2: 确认 Document 使用的 OpenAI 能力仍存在**
 
