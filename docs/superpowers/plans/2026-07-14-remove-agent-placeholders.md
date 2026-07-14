@@ -32,6 +32,7 @@
 - Delete: `backend/app/services/agent_api/`
 - Delete: `backend/app/entrypoints/agent_api.py`
 - Modify: `backend/app/infrastructure/llm.py`
+- Create: `backend/app/domains/document/components/image_describer.py`
 - Modify: `backend/app/entrypoints/document_worker.py`
 - Modify: `backend/app/entrypoints/celery_worker.py`
 - Delete: `backend/tests/test_agent_domain_layout.py`
@@ -81,25 +82,42 @@ uv run pytest tests/test_project_layout.py tests/test_target_architecture_layout
 
 Expected: FAIL，失败信息指出 `agent_api.py` 或 Agent 目录仍然存在。
 
-- [ ] **Step 3: 先把 LLM 真实实现迁入基础设施**
+- [ ] **Step 3: 分离 LLM SDK 构造与 Document 图片描述语义**
 
-用 `document_worker.py` 中现有、已由 Document 测试覆盖的实现替换 `infrastructure/llm.py` 对 Agent 的转发，迁入：
-
-完整复制 `RuntimeImageDescriber`、`create_runtime_image_describer` 和 `_clean_value` 的现有实现；在目标文件中保留类名和工厂签名，不改变 Base64 编码、`HumanMessage` 内容、`qwen3.6-flash` 模型名或错误消息。
-
-从 `document_worker.py` 和 `celery_worker.py` 删除重复类、工厂和 `_clean_value`，并在两个入口导入：
+删除 `infrastructure/llm.py` 对 Agent 的转发，改为提供：
 
 ```python
-from app.infrastructure.llm import create_runtime_image_describer
+def create_chat_model(settings: Any, *, model: str) -> ChatOpenAI:
+    """按 OpenAI-compatible 配置创建 chat model。"""
+
+
+def create_embedding_model(settings: Any) -> OpenAIEmbeddings:
+    """创建文档向量化使用的 embedding model。"""
+```
+
+`create_embedding_model` 保持原来的 `text-embedding-v4`、`chunk_size=9`、维度和 tokenizer 参数；`create_chat_model` 统一处理 API key、base URL 和指定模型名。
+
+创建 `domains/document/components/image_describer.py`，从 `document_worker.py` 完整迁入 `RuntimeImageDescriber`。Base64 data URL、`HumanMessage` 多模态格式和中文提示词保持不变。
+
+从 `document_worker.py` 和 `celery_worker.py` 删除重复类与 `_clean_value`。两个入口保留 `create_runtime_image_describer(settings)` 作为启动期装配函数，其实现改为：
+
+```python
+from app.domains.document.components.image_describer import RuntimeImageDescriber
+from app.infrastructure.llm import create_chat_model
+
+
+def create_runtime_image_describer(settings: Any) -> RuntimeImageDescriber:
+    model = create_chat_model(settings, model="qwen3.6-flash")
+    return RuntimeImageDescriber(model=model)
 ```
 
 把 `test_document_conversion_worker.py` 中的适配器导入改为：
 
 ```python
-from app.infrastructure.llm import RuntimeImageDescriber
+from app.domains.document.components.image_describer import RuntimeImageDescriber
 ```
 
-完成这一步后 `infrastructure.llm` 不再依赖 `domains.agent`，Agent 目录删除不会留下坏导入。
+完成这一步后 `infrastructure.llm` 不依赖 Agent 或 Document；Document Prompt 也不进入通用基础设施。
 
 - [ ] **Step 4: 删除 Agent/Chat 代码和专属测试**
 
@@ -177,8 +195,8 @@ git commit -m "refactor: remove agent placeholders and centralize llm"
 - Modify: `backend/tests/test_target_architecture_layout.py`
 
 **Interfaces:**
-- Consumes: 现有 `create_embedding_model(settings)`、`create_elasticsearch_store(settings=, embedding_model=)`、`ElasticsearchVectorStoreAdapter`、Redis 锁工厂和 `create_runtime_image_describer(settings)` 行为。
-- Produces: 相同函数和类名由 `app.infrastructure.elasticsearch` 与 `app.infrastructure.redis` 提供；Task 1 已完成的 `app.infrastructure.llm` 继续作为共享图片描述实现。
+- Consumes: Task 1 已迁入 `app.infrastructure.llm.create_embedding_model(settings)`；现有 `create_elasticsearch_store(settings=, embedding_model=)`、`ElasticsearchVectorStoreAdapter` 和 Redis 锁工厂行为。
+- Produces: Elasticsearch/Redis 接口由 `app.infrastructure.elasticsearch` 与 `app.infrastructure.redis` 提供；LLM SDK 构造继续由 `app.infrastructure.llm` 提供。
 
 - [ ] **Step 1: 先把基础设施测试和架构断言切换到目标导入路径**
 
@@ -186,6 +204,7 @@ git commit -m "refactor: remove agent placeholders and centralize llm"
 
 ```python
 from app.infrastructure import elasticsearch as vector_store
+from app.infrastructure import llm
 from app.infrastructure.elasticsearch import (
     ElasticsearchVectorStoreAdapter,
     VectorStoreIdCountMismatch,
@@ -221,9 +240,9 @@ Expected: FAIL，因为 `infrastructure.elasticsearch` 和 `infrastructure.redis
 
 - [ ] **Step 3: 将完整向量存储实现迁入 `infrastructure/elasticsearch.py`**
 
-用 `backend/app/domains/document/components/vector_store.py` 的完整内容替换当前转发壳。保持 `EMBEDDING_MODEL`、`EMBEDDING_CHUNK_SIZE`、`VECTOR_FIELD`、`TEXT_FIELD`、`VectorStoreIdCountMismatch`、`VectorIndexDimensionMismatch`、`create_embedding_model`、`create_elasticsearch_store`、`ensure_vector_index` 和 `ElasticsearchVectorStoreAdapter` 的现有实现与公开签名不变。
+用 `backend/app/domains/document/components/vector_store.py` 中除 Embedding model 构造外的完整内容替换当前转发壳。保持 `VECTOR_FIELD`、`TEXT_FIELD`、`VectorStoreIdCountMismatch`、`VectorIndexDimensionMismatch`、`create_elasticsearch_store`、`ensure_vector_index` 和 `ElasticsearchVectorStoreAdapter` 的现有实现与公开签名不变；`create_embedding_model`、`EMBEDDING_MODEL` 和 `EMBEDDING_CHUNK_SIZE` 已在 Task 1 迁入 `app.infrastructure.llm`。
 
-然后删除 `backend/app/domains/document/components/vector_store.py`，把 Document Worker、Celery 和测试的导入路径改为 `app.infrastructure.elasticsearch`。不得改变 mapping、字段名、Embedding 模型、批大小、异常或补偿删除逻辑。
+然后删除 `backend/app/domains/document/components/vector_store.py`。Document Worker 与 Celery 从 `app.infrastructure.llm` 导入 `create_embedding_model`，从 `app.infrastructure.elasticsearch` 导入 store/adapter；测试按相同边界拆分导入。不得改变 mapping、字段名、Embedding 模型、批大小、异常或补偿删除逻辑。
 
 - [ ] **Step 4: 将 Redis client 与锁工厂迁入 `infrastructure/redis.py`**
 
