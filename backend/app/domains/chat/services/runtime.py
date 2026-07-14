@@ -1,5 +1,7 @@
 """Chat completion Graph producer。"""
 
+import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -9,6 +11,77 @@ from app.domains.chat.graph import ChatRuntimeContext
 from app.domains.chat.repositories import MessageRepository
 from app.domains.chat.services.conversation import AcceptedUserTurn
 from app.services.chat_api.streaming import project_graph_event
+
+
+class _CompletionChannel:
+    def __init__(self, *, maxsize: int) -> None:
+        self.queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue(maxsize=maxsize)
+        self.attached = True
+
+    async def publish(self, event: str, payload: Any) -> None:
+        if self.attached:
+            await self.queue.put((event, payload))
+
+
+class CompletionSubscriber:
+    def __init__(self, channel: _CompletionChannel) -> None:
+        self._channel = channel
+
+    async def receive(self) -> tuple[str, Any]:
+        return await self._channel.queue.get()
+
+    def detach(self) -> None:
+        self._channel.attached = False
+
+    @property
+    def pending_count(self) -> int:
+        return self._channel.queue.qsize()
+
+
+class CompletionProducerRegistry:
+    def __init__(self, *, shutdown_timeout: float = 30) -> None:
+        self._shutdown_timeout = shutdown_timeout
+        self._accepting = True
+        self._tasks: set[asyncio.Task[None]] = set()
+
+    def start(
+        self,
+        *,
+        producer_factory: Callable[[Any], "CompletionProducer"],
+        turn: AcceptedUserTurn,
+        user_id: str,
+    ) -> CompletionSubscriber:
+        if not self._accepting:
+            raise RuntimeError("completion registry is shutting down")
+        channel = _CompletionChannel(maxsize=16)
+        subscriber = CompletionSubscriber(channel)
+        producer = producer_factory(channel)
+        task = asyncio.create_task(producer.run(turn=turn, user_id=user_id))
+        self._tasks.add(task)
+        task.add_done_callback(self._task_done)
+        return subscriber
+
+    def _task_done(self, task: asyncio.Task[None]) -> None:
+        self._tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
+
+    async def shutdown(self) -> None:
+        self._accepting = False
+        if not self._tasks:
+            return
+        _, pending = await asyncio.wait(
+            tuple(self._tasks),
+            timeout=self._shutdown_timeout,
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    @property
+    def active_count(self) -> int:
+        return len(self._tasks)
 
 
 class CompletionProducer:

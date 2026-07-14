@@ -41,15 +41,10 @@ class ChatResourceStack:
         self._stack.push_async_callback(cleanup)
 
 
-class LifespanProducerRegistry:
-    """为后续 producer task registry 保留的生命周期边界。"""
+def create_producer_registry() -> Any:
+    from app.domains.chat.services.runtime import CompletionProducerRegistry
 
-    async def shutdown(self) -> None:
-        return None
-
-
-def create_producer_registry() -> LifespanProducerRegistry:
-    return LifespanProducerRegistry()
+    return CompletionProducerRegistry()
 
 
 @dataclass(frozen=True, slots=True)

@@ -185,12 +185,12 @@
 
 **Interfaces:** `CompletionProducerRegistry.start(...)` 创建并持有 producer task；subscriber 使用有界/可解除的 queue；`detach()` 只移除 subscriber；`shutdown()` 停止接收新任务、等待有限优雅窗口后取消剩余任务。
 
-- [ ] 10.1 RED — 添加断连测试：subscriber 在首个 delta 后 detach，Graph task 未被取消并继续保存完整 ASSISTANT；detach 后不再向 queue 写 token；registry shutdown 按既定顺序等待 producer；新任务在 shutdown 开始后被拒绝。
-- [ ] 10.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_disconnect.py -q`；预期因 registry/detach 行为尚不存在而失败。
-- [ ] 10.3 GREEN — 实现 registry、subscriber detach 和无订阅时停止事件入队；producer 只保留最终回答 buffer，不实现跨进程恢复或 token replay。
-- [ ] 10.4 GREEN VERIFY — 重跑 10.2 命令；预期全部通过。
-- [ ] 10.5 REFACTOR — 集中 task ownership 和 shutdown 状态转换，避免请求协程直接拥有 Graph task；运行 `cd backend && uv run python -m pytest tests/test_chat_completion_disconnect.py tests/test_chat_completion_producer.py tests/test_chat_api_lifespan.py -q`。
-- [ ] 10.6 COMMIT — 提交断连与 registry，提交信息：`feat(chat): continue completions after subscriber disconnect`。
+- [x] 10.1 RED — 添加断连测试：subscriber 在首个 delta 后 detach，Graph task 未被取消并继续保存完整 ASSISTANT；detach 后不再向 queue 写 token；registry shutdown 按既定顺序等待 producer；新任务在 shutdown 开始后被拒绝。
+- [x] 10.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_completion_disconnect.py -q`；预期因 registry/detach 行为尚不存在而失败。
+- [x] 10.3 GREEN — 实现 registry、subscriber detach 和无订阅时停止事件入队；producer 只保留最终回答 buffer，不实现跨进程恢复或 token replay。
+- [x] 10.4 GREEN VERIFY — 重跑 10.2 命令；预期全部通过。
+- [x] 10.5 REFACTOR — 集中 task ownership 和 shutdown 状态转换，避免请求协程直接拥有 Graph task；运行 `cd backend && uv run python -m pytest tests/test_chat_completion_disconnect.py tests/test_chat_completion_producer.py tests/test_chat_api_lifespan.py -q`。
+- [x] 10.6 COMMIT — 提交断连与 registry，提交信息：`feat(chat): continue completions after subscriber disconnect`。
 
 ## 11. Conversation list and message-history HTTP API
 
