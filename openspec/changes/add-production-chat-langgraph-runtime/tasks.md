@@ -72,12 +72,12 @@
 
 **Interfaces:** `to_psycopg_dsn(database_url: str) -> str` 使用 SQLAlchemy URL 解析；`postgres_checkpointer(database_url: str)` 是 async context manager，内部创建独立 `AsyncConnectionPool`，以 `autocommit=True`、`dict_row` 连接参数构造 `AsyncPostgresSaver`，进入时执行 `await saver.setup()`，退出时关闭 pool。
 
-- [ ] 3.1 RED — 添加 DSN 转换测试，覆盖 `postgresql+asyncpg://`、已转义用户名/密码、query 参数和非法非 PostgreSQL URL；添加 fake pool/saver 生命周期测试，断言 pool 与业务 SQLAlchemy engine 无共享、`setup()` 恰好一次、异常时也关闭 pool。
-- [ ] 3.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_langgraph_infrastructure.py -q`；预期因 `app.infrastructure.langgraph` 尚不存在而失败。
-- [ ] 3.3 GREEN — 实现 URL 转换和 async context manager；只使用 LangGraph saver 公开 API，不定义 checkpoint ORM model，不新增 Alembic migration，不提供 `InMemorySaver` fallback。
-- [ ] 3.4 GREEN VERIFY — 重跑 3.2 命令；预期全部通过。
-- [ ] 3.5 REFACTOR — 把 pool 构造保留为可 monkeypatch 的小函数并收紧类型；运行 `cd backend && uv run python -m pytest tests/test_chat_langgraph_infrastructure.py tests/test_chat_graph.py -q`。
-- [ ] 3.6 COMMIT — 提交基础设施与测试，提交信息：`feat(chat): add postgres checkpoint resource`。
+- [x] 3.1 RED — 添加 DSN 转换测试，覆盖 `postgresql+asyncpg://`、已转义用户名/密码、query 参数和非法非 PostgreSQL URL；添加 fake pool/saver 生命周期测试，断言 pool 与业务 SQLAlchemy engine 无共享、`setup()` 恰好一次、异常时也关闭 pool。
+- [x] 3.2 RED VERIFY — 运行 `cd backend && uv run python -m pytest tests/test_chat_langgraph_infrastructure.py -q`；预期因 `app.infrastructure.langgraph` 尚不存在而失败。
+- [x] 3.3 GREEN — 实现 URL 转换和 async context manager；只使用 LangGraph saver 公开 API，不定义 checkpoint ORM model，不新增 Alembic migration，不提供 `InMemorySaver` fallback。
+- [x] 3.4 GREEN VERIFY — 重跑 3.2 命令；预期全部通过。
+- [x] 3.5 REFACTOR — 把 pool 构造保留为可 monkeypatch 的小函数并收紧类型；运行 `cd backend && uv run python -m pytest tests/test_chat_langgraph_infrastructure.py tests/test_chat_graph.py -q`。
+- [x] 3.6 COMMIT — 提交基础设施与测试，提交信息：`feat(chat): add postgres checkpoint resource`。
 
 ## 4. Chat API lifespan and production Graph compilation
 
