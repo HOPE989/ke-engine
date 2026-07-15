@@ -1,7 +1,17 @@
 """Chat completion、会话列表和消息历史的 HTTP transport 层。
 
-路由只处理身份、输入转换、领域错误映射与响应编码。业务事务由领域 service 管理，
-Graph 的执行与终态持久化由后台 producer 管理。
+路由只处理身份、输入转换、领域错误映射与响应编码。业务事务由领域 Service 管理，
+Graph 的执行与终态持久化由后台 Producer 管理。
+
+对于流式 completion，本文件和 ``domains.chat.services.runtime`` 的分工如下：
+
+1. Router 先同步于请求生命周期完成身份校验和 USER 消息事务。
+2. Router 向 Registry 提交一个 Producer 工厂；Registry 创建 Channel 后才调用该工厂。
+3. Registry 在独立 asyncio task 中运行 Producer，并向 Router 返回 Subscriber。
+4. Router 从 Subscriber 读取应用事件，将其编码成 SSE 后写入 HTTP 响应。
+5. HTTP 连接结束时 Router 只 detach Subscriber；Producer 继续完成生成和落库。
+
+这种划分保证“客户端是否保持连接”和“已接受的用户轮次是否完整执行”互不绑定。
 """
 
 from typing import Annotated
@@ -36,11 +46,17 @@ async def create_completion(
 ) -> StreamingResponse:
     """接受一轮用户输入并返回 metadata-first 的实时 SSE 流。
 
-    USER 消息提交失败时不会创建 producer 或返回成功流；会话不存在和不属于当前
+    FastAPI 会分别从请求体、认证依赖和应用 lifespan 中准备 request、principal 与
+    chat_deps。USER 消息提交失败时不会创建 Producer 或返回成功流；会话不存在和不属于当前
     用户统一映射为 404，避免通过响应差异泄露资源所有权。
+
+    此函数不会直接执行或 await LangGraph。它只注册后台 Producer，然后消费与当前 HTTP
+    连接对应的 Subscriber。
     """
 
     # 步骤 1：先在业务事务中创建/校验会话并提交 USER 消息。
+    # 这一步在启动后台任务之前完成，因此只要进入流式响应，metadata 中引用的会话和
+    # USER 消息就一定已经落库。反过来，前置事务失败时不会产生孤立的后台任务。
     try:
         turn = await ConversationService(
             chat_deps.session_factory,
@@ -57,7 +73,19 @@ async def create_completion(
     except ConversationNotFound as exc:
         raise AppException("conversation not found", status.HTTP_404_NOT_FOUND) from exc
 
-    # 步骤 2：业务事务成功后才注册后台 producer；请求协程不直接拥有 Graph task。
+    # 步骤 2：业务事务成功后才注册后台 Producer；请求协程不直接拥有 Graph task。
+    #
+    # 这里传入的是“如何创建 Producer”的工厂，而不是已经创建好的 Producer。原因是
+    # publisher/Channel 由 Registry.start() 内部创建，Router 在调用 start() 之前拿不到它。
+    # Registry 内部实际执行：
+    #
+    #     channel = _CompletionChannel(...)
+    #     subscriber = CompletionSubscriber(channel)
+    #     producer = producer_factory(channel)
+    #
+    # 最后一行调用下面的 lambda 时，Python 按位置参数规则把 channel 赋给 lambda 的
+    # 第一个形参 publisher。因此 publisher 并不是 FastAPI 注入或从外层捕获的变量，
+    # 它就是 Registry 主动传入的 channel；随后又被保存到 CompletionProducer 中。
     subscriber = chat_deps.producer_registry.start(
         producer_factory=lambda publisher: CompletionProducer(
             graph=chat_deps.graph,
@@ -71,19 +99,30 @@ async def create_completion(
     )
 
     async def event_stream():
-        """转发当前连接的实时事件，并在终态或断连时解除订阅。"""
+        """转发当前连接的实时事件，并在终态或断连时解除订阅。
+
+        StreamingResponse 会异步迭代这个生成器。队列暂时没有事件时，receive() 会异步
+        等待；Producer 发布事件后恢复执行并 yield 一段已经编码好的 SSE 数据。
+        """
 
         try:
             while True:
+                # Subscriber 与 Producer 引用同一个 Channel：Producer 的 publish() 写入
+                # channel.queue，这里的 receive() 从该队列取出同一个 (event, payload)。
                 event, payload = await subscriber.receive()
                 yield encode_sse(event, payload)
+                # completed/error 都是唯一终态。终态已经发送后无需继续等待新事件。
                 if event in {"completed", "error"}:
                     break
         finally:
-            # detach 只停止向本连接入队，producer 仍继续生成并持久化完整回答。
+            # async generator 正常结束、客户端中途断开或发送响应时发生异常，都会执行
+            # finally。detach 只让 Channel 停止为本连接入队，不会取消 Registry 持有的
+            # Producer task；即使客户端断开，Producer 仍继续生成并持久化完整回答。
             subscriber.detach()
 
-    # 步骤 3：返回禁缓存、禁代理缓冲的 SSE 响应，确保 token 可以及时到达客户端。
+    # 步骤 3：构造响应并把 event_stream() 交给 Starlette 异步消费。此处返回响应对象时，
+    # 后台 Producer 通常仍在运行；后续 token 通过生成器逐条写给客户端。
+    # 禁缓存、禁代理缓冲可以避免中间层攒满一批数据后才发送，确保 token 及时到达。
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
