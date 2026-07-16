@@ -219,6 +219,7 @@ def test_settings_document_startup_and_request_time_boundaries():
         "elasticsearch_url",
         "elasticsearch_index",
         "embedding_dimensions",
+        "openai_model",
     }
     assert config.REQUEST_TIME_SETTINGS == {"max_upload_size_mb"}
 

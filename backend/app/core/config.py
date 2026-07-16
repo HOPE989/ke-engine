@@ -125,7 +125,11 @@ class Settings(BaseSettings):
     )
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openai_base_url: str | None = Field(default=None, validation_alias="OPENAI_BASE_URL")
-    openai_model: str | None = Field(default=None, validation_alias="OPENAI_MODEL")
+    openai_model: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_MODEL",
+        description="startup-only: Chat model is fixed for the Chat API process lifetime.",
+    )
     elasticsearch_url: str = Field(
         default="http://localhost:9200",
         validation_alias="ELASTICSEARCH_URL",
@@ -198,6 +202,7 @@ STARTUP_ONLY_SETTINGS = {
     "elasticsearch_url",
     "elasticsearch_index",
     "embedding_dimensions",
+    "openai_model",
 }
 REQUEST_TIME_SETTINGS = {"max_upload_size_mb"}
 
@@ -226,3 +231,11 @@ def get_request_settings() -> Settings:
     """返回请求期配置快照，用于允许请求边界字段不重启生效。"""
 
     return create_settings()
+
+
+def validate_chat_startup_settings(settings: Settings) -> Settings:
+    """确认 Chat API 启动所需、但其他进程可省略的配置。"""
+
+    if not settings.openai_model or not settings.openai_model.strip():
+        raise ValueError("OPENAI_MODEL is required to start the Chat API")
+    return settings

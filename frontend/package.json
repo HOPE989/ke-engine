@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "node --experimental-strip-types --test src/app/chat/sse.test.ts src/app/chat/api.test.ts src/app/api/v1/chat/completions/route.test.ts"
   },
   "dependencies": {
     "next": "^15.3.4",

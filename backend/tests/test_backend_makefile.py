@@ -15,6 +15,7 @@ def test_root_makefile_exposes_backend_dev_targets():
     assert "app.main:app" not in content
     assert "dev-api:" not in content
     assert "DOCUMENT_API_PORT ?= 8000" in content
+    assert "CHAT_API_PORT ?= 8001" in content
     assert "AGENT_API_PORT" not in content
     assert "$(MAKE) -j 2 dev-document-api dev-worker" in content
     assert "$(UV) run python -m app.entrypoints.document_worker" in content
@@ -26,6 +27,19 @@ def test_root_makefile_exposes_backend_dev_targets():
     assert "--if-not-exists" in content
     assert "--topic document.convert.requested" in content
     assert "--topic document.embed_store.requested" in content
+
+
+def test_root_makefile_exposes_chat_api_target():
+    makefile = Path(__file__).resolve().parents[2] / "Makefile"
+
+    content = makefile.read_text(encoding="utf-8")
+
+    assert "dev-chat-api:" in content
+    assert "make dev-chat-api" in content
+    assert (
+        "$(UV) run uvicorn app.entrypoints.chat_api:app --reload "
+        "--host $(API_HOST) --port $(CHAT_API_PORT)"
+    ) in content
 
 
 def test_root_makefile_exposes_database_init_target():
