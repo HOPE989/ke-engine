@@ -1,0 +1,569 @@
+.shell {
+  --ink: #191a1c;
+  --paper: #f1efe8;
+  --panel: #e7e4db;
+  --line: #b7b3a8;
+  --accent: #ef5b2a;
+  --muted: #6e6b64;
+  display: grid;
+  grid-template-columns: 18rem minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Courier New", Courier, monospace;
+}
+
+.sidebar {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  border-right: 1px solid #3c3d3f;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    #202123;
+  background-size: 100% 2rem;
+  color: #f6f3ea;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem 1.25rem;
+  border-bottom: 1px solid #3c3d3f;
+}
+
+.brandMark {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: Georgia, serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.brand div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.brand strong {
+  font-family: Georgia, serif;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+}
+
+.brand div span {
+  color: #989a9d;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+}
+
+.newButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 1.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #171719;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.newButton:hover:not(:disabled) {
+  background: transparent;
+  color: var(--accent);
+}
+
+.newButton span {
+  font-size: 1.25rem;
+}
+
+.listHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1.25rem;
+  color: #989a9d;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.listHeader button {
+  border: 0;
+  background: transparent;
+  color: #d4d1c9;
+  font-size: 1.15rem;
+  cursor: pointer;
+}
+
+.conversationList {
+  display: grid;
+  align-content: start;
+  overflow-y: auto;
+  padding-bottom: 1.5rem;
+}
+
+.conversationList > button {
+  display: grid;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.9rem 1.25rem;
+  border: 0;
+  border-left: 3px solid transparent;
+  background: transparent;
+  color: #eeeae1;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conversationList > button:hover:not(:disabled),
+.conversationList > .selectedConversation {
+  border-left-color: var(--accent);
+  background: #2c2d2f;
+}
+
+.conversationList strong {
+  overflow: hidden;
+  font-family: Georgia, serif;
+  font-size: 0.9rem;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversationList button span {
+  color: #888a8d;
+  font-size: 0.65rem;
+}
+
+.emptyList {
+  margin: 1rem 1.25rem;
+  color: #898b8f;
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+
+.workspace {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  height: 100vh;
+  min-width: 0;
+}
+
+.topbar {
+  display: flex;
+  min-height: 6rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.topbar h1 {
+  margin: 0.3rem 0 0;
+  font-family: Georgia, serif;
+  font-size: clamp(1.25rem, 2vw, 1.75rem);
+  font-weight: 400;
+}
+
+.identity {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  background: #f8f6ef;
+}
+
+.identity label {
+  align-self: center;
+  padding-left: 0.75rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.identity input {
+  width: 10rem;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  padding: 0.7rem;
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.identity input:focus {
+  box-shadow: inset 0 -2px var(--accent);
+}
+
+.identity button {
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: transparent;
+  padding: 0 0.8rem;
+  cursor: pointer;
+}
+
+.statusStrip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0 2rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.statusDot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: #2c9b5e;
+  box-shadow: 0 0 0 3px rgba(44, 155, 94, 0.14);
+}
+
+.statusDivider {
+  color: var(--line);
+}
+
+.messageArea {
+  overflow-y: auto;
+  background-image:
+    linear-gradient(rgba(25, 26, 28, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(25, 26, 28, 0.035) 1px, transparent 1px);
+  background-size: 2rem 2rem;
+}
+
+.messages {
+  display: grid;
+  gap: 1.5rem;
+  width: min(52rem, calc(100% - 3rem));
+  margin: 0 auto;
+  padding: 2.5rem 0;
+}
+
+.message {
+  width: min(85%, 42rem);
+  animation: reveal 220ms ease-out both;
+}
+
+.messageMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.message p {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  background: #f9f7f0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.userMessage {
+  justify-self: end;
+}
+
+.userMessage .messageMeta {
+  justify-content: flex-end;
+}
+
+.userMessage p {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #f7f3e8;
+}
+
+.live,
+.failed {
+  padding: 0.15rem 0.35rem;
+  background: var(--accent);
+  color: white;
+  letter-spacing: 0;
+}
+
+.failed {
+  background: #a52d25;
+}
+
+.welcome {
+  position: relative;
+  width: min(46rem, calc(100% - 3rem));
+  margin: 10vh auto 3rem;
+  padding: 2.5rem 0;
+}
+
+.welcomeIndex {
+  position: absolute;
+  top: -2rem;
+  right: 0;
+  color: rgba(25, 26, 28, 0.08);
+  font-family: Georgia, serif;
+  font-size: 8rem;
+  line-height: 1;
+}
+
+.welcome h2 {
+  position: relative;
+  max-width: 34rem;
+  margin: 0;
+  font-family: Georgia, serif;
+  font-size: clamp(2rem, 4vw, 3.75rem);
+  font-weight: 400;
+  line-height: 1.08;
+}
+
+.welcome > p {
+  max-width: 38rem;
+  margin: 1.25rem 0 2rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.8;
+}
+
+.welcome code {
+  color: var(--ink);
+}
+
+.suggestions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--line);
+}
+
+.suggestions button {
+  display: flex;
+  min-height: 5.5rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  padding: 1rem 0.75rem;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggestions button:last-child {
+  border-right: 0;
+}
+
+.suggestions button:hover {
+  background: var(--panel);
+}
+
+.loadingState {
+  display: grid;
+  height: 100%;
+  min-height: 15rem;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.errorBanner {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 2rem;
+  background: #a52d25;
+  color: white;
+  font-size: 0.75rem;
+}
+
+.errorBanner button {
+  border: 0;
+  background: transparent;
+  color: white;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.composerWrap {
+  padding: 1rem 2rem 0.75rem;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  width: min(52rem, 100%);
+  margin: 0 auto;
+  border: 1px solid var(--ink);
+  background: #fbf9f2;
+  box-shadow: 0.4rem 0.4rem 0 var(--panel);
+}
+
+.composer textarea {
+  min-height: 4.75rem;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  padding: 1rem;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.composer textarea:focus {
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.composer button {
+  display: flex;
+  width: 7rem;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  border-left: 1px solid var(--ink);
+  background: var(--accent);
+  padding: 1rem;
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.composer button:disabled,
+.newButton:disabled,
+.identity button:disabled,
+.conversationList button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.composerWrap > p {
+  width: min(52rem, 100%);
+  margin: 0.65rem auto 0;
+  color: var(--muted);
+  font-size: 0.62rem;
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+}
+
+@media (max-width: 760px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    min-height: auto;
+    border-right: 0;
+    border-bottom: 1px solid #3c3d3f;
+  }
+
+  .brand {
+    padding: 0.75rem 1rem;
+  }
+
+  .newButton {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.75rem;
+    margin: 0;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .newButton span,
+  .listHeader,
+  .conversationList {
+    display: none;
+  }
+
+  .workspace {
+    height: calc(100vh - 4.25rem);
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.8rem 1rem;
+  }
+
+  .identity {
+    width: 100%;
+  }
+
+  .identity input {
+    flex: 1;
+  }
+
+  .statusStrip,
+  .errorBanner,
+  .composerWrap {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .welcome {
+    margin-top: 3rem;
+  }
+
+  .suggestions {
+    grid-template-columns: 1fr;
+  }
+
+  .suggestions button {
+    min-height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .messages {
+    width: calc(100% - 2rem);
+    padding: 1.5rem 0;
+  }
+
+  .message {
+    width: 95%;
+  }
+
+  .composer button {
+    width: 5.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message {
+    animation: none;
+  }
+}
