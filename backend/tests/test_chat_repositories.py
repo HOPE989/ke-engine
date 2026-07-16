@@ -27,6 +27,21 @@ class FakeSession:
         return FakeScalarResult(self.result_pages.pop(0))
 
 
+class FakeUpdateResult:
+    def __init__(self, rowcount):
+        self.rowcount = rowcount
+
+
+class FakeUpdateSession:
+    def __init__(self, *, rowcount=1):
+        self.rowcount = rowcount
+        self.statements = []
+
+    async def execute(self, statement):
+        self.statements.append(statement)
+        return FakeUpdateResult(self.rowcount)
+
+
 def _sql(statement):
     return str(statement.compile(dialect=postgresql.dialect())).lower()
 
@@ -122,3 +137,23 @@ async def test_messages_use_owned_chronological_keyset_and_business_tables_only(
     second_sql = _sql(second_session.statements[0])
     assert "messages.created_at >" in second_sql
     assert "messages.id >" in second_sql
+
+
+@pytest.mark.asyncio
+async def test_update_title_preserves_activity_time_and_ignores_deleted_conversations():
+    from app.domains.chat.repositories import ConversationRepository
+
+    session = FakeUpdateSession()
+    updated = await ConversationRepository(session).update_title(
+        conversation_id=42,
+        title="订单索引优化",
+    )
+
+    assert updated is True
+    statement = session.statements[0]
+    sql = _sql(statement).replace(" ", "")
+    assert "updateconversationssettitle=" in sql
+    assert "updated_at=conversations.updated_at" in sql
+    assert "conversations.id=" in sql
+    assert "conversations.status!=" in sql
+    assert "订单索引优化" in statement.compile().params.values()

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.chat.shared.models import Conversation, ConversationStatus
@@ -67,6 +67,23 @@ class ConversationRepository:
             Conversation.status != ConversationStatus.DELETED.value,
         )
         return (await self._session.execute(statement)).scalar_one_or_none()
+
+    async def update_title(self, *, conversation_id: int, title: str) -> bool:
+        """更新未删除会话的标题，同时保持业务活跃时间不变。"""
+
+        statement = (
+            update(Conversation)
+            .where(
+                Conversation.id == conversation_id,
+                Conversation.status != ConversationStatus.DELETED.value,
+            )
+            .values(
+                title=title,
+                updated_at=Conversation.updated_at,
+            )
+        )
+        result = await self._session.execute(statement)
+        return result.rowcount > 0
 
     async def list_owned(
         self,
