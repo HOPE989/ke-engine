@@ -1,7 +1,7 @@
 """接收用户输入，并把会话变化与 USER 消息原子持久化。
 
-该 service 是 completion 的业务事务入口。它只确认系统已经接受用户轮次，不启动
-Graph，也不创建 SSE 流；调用方应在事务成功返回后再安排后台生成任务。
+该 service 是 completion 的业务事务入口。它确认系统已经接受用户轮次，并在新会话
+事务提交后提交轻量标题任务；它不启动 Graph，也不创建 SSE 流。
 """
 
 from dataclasses import dataclass
@@ -9,6 +9,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.domains.chat.repositories import ConversationRepository
+from app.domains.chat.services.title import (
+    TitleGenerationRequest,
+    submit_title_generation,
+)
 from app.domains.chat.shared.models import (
     Conversation,
     ConversationStatus,
@@ -43,9 +47,9 @@ def _normalize_content(content: str) -> str:
 
 
 def _title_from_content(content: str) -> str:
-    """从首条规范化消息截取数据库允许的 255 字符会话标题。"""
+    """从首条规范化消息截取 20 个字符作为新会话临时标题。"""
 
-    return content[:255]
+    return content[:20]
 
 
 class ConversationService:
@@ -55,11 +59,15 @@ class ConversationService:
         self,
         session_factory: Any,
         id_generator: Any,
+        title_model: Any,
         *,
+        title_submitter: Any = submit_title_generation,
         now: Any = None,
     ) -> None:
         self._session_factory = session_factory
         self._id_generator = id_generator
+        self._title_model = title_model
+        self._title_submitter = title_submitter
         self._now = now or (lambda: datetime.now(UTC))
 
     async def accept_user_turn(
@@ -78,6 +86,7 @@ class ConversationService:
 
         # 步骤 1：在打开数据库事务前规范化输入，空内容不会产生任何持久化副作用。
         normalized = _normalize_content(content)
+        title_request: TitleGenerationRequest | None = None
         async with self._session_factory() as session:
             async with session.begin():
                 timestamp = self._now()
@@ -94,6 +103,10 @@ class ConversationService:
                         updated_at=timestamp,
                     )
                     session.add(conversation)
+                    title_request = TitleGenerationRequest(
+                        conversation_id=conversation_id,
+                        content=normalized,
+                    )
                 else:
                     conversation = await ConversationRepository(session).get_owned(
                         conversation_id=conversation_id,
@@ -115,6 +128,14 @@ class ConversationService:
                         updated_at=timestamp,
                     )
                 )
+
+        # 只有事务上下文正常退出后才启动标题 task，保证会话和 USER 消息已经提交。
+        if title_request is not None:
+            self._title_submitter(
+                request=title_request,
+                model=self._title_model,
+                session_factory=self._session_factory,
+            )
 
         # 只有事务上下文正常退出后才把稳定 ID 交给 Graph producer。
         return AcceptedUserTurn(

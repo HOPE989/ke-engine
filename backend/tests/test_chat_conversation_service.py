@@ -77,15 +77,28 @@ class FakeIdGenerator:
         return next(self.values)
 
 
+class FakeTitleSubmitter:
+    def __init__(self, session):
+        self.session = session
+        self.calls = []
+
+    def __call__(self, **kwargs):
+        self.calls.append((self.session.commits, kwargs))
+
+
 @pytest.mark.asyncio
 async def test_accept_first_user_turn_creates_active_conversation_and_message_atomically():
     from app.domains.chat.services.conversation import ConversationService
 
     session = FakeSession()
     now = datetime(2026, 7, 14, tzinfo=UTC)
+    title_model = object()
+    title_submitter = FakeTitleSubmitter(session)
     service = ConversationService(
         session_factory=FakeSessionFactory(session),
         id_generator=FakeIdGenerator(1001, 2001),
+        title_model=title_model,
+        title_submitter=title_submitter,
         now=lambda: now,
     )
     content = "  " + "x" * 300 + "  "
@@ -96,7 +109,7 @@ async def test_accept_first_user_turn_creates_active_conversation_and_message_at
     assert isinstance(conversation, Conversation)
     assert conversation.id == 1001
     assert conversation.user_id == "alice"
-    assert conversation.title == "x" * 255
+    assert conversation.title == "x" * 20
     assert conversation.status == "ACTIVE"
     assert conversation.updated_at == now
     assert isinstance(message, Message)
@@ -108,6 +121,12 @@ async def test_accept_first_user_turn_creates_active_conversation_and_message_at
     assert turn.user_message_id == 2001
     assert turn.content == "x" * 300
     assert (session.begins, session.commits, session.rollbacks) == (1, 1, 0)
+    assert len(title_submitter.calls) == 1
+    commits_at_submit, submit_kwargs = title_submitter.calls[0]
+    assert commits_at_submit == 1
+    assert submit_kwargs["request"].conversation_id == 1001
+    assert submit_kwargs["request"].content == "x" * 300
+    assert submit_kwargs["model"] is title_model
 
 
 @pytest.mark.asyncio
@@ -124,9 +143,12 @@ async def test_accept_user_turn_appends_to_owned_conversation_and_updates_activi
         updated_at=previous,
     )
     session = FakeSession(owned_conversation=conversation)
+    title_submitter = FakeTitleSubmitter(session)
     service = ConversationService(
         session_factory=FakeSessionFactory(session),
         id_generator=FakeIdGenerator(2002),
+        title_model=object(),
+        title_submitter=title_submitter,
         now=lambda: now,
     )
 
@@ -142,6 +164,8 @@ async def test_accept_user_turn_appends_to_owned_conversation_and_updates_activi
     assert session.added[0].conversation_id == 1001
     assert turn.user_message_id == 2002
     assert (session.begins, session.commits, session.rollbacks) == (1, 1, 0)
+    assert conversation.title == "existing"
+    assert title_submitter.calls == []
 
 
 @pytest.mark.asyncio
@@ -149,7 +173,12 @@ async def test_blank_content_is_rejected_before_opening_session_or_transaction()
     from app.domains.chat.services.conversation import ConversationService
 
     factory = FakeSessionFactory(FakeSession())
-    service = ConversationService(factory, FakeIdGenerator())
+    service = ConversationService(
+        factory,
+        FakeIdGenerator(),
+        title_model=object(),
+        title_submitter=FakeTitleSubmitter(factory.session),
+    )
 
     with pytest.raises(ValueError, match="blank"):
         await service.accept_user_turn(user_id="alice", content=" \t\n ")
@@ -166,9 +195,12 @@ async def test_missing_and_foreign_conversations_raise_same_not_found(owned_conv
     )
 
     session = FakeSession(owned_conversation=owned_conversation)
+    title_submitter = FakeTitleSubmitter(session)
     service = ConversationService(
         FakeSessionFactory(session),
         FakeIdGenerator(2001),
+        title_model=object(),
+        title_submitter=title_submitter,
     )
 
     with pytest.raises(ConversationNotFound):
@@ -180,6 +212,7 @@ async def test_missing_and_foreign_conversations_raise_same_not_found(owned_conv
 
     assert session.added == []
     assert (session.commits, session.rollbacks) == (0, 1)
+    assert title_submitter.calls == []
 
 
 @pytest.mark.asyncio
@@ -188,9 +221,12 @@ async def test_first_turn_rolls_back_when_either_write_fails(fail_on_type):
     from app.domains.chat.services.conversation import ConversationService
 
     session = FakeSession(fail_on_type=fail_on_type)
+    title_submitter = FakeTitleSubmitter(session)
     service = ConversationService(
         FakeSessionFactory(session),
         FakeIdGenerator(1001, 2001),
+        title_model=object(),
+        title_submitter=title_submitter,
     )
 
     with pytest.raises(RuntimeError, match="write failed"):
@@ -198,3 +234,4 @@ async def test_first_turn_rolls_back_when_either_write_fails(fail_on_type):
 
     assert session.commits == 0
     assert session.rollbacks == 1
+    assert title_submitter.calls == []
