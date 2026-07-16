@@ -11,8 +11,9 @@ from app.services.chat_api.app import create_app
 
 
 class FakeResult:
-    def __init__(self, value):
+    def __init__(self, value, *, rowcount=1):
         self.value = value
+        self.rowcount = rowcount
 
     def scalar_one_or_none(self):
         return self.value
@@ -93,6 +94,11 @@ class FailingGraph(FakeGraph):
         raise RuntimeError("graph failed")
 
 
+class FakeTitleModel:
+    async def ainvoke(self, messages):
+        return SimpleNamespace(content="测试会话标题")
+
+
 def _parse_sse(body):
     events = []
     for block in body.strip().split("\n\n"):
@@ -113,6 +119,7 @@ def _app_with_runtime(session, ids, *, graph=None):
         id_generator=FakeIdGenerator(*ids),
         graph=graph or FakeGraph(),
         model=object(),
+        title_model=FakeTitleModel(),
         producer_registry=CompletionProducerRegistry(shutdown_timeout=1),
     )
     return app

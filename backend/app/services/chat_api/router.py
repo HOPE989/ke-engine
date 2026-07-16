@@ -61,6 +61,7 @@ async def create_completion(
         turn = await ConversationService(
             chat_deps.session_factory,
             chat_deps.id_generator,
+            chat_deps.title_model,
         ).accept_user_turn(
             user_id=principal.user_id,
             content=request.content,

@@ -25,7 +25,8 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
 
     calls = []
     session_factory = object()
-    model = object()
+    chat_model = object()
+    title_model = object()
     saver = object()
     graph = object()
 
@@ -35,8 +36,12 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
         return session_factory
 
     def fake_create_chat_model(settings, *, model):
-        calls.append("model_create")
-        return globals_model
+        calls.append(f"model_create:{model}")
+        if model == "gpt-test":
+            return chat_model
+        if model == "qwen3.6-flash":
+            return title_model
+        raise AssertionError(f"unexpected model: {model}")
 
     @asynccontextmanager
     async def fake_postgres_checkpointer(database_url):
@@ -48,7 +53,13 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
 
     class FakeBuilder:
         def compile(self, *, checkpointer):
-            assert calls == ["database_open", "model_create", "saver_open", "build_graph"]
+            assert calls == [
+                "database_open",
+                "model_create:gpt-test",
+                "model_create:qwen3.6-flash",
+                "saver_open",
+                "build_graph",
+            ]
             assert checkpointer is saver
             calls.append("compile_graph")
             return graph
@@ -58,7 +69,6 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
             calls.append("registry_shutdown")
 
     registry = FakeRegistry()
-    globals_model = model
     monkeypatch.setattr(deps, "initialize_database_deps", fake_initialize_database_deps)
     monkeypatch.setattr(deps, "create_chat_model", fake_create_chat_model)
     monkeypatch.setattr(deps, "postgres_checkpointer", fake_postgres_checkpointer)
@@ -77,7 +87,8 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
     async with deps.application_lifespan_resources(application, _settings()):
         assert calls == [
             "database_open",
-            "model_create",
+            "model_create:gpt-test",
+            "model_create:qwen3.6-flash",
             "saver_open",
             "build_graph",
             "compile_graph",
@@ -87,7 +98,8 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
             session_factory=session_factory,
             id_generator=application.state.chat_deps.id_generator,
             graph=graph,
-            model=model,
+            model=chat_model,
+            title_model=title_model,
             producer_registry=registry,
         )
 

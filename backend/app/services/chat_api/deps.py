@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 from app.core.config import Settings, validate_chat_startup_settings
 from app.domains.chat.graph import build_chat_graph
+from app.domains.chat.services.title import TITLE_MODEL
 from app.infrastructure.langgraph import postgres_checkpointer
 from app.infrastructure.llm import create_chat_model
 from app.infrastructure.snowflake import SnowflakeIdGenerator
@@ -67,6 +68,7 @@ class ChatApiDeps:
     id_generator: Any
     graph: Any
     model: Any
+    title_model: Any
     producer_registry: Any
 
 
@@ -97,6 +99,7 @@ async def application_lifespan_resources(
         # 步骤 2：先准备业务数据库与模型，再建立独立的 checkpoint 连接池。
         session_factory = await initialize_database_deps(stack=stack, settings=settings)
         model = create_chat_model(settings, model=settings.openai_model)
+        title_model = create_chat_model(settings, model=TITLE_MODEL)
         saver = await stack.enter_async_context(postgres_checkpointer(settings.database_url))
 
         # 步骤 3：只有 saver 完成 setup 后才编译生产 Graph，确保首次请求即可持久化 state。
@@ -110,6 +113,7 @@ async def application_lifespan_resources(
             id_generator=SnowflakeIdGenerator(worker_id=settings.snowflake_worker_id),
             graph=graph,
             model=model,
+            title_model=title_model,
             producer_registry=producer_registry,
         )
         stack.push_cleanup(_discard_app_state_attr, application, "chat_deps")
