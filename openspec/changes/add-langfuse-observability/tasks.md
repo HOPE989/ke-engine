@@ -32,11 +32,11 @@
 
 ## 5. Live Experiment command
 
-- [ ] 5.1 Create or reuse the fixed Dataset and idempotently upsert the 18 current cases
-- [ ] 5.2 Run a serial Dataset Experiment with real model callback tracing and live_model metadata
-- [ ] 5.3 Print formatted results and Dataset Run URL and return non-zero for configuration, authentication or remote failures
-- [ ] 5.4 Document Langfuse configuration, Chat tracing, Studio and Experiment commands
-- [ ] 5.5 Add offline orchestration tests proving serial execution, fail-fast behavior and guaranteed client shutdown
+- [x] 5.1 Create or reuse the fixed Dataset and idempotently upsert the 18 current cases
+- [x] 5.2 Run a serial Dataset Experiment with real model callback tracing and live_model metadata
+- [x] 5.3 Print formatted results and Dataset Run URL and return non-zero for configuration, authentication or remote failures
+- [x] 5.4 Document Langfuse configuration, Chat tracing, Studio and Experiment commands
+- [x] 5.5 Add offline orchestration tests proving serial execution, fail-fast behavior and guaranteed client shutdown
 
 ## 6. Verification and evidence
 

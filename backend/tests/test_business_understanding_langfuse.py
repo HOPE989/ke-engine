@@ -15,6 +15,7 @@ from app.domains.chat.graph.business_understanding.prompt import (
     build_business_understanding_messages,
 )
 from chat_graph_test_support import FakeSequentialChatModel
+from langfuse.api.commons.errors import NotFoundError
 
 
 def _oracle_output(case):
@@ -123,3 +124,168 @@ async def test_experiment_task_invokes_real_node_with_complete_message_history()
     assert model.structured_runnable.calls == [
         build_business_understanding_messages(expected_messages)
     ]
+
+
+class FakeExperimentResult:
+    dataset_run_url = "http://langfuse.local/project/datasets/run-1"
+
+    def format(self):
+        return "18 items evaluated"
+
+
+class FakeDataset:
+    def __init__(self, *, result=None, experiment_error=None):
+        self.result = result or FakeExperimentResult()
+        self.experiment_error = experiment_error
+        self.experiment_calls = []
+
+    def run_experiment(self, **kwargs):
+        self.experiment_calls.append(kwargs)
+        if self.experiment_error is not None:
+            raise self.experiment_error
+        return self.result
+
+
+class FakeLangfuseClient:
+    def __init__(
+        self,
+        *,
+        dataset_exists=True,
+        auth_valid=True,
+        result=None,
+        experiment_error=None,
+    ):
+        self.dataset_exists = dataset_exists
+        self.auth_valid = auth_valid
+        self.dataset = FakeDataset(result=result, experiment_error=experiment_error)
+        self.created_datasets = []
+        self.created_items = []
+        self.shutdown_calls = 0
+
+    def get_dataset(self, name):
+        assert name == "ke-engine/business-understanding-v1"
+        if not self.dataset_exists:
+            raise NotFoundError({"message": "not found"})
+        return self.dataset
+
+    def create_dataset(self, **kwargs):
+        self.created_datasets.append(kwargs)
+        self.dataset_exists = True
+
+    def create_dataset_item(self, **kwargs):
+        self.created_items.append(kwargs)
+
+    def auth_check(self):
+        return self.auth_valid
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+
+
+def _experiment_settings():
+    return SimpleNamespace(
+        openai_model="gpt-test",
+        app_version="0.1.0",
+    )
+
+
+def test_sync_dataset_creates_then_upserts_all_eighteen_items():
+    from app.evaluation.business_understanding_langfuse import (
+        DATASET_NAME,
+        sync_dataset,
+    )
+
+    client = FakeLangfuseClient(dataset_exists=False)
+
+    dataset = sync_dataset(client, load_evaluation_cases())
+
+    assert dataset is client.dataset
+    assert client.created_datasets[0]["name"] == DATASET_NAME
+    assert len(client.created_items) == 18
+    assert all(item["dataset_name"] == DATASET_NAME for item in client.created_items)
+    assert len({item["id"] for item in client.created_items}) == 18
+
+
+def test_sync_dataset_reuses_existing_dataset_and_still_upserts_items():
+    from app.evaluation.business_understanding_langfuse import sync_dataset
+
+    client = FakeLangfuseClient(dataset_exists=True)
+
+    sync_dataset(client, load_evaluation_cases())
+
+    assert client.created_datasets == []
+    assert len(client.created_items) == 18
+
+
+def test_run_experiment_is_serial_traced_and_prints_dataset_run_url(
+    monkeypatch,
+    capsys,
+):
+    from app.evaluation import business_understanding_langfuse as module
+
+    client = FakeLangfuseClient()
+    handler = object()
+    resources = SimpleNamespace(client=client, handler=handler)
+    model_instance = object()
+    model_calls = []
+    monkeypatch.setattr(
+        module,
+        "create_chat_model",
+        lambda settings, *, model, callbacks: model_calls.append(
+            {"settings": settings, "model": model, "callbacks": callbacks}
+        )
+        or model_instance,
+    )
+    settings = _experiment_settings()
+
+    result = module.run_experiment(settings, resources=resources)
+
+    assert result is client.dataset.result
+    assert model_calls == [
+        {"settings": settings, "model": "gpt-test", "callbacks": [handler]}
+    ]
+    call = client.dataset.experiment_calls[0]
+    assert call["max_concurrency"] == 1
+    assert call["evaluators"] == [module.langfuse_evaluator]
+    assert call["metadata"] == {
+        "model": "gpt-test",
+        "prompt_version": "v1",
+        "app_version": "0.1.0",
+        "live_model": "true",
+    }
+    assert call["task"].keywords == {"model": model_instance}
+    output = capsys.readouterr().out
+    assert "18 items evaluated" in output
+    assert FakeExperimentResult.dataset_run_url in output
+    assert client.shutdown_calls == 1
+
+
+@pytest.mark.parametrize(
+    "client",
+    [
+        FakeLangfuseClient(auth_valid=False),
+        FakeLangfuseClient(experiment_error=RuntimeError("remote failed")),
+    ],
+)
+def test_run_experiment_fails_fast_and_always_shuts_down(client):
+    from app.evaluation.business_understanding_langfuse import run_experiment
+
+    resources = SimpleNamespace(client=client, handler=object())
+
+    with pytest.raises(RuntimeError):
+        run_experiment(_experiment_settings(), resources=resources)
+
+    assert client.shutdown_calls == 1
+
+
+def test_main_returns_nonzero_when_langfuse_configuration_is_missing(
+    monkeypatch,
+    capsys,
+):
+    from app.evaluation import business_understanding_langfuse as module
+
+    monkeypatch.setattr(module, "create_settings", _experiment_settings)
+    monkeypatch.setattr(module, "create_langfuse_resources", lambda settings: None)
+
+    assert module.main() == 1
+    assert "Langfuse configuration is required" in capsys.readouterr().err

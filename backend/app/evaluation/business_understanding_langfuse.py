@@ -1,20 +1,26 @@
 """业务理解 fixture 与 Langfuse Dataset Experiment 之间的薄适配层。"""
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
+from functools import partial
+import sys
 from typing import Any
 from uuid import UUID, uuid5
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langfuse import Evaluation
+from langfuse.api.commons.errors import NotFoundError
 from langgraph.runtime import Runtime
 
+from app.core.config import Settings, create_settings
 from app.domains.chat.graph.business_understanding import (
     BusinessIntent,
     BusinessRoute,
 )
 from app.domains.chat.graph.business_understanding.evaluation import (
     EvaluationCase,
+    load_evaluation_cases,
     score_evaluation_cases,
 )
 from app.domains.chat.graph.business_understanding.prompt import (
@@ -24,6 +30,11 @@ from app.domains.chat.graph.context import ChatRuntimeContext
 from app.domains.chat.graph.nodes.business_understanding import (
     business_understanding_node,
 )
+from app.infrastructure.langfuse import (
+    LangfuseResources,
+    create_langfuse_resources,
+)
+from app.infrastructure.llm import create_chat_model
 
 
 DATASET_NAME = "ke-engine/business-understanding-v1"
@@ -129,6 +140,86 @@ def langchain_messages(messages: Sequence[Mapping[str, str]]) -> list[BaseMessag
     return converted
 
 
+def sync_dataset(client: Any, cases: Sequence[EvaluationCase]) -> Any:
+    """创建或复用固定 Dataset，并以稳定 ID 幂等写入当前全部 fixture。"""
+
+    try:
+        client.get_dataset(DATASET_NAME)
+    except NotFoundError:
+        client.create_dataset(
+            name=DATASET_NAME,
+            description="18 labeled business-understanding regression cases",
+            metadata={
+                "source": "ke-engine",
+                "prompt_version": BUSINESS_UNDERSTANDING_PROMPT_VERSION,
+            },
+        )
+    for case in cases:
+        client.create_dataset_item(
+            dataset_name=DATASET_NAME,
+            **dataset_item_payload(case),
+        )
+    return client.get_dataset(DATASET_NAME)
+
+
+def run_experiment(
+    settings: Settings,
+    *,
+    resources: LangfuseResources | None = None,
+) -> Any:
+    """串行运行真实模型 Dataset Experiment；任何远端失败都显式传播。"""
+
+    active_resources = resources or create_langfuse_resources(settings)
+    if active_resources is None:
+        raise RuntimeError("Langfuse configuration is required for the experiment")
+
+    client = active_resources.client
+    try:
+        if not client.auth_check():
+            raise RuntimeError("Langfuse authentication failed")
+        dataset = sync_dataset(client, load_evaluation_cases())
+        model = create_chat_model(
+            settings,
+            model=settings.openai_model,
+            callbacks=[active_resources.handler],
+        )
+        result = dataset.run_experiment(
+            name="business-understanding-live-model",
+            run_name=_default_run_name(),
+            description=(
+                "Production business-understanding node against 18 labeled cases"
+            ),
+            task=partial(run_business_understanding_case, model=model),
+            evaluators=[langfuse_evaluator],
+            max_concurrency=1,
+            metadata={
+                "model": settings.openai_model,
+                "prompt_version": BUSINESS_UNDERSTANDING_PROMPT_VERSION,
+                "app_version": settings.app_version,
+                "live_model": "true",
+            },
+        )
+        print(result.format())
+        dataset_run_url = getattr(result, "dataset_run_url", None)
+        if not dataset_run_url:
+            raise RuntimeError("Langfuse experiment did not return a Dataset Run URL")
+        print(dataset_run_url)
+        return result
+    finally:
+        client.shutdown()
+
+
+def main() -> int:
+    """显式 CLI 入口；失败返回非零，避免误认为已生成评测结果。"""
+
+    try:
+        run_experiment(create_settings())
+    except Exception as exc:
+        print(f"Langfuse experiment failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _evaluation_case_from_langfuse(
     *,
     input: Mapping[str, Any],
@@ -152,3 +243,11 @@ def _evaluation_case_from_langfuse(
 def _ratio(value: tuple[int, int]) -> float:
     hits, total = value
     return hits / total if total else 1.0
+
+
+def _default_run_name() -> str:
+    return f"business-understanding-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
