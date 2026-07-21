@@ -4,6 +4,8 @@ export type ApiResponse<T> = {
   data: T | null;
 };
 
+export type CompletionFinishReason = "stop" | "interrupt";
+
 export type Conversation = {
   id: string;
   title: string;

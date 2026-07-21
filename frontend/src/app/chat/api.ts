@@ -1,10 +1,19 @@
 import { parseSseFrames } from "./sse.ts";
-import type { ApiResponse, ConversationPage, MessagePage } from "./types";
+import type {
+  ApiResponse,
+  CompletionFinishReason,
+  ConversationPage,
+  MessagePage
+} from "./types";
 
 const chatEndpoint = "/api/v1/chat";
 
 function headers(userId: string) {
   return { "X-Mock-User-Id": userId };
+}
+
+function isFinishReason(value: unknown): value is CompletionFinishReason {
+  return value === "stop" || value === "interrupt";
 }
 
 export async function readJson<T>(response: Response): Promise<ApiResponse<T>> {
@@ -42,7 +51,7 @@ export async function streamCompletion(options: {
   content: string;
   onMetadata: (conversationId: string) => void;
   onDelta: (content: string) => void;
-}) {
+}): Promise<CompletionFinishReason> {
   const response = await fetch(`${chatEndpoint}/completions`, {
     method: "POST",
     headers: {
@@ -86,6 +95,12 @@ export async function streamCompletion(options: {
         options.onMetadata(String(item.data.conversation_id));
       } else if (item.event === "content_delta") {
         options.onDelta(String(item.data.content ?? ""));
+      } else if (item.event === "completed") {
+        if (!isFinishReason(item.data.finish_reason)) {
+          throw new Error("completed 事件包含未知的 finish reason。");
+        }
+        await reader.cancel();
+        return item.data.finish_reason;
       } else if (item.event === "error") {
         throw new Error(String(item.data.message ?? "模型生成失败"));
       }
@@ -93,4 +108,6 @@ export async function streamCompletion(options: {
 
     if (done) break;
   }
+
+  throw new Error("SSE 响应在收到 completed 事件前结束。");
 }
