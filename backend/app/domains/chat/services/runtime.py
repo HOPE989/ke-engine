@@ -46,6 +46,7 @@ from app.domains.chat.graph.routing import CLARIFY_NODE, LLM_NODE
 from app.domains.chat.repositories import MessageRepository
 from app.domains.chat.services.conversation import AcceptedUserTurn
 from app.services.chat_api.streaming import (
+    project_business_boundary_event,
     project_clarification_interrupt,
     project_graph_event,
 )
@@ -363,6 +364,11 @@ class CompletionProducer:
             if delta is not None:
                 answer_parts.append(delta.content)
                 await self._publisher.publish("content_delta", delta)
+
+            boundary_delta = project_business_boundary_event(event)
+            if boundary_delta is not None:
+                answer_parts.append(boundary_delta.content)
+                await self._publisher.publish("content_delta", boundary_delta)
 
             clarification = project_clarification_interrupt(event)
             if clarification is not None:

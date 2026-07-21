@@ -77,3 +77,48 @@ def test_evaluation_scorer_reports_each_dimension_independently():
     assert score.key_entities == (1, 2)
     assert score.clarification == (1, 1)
     assert score.schema_validity == (1, 1)
+
+
+def test_deterministic_contract_evaluator_summary_reports_all_five_dimensions():
+    from app.domains.chat.graph.business_understanding.evaluation import (
+        load_evaluation_cases,
+        score_evaluation_cases,
+    )
+
+    totals = {
+        "route": [0, 0],
+        "intent": [0, 0],
+        "key_entities": [0, 0],
+        "clarification": [0, 0],
+        "schema_validity": [0, 0],
+    }
+    cases = load_evaluation_cases()
+    for case in cases:
+        oracle_payload = {
+            "reasoning": "deterministic labeled expectation replay",
+            "route": case.expected_route.value,
+            "intent": (
+                case.expected_intent.value
+                if case.expected_intent is not None
+                else None
+            ),
+            "entities": case.expected_key_entities,
+            "clarification_question": case.expected_clarification_contains,
+        }
+        score = score_evaluation_cases(case, oracle_payload)
+        for dimension in totals:
+            hits, count = getattr(score, dimension)
+            totals[dimension][0] += hits
+            totals[dimension][1] += count
+
+    assert len(cases) == 18
+    assert totals == {
+        "route": [18, 18],
+        "intent": [18, 18],
+        "key_entities": [24, 24],
+        "clarification": [18, 18],
+        "schema_validity": [18, 18],
+    }
+    print("deterministic_contract_evaluator_validation cases=18 live_model=false")
+    for dimension, (hits, count) in totals.items():
+        print(f"{dimension}={hits}/{count}")

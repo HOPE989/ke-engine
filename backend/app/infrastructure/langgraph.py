@@ -8,9 +8,20 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from sqlalchemy.engine import make_url
+
+
+_BUSINESS_UNDERSTANDING_CHECKPOINT_TYPES = (
+    ("app.domains.chat.graph.business_understanding.models", "BusinessRoute"),
+    ("app.domains.chat.graph.business_understanding.models", "BusinessIntent"),
+    (
+        "app.domains.chat.graph.business_understanding.models",
+        "BusinessUnderstandingResult",
+    ),
+)
 
 
 def to_psycopg_dsn(database_url: str) -> str:
@@ -50,7 +61,12 @@ async def postgres_checkpointer(database_url: str) -> AsyncIterator[AsyncPostgre
     await pool.open()
     try:
         # 步骤 2：通过 saver 公开 API 准备其内部 schema，再交给 Graph 编译使用。
-        saver = AsyncPostgresSaver(pool)
+        saver = AsyncPostgresSaver(
+            pool,
+            serde=JsonPlusSerializer(
+                allowed_msgpack_modules=_BUSINESS_UNDERSTANDING_CHECKPOINT_TYPES
+            ),
+        )
         await saver.setup()
         yield saver
     finally:

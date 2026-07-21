@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk
 from langgraph.types import Interrupt
 
 from app.contracts.chat.stream import (
@@ -82,6 +82,31 @@ def test_project_graph_event_ignores_empty_and_non_public_events():
     ]
 
     assert [project_graph_event(event) for event in events] == [None, None, None, None]
+
+
+def test_project_business_boundary_event_accepts_only_boundary_node_message_update():
+    from app.domains.chat.graph.nodes.business_boundary import BUSINESS_BOUNDARY_MESSAGE
+    from app.services.chat_api.streaming import project_business_boundary_event
+
+    boundary_event = {
+        "event": "on_chain_stream",
+        "metadata": {"langgraph_node": "business_boundary"},
+        "data": {
+            "chunk": {
+                "messages": [AIMessage(content=BUSINESS_BOUNDARY_MESSAGE)]
+            }
+        },
+    }
+    classifier_event = {
+        **boundary_event,
+        "metadata": {"langgraph_node": "business_understanding"},
+    }
+
+    payload = project_business_boundary_event(boundary_event)
+
+    assert payload is not None
+    assert payload.model_dump() == {"content": BUSINESS_BOUNDARY_MESSAGE}
+    assert project_business_boundary_event(classifier_event) is None
 
 
 def test_project_clarification_interrupt_projects_real_langgraph_interrupt_value():

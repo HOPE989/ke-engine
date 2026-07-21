@@ -46,9 +46,10 @@ class FakePool:
 
 
 class FakeSaver:
-    def __init__(self, pool, calls):
+    def __init__(self, pool, calls, serde):
         self.pool = pool
         self.calls = calls
+        self.serde = serde
 
     async def setup(self):
         self.calls.append(("saver_setup", self.pool))
@@ -71,7 +72,7 @@ async def test_postgres_checkpointer_uses_dedicated_pool_and_sets_up_once(monkey
     monkeypatch.setattr(
         langgraph,
         "AsyncPostgresSaver",
-        lambda pool: FakeSaver(pool, calls),
+        lambda pool, *, serde: FakeSaver(pool, calls, serde),
     )
 
     async with langgraph.postgres_checkpointer(
@@ -79,6 +80,7 @@ async def test_postgres_checkpointer_uses_dedicated_pool_and_sets_up_once(monkey
     ) as saver:
         assert saver.pool is checkpoint_pool
         assert saver.pool is not business_engine
+        assert isinstance(saver.serde, langgraph.JsonPlusSerializer)
         calls.append(("yield", saver.pool))
 
     assert calls == [
@@ -100,7 +102,7 @@ async def test_postgres_checkpointer_closes_pool_when_body_raises(monkeypatch):
     monkeypatch.setattr(
         langgraph,
         "AsyncPostgresSaver",
-        lambda created_pool: FakeSaver(created_pool, calls),
+        lambda created_pool, *, serde: FakeSaver(created_pool, calls, serde),
     )
 
     with pytest.raises(RuntimeError, match="body failed"):

@@ -1573,3 +1573,56 @@ Business Understanding
 ### 34.6 当前一句话结论
 
 > ke-engine 复刻 know-engine 的企业 RAG 功能链路和 Prompt 分流思想，使用真实但克制的铁路煤炭场景完成迁移，并将 `related` 硬门控升级为 `BUSINESS / NON_BUSINESS / CLARIFY` 三态 `route`；第一项正式变更只完成 Business Understanding，业务 RAG 和结构化查询后续逐步接入。
+
+## 35. 第五轮实施事实：Business Understanding 已通过 PostgreSQL 端到端验证
+
+本节记录 2026-07-21 实际测试已经证明的范围。它更新第 34 节的实施状态，但不把前文讨论过的未来能力描述成当前实现。
+
+### 35.1 已实现并验证的图拓扑
+
+~~~text
+START
+  ↓
+business_understanding
+  ├── NON_BUSINESS → llm → END
+  ├── BUSINESS → business_boundary → END
+  └── CLARIFY → clarify ── interrupt
+                         └─ resume → business_understanding
+~~~
+
+- `business_understanding` 使用注入的同一个 Chat Model 派生 structured runnable，分类结果进入 checkpoint state，分类 JSON 和 `reasoning` 不进入公开 SSE。
+- `NON_BUSINESS` 才调用普通模型，并以真实 `on_chat_model_stream` 事件产生公开文本增量。
+- `BUSINESS` 不调用普通模型，只通过 `business_boundary` 发布并持久化固定文本“已识别业务请求，但当前阶段尚未连接业务检索。”。
+- `CLARIFY` 以真实 LangGraph interrupt 挂起。恢复后，澄清问题和用户回答进入 message state，再回到 `business_understanding` 重新识别。
+- 业务 `conversation_id` 的十进制字符串继续作为 LangGraph `thread_id`；客户端不提交 checkpoint ID、interrupt ID 或 `Command`。
+
+### 35.2 三条路径的终态与持久化顺序
+
+真实 PostgreSQL 集成测试使用每个用例独立创建并在结束时清理的 schema，同时使用真实 PostgreSQL checkpointer 和业务 `conversations/messages` 表。
+
+| 路径 | 已验证的公开事件与持久化事实 | 成功终态 |
+|---|---|---|
+| `NON_BUSINESS` | `metadata → content_delta* → ASSISTANT commit → completed`；普通模型调用 1 次，完整通用回答在 `completed` 发布时已能被新事务查询到 | `finish_reason=stop` |
+| `BUSINESS` | `metadata → content_delta(boundary) → ASSISTANT commit → completed`；只落固定 boundary 文本，普通模型调用 0 次 | `finish_reason=stop` |
+| 首次 `CLARIFY` | `metadata → content_delta(question) → ASSISTANT commit → completed`；澄清问题先落业务表，checkpoint 的 `next` 为 `clarify` | `finish_reason=interrupt` |
+| 同 thread 恢复 | 下一条 USER “YD2026001”先提交业务表，再传入 `Command(resume="YD2026001")`；structured model 的第二次历史末尾为 ASSISTANT 澄清问题和 USER 回答；最终 boundary 落库，checkpoint 的 `next/tasks` 清空 | `finish_reason=stop` |
+
+PostgreSQL saver 对 `BusinessRoute`、`BusinessIntent` 和 `BusinessUnderstandingResult` 使用精确的 msgpack 反序列化白名单；端到端测试同时断言恢复过程没有 `langgraph.checkpoint.serde.jsonplus` warning。
+
+### 35.3 本次新鲜验证结果
+
+以下数字来自 2026-07-21 的实际命令输出：
+
+| 命令 | 结果 |
+|---|---|
+| `uv run pytest tests/test_business_understanding_postgres.py -q -m integration` | `3 passed in 1.83s` |
+| `uv run pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_business_understanding_postgres.py -q -m integration` | `5 passed in 2.54s` |
+| brief 指定的 14 个 Chat 单元测试文件 | `107 passed in 2.31s`；命令 wall 6.44s |
+| `uv run pytest -q -m "not integration"` | `555 passed, 3 skipped, 5 deselected in 5.23s` |
+| `npm test` | `11/11 tests passed`；命令 wall 4.09s；保留 Node type stripping 与未声明 module type 的既有 warning |
+| `npm run lint` | exit 0；命令 wall 7.85s |
+| `npm run build` | exit 0；Next.js 15.5.19 production build 成功；compile 2.2s，命令 wall 22.10s |
+
+### 35.4 仍然延期的范围
+
+本轮没有实现业务 RAG、SQL Tool 或结构化查询执行，也没有生成业务事实答案。引用、证据校验、证据冲突处理、Grounded Answer 和更细粒度的运行计划/运输单据/分析/异常意图仍需后续 change 与独立测试证明；固定 boundary 文本不能被解释为业务回答能力已经完成。
