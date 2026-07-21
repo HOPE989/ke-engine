@@ -1593,6 +1593,7 @@ business_understanding
 - `business_understanding` 使用注入的同一个 Chat Model 派生 structured runnable，分类结果进入 checkpoint state，分类 JSON 和 `reasoning` 不进入公开 SSE。
 - `NON_BUSINESS` 才调用普通模型，并以真实 `on_chat_model_stream` 事件产生公开文本增量。
 - `BUSINESS` 不调用普通模型，只通过 `business_boundary` 发布并持久化固定文本“已识别业务请求，但当前阶段尚未连接业务检索。”。
+- boundary 公开投影要求 `data.chunk.messages` 恰好包含一条完整且精确类型为 `AIMessage` 的固定文本；`AIMessageChunk`、HumanMessage、空/多消息或错误文本即使带有匹配的 boundary provenance 也会进入安全 error 终态，不写 ASSISTANT、不发布 completed，错误 payload 不回显原始内容或对象表示。
 - `CLARIFY` 以真实 LangGraph interrupt 挂起。恢复后，澄清问题和用户回答进入 message state，再回到 `business_understanding` 重新识别。
 - 业务 `conversation_id` 的十进制字符串继续作为 LangGraph `thread_id`；客户端不提交 checkpoint ID、interrupt ID 或 `Command`。
 
@@ -1607,7 +1608,7 @@ business_understanding
 | 首次 `CLARIFY` | `metadata → content_delta(question) → ASSISTANT commit → completed`；澄清问题先落业务表，checkpoint 的 `next` 为 `clarify` | `finish_reason=interrupt` |
 | 同 thread 恢复 | 下一条 USER “YD2026001”先提交业务表，再传入 `Command(resume="YD2026001")`；structured model 的第二次历史末尾为 ASSISTANT 澄清问题和 USER 回答；最终 boundary 落库，checkpoint 的 `next/tasks` 清空 | `finish_reason=stop` |
 
-PostgreSQL saver 对 `BusinessRoute`、`BusinessIntent` 和 `BusinessUnderstandingResult` 使用精确的 msgpack 反序列化白名单；端到端测试同时断言恢复过程没有 `langgraph.checkpoint.serde.jsonplus` warning。
+PostgreSQL saver 对 `BusinessRoute`、`BusinessIntent` 和 `BusinessUnderstandingResult` 使用精确的 msgpack 反序列化白名单。确定性主门禁直接锁定 `JsonPlusSerializer` 构造参数只能是这 3 个模块类型，并使用真实 serializer 往返恢复嵌套 `BusinessEntities`、route/intent enum 和内建 LangChain message 的精确类型与值；端到端 caplog 对恢复过程无 `langgraph.checkpoint.serde.jsonplus` warning 的断言作为补充观察。
 
 ### 35.3 本次新鲜验证结果
 
@@ -1616,12 +1617,12 @@ PostgreSQL saver 对 `BusinessRoute`、`BusinessIntent` 和 `BusinessUnderstandi
 | 命令 | 结果 |
 |---|---|
 | `uv run pytest tests/test_business_understanding_postgres.py -q -m integration` | `3 passed in 1.83s` |
-| `uv run pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_business_understanding_postgres.py -q -m integration` | `5 passed in 2.54s` |
-| brief 指定的 14 个 Chat 单元测试文件 | `107 passed in 2.31s`；命令 wall 6.44s |
-| `uv run pytest -q -m "not integration"` | `555 passed, 3 skipped, 5 deselected in 5.23s` |
-| `npm test` | `11/11 tests passed`；命令 wall 4.09s；保留 Node type stripping 与未声明 module type 的既有 warning |
-| `npm run lint` | exit 0；命令 wall 7.85s |
-| `npm run build` | exit 0；Next.js 15.5.19 production build 成功；compile 2.2s，命令 wall 22.10s |
+| `uv run pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_business_understanding_postgres.py -q -m integration` | `5 passed in 3.05s`；命令 wall 7.78s |
+| brief 指定的 14 个 Chat 单元测试文件 | `113 passed in 2.85s`；命令 wall 7.81s |
+| `uv run pytest -q -m "not integration"` | `563 passed, 3 skipped, 5 deselected in 6.19s`；命令 wall 11.27s |
+| `npm test` | `11/11 tests passed`；Node duration 302.76ms，命令 wall 4.53s；保留 Node type stripping 与未声明 module type 的既有 warning |
+| `npm run lint` | exit 0；命令 wall 8.72s |
+| `npm run build` | exit 0；Next.js 15.5.19 production build 成功；compile 2.1s，命令 wall 22.61s |
 
 ### 35.4 仍然延期的范围
 

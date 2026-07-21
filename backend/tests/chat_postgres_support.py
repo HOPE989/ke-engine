@@ -153,17 +153,23 @@ class BlockingPartialModel:
 async def isolated_schema():
     schema = f"test_chat_runtime_{uuid4().hex}"
     admin = create_async_engine(DATABASE_URL)
-    async with admin.begin() as connection:
-        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-    await admin.dispose()
+    try:
+        async with admin.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    finally:
+        await admin.dispose()
     try:
         saver_url = f"{DATABASE_URL}?options=-csearch_path%3D{schema}"
         yield schema, saver_url
     finally:
         cleanup = create_async_engine(DATABASE_URL)
-        async with cleanup.begin() as connection:
-            await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
-        await cleanup.dispose()
+        try:
+            async with cleanup.begin() as connection:
+                await connection.execute(
+                    text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+                )
+        finally:
+            await cleanup.dispose()
 
 
 def create_business_engine(schema: str):

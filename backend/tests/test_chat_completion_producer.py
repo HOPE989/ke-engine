@@ -2,7 +2,9 @@ from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.types import Interrupt, StateSnapshot
 import pytest
 
+from app.domains.chat.graph.nodes.business_boundary import BUSINESS_BOUNDARY_MESSAGE
 from app.domains.chat.graph.routing import (
+    BUSINESS_BOUNDARY_NODE,
     BUSINESS_UNDERSTANDING_NODE,
     CLARIFY_NODE,
     LLM_NODE,
@@ -214,6 +216,33 @@ class UnsupportedInterruptGraph(FakeGraph):
         }
 
 
+class InvalidBusinessBoundaryChunkGraph(FakeGraph):
+    def __init__(self, calls, publisher):
+        super().__init__(calls, publisher)
+        self.boundary_chunk = AIMessageChunk(content=BUSINESS_BOUNDARY_MESSAGE)
+
+    async def astream_events(self, graph_input, config, *, context, version):
+        assert self.publisher.events[0][0] == "metadata"
+        self.invocations.append(
+            {
+                "input": graph_input,
+                "config": config,
+                "context": context,
+                "version": version,
+            }
+        )
+        self.calls.append("graph_start")
+        yield {
+            "event": "on_chain_stream",
+            "data": {
+                "chunk": {
+                    "messages": [self.boundary_chunk]
+                }
+            },
+            "metadata": {"langgraph_node": BUSINESS_BOUNDARY_NODE},
+        }
+
+
 @pytest.mark.asyncio
 async def test_completion_producer_success_persists_before_completed_and_preserves_deltas():
     from app.domains.chat.services.runtime import CompletionProducer
@@ -383,6 +412,38 @@ async def test_unsupported_interrupt_emits_only_safe_error_without_assistant(
     assert "raw-internal-interrupt-id" not in error_json
     assert "raw-question-must-not-leak" not in error_json
     assert "Interrupt" not in error_json
+
+
+@pytest.mark.asyncio
+async def test_invalid_business_boundary_chunk_emits_only_safe_error_without_assistant():
+    from app.domains.chat.services.runtime import CompletionProducer
+
+    calls = []
+    publisher = FakePublisher(calls)
+    graph = InvalidBusinessBoundaryChunkGraph(calls, publisher)
+    session = FakeSession(calls)
+    producer = CompletionProducer(
+        graph=graph,
+        model=object(),
+        session_factory=FakeSessionFactory(session),
+        id_generator=FakeIdGenerator(),
+        publisher=publisher,
+    )
+
+    await producer.run(
+        turn=AcceptedUserTurn(1001, 2001, "查一下我的运单"),
+        user_id="alice",
+    )
+
+    assert [event for event, _ in publisher.events] == ["metadata", "error"]
+    assert session.added == []
+    assert all(event != "completed" for event, _ in publisher.events)
+    public_payloads = " ".join(
+        payload.model_dump_json() for _, payload in publisher.events
+    )
+    assert BUSINESS_BOUNDARY_MESSAGE not in public_payloads
+    assert "AIMessageChunk" not in public_payloads
+    assert repr(graph.boundary_chunk) not in public_payloads
 
 
 @pytest.mark.asyncio

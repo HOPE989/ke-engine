@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langgraph.types import Interrupt
 
 from app.contracts.chat.stream import (
@@ -10,6 +10,7 @@ from app.contracts.chat.stream import (
     ErrorPayload,
     MetadataPayload,
 )
+from app.domains.chat.graph.nodes.business_boundary import BUSINESS_BOUNDARY_MESSAGE
 
 
 def _decode_frame(frame):
@@ -107,6 +108,35 @@ def test_project_business_boundary_event_accepts_only_boundary_node_message_upda
     assert payload is not None
     assert payload.model_dump() == {"content": BUSINESS_BOUNDARY_MESSAGE}
     assert project_business_boundary_event(classifier_event) is None
+
+
+@pytest.mark.parametrize(
+    "messages",
+    [
+        [AIMessageChunk(content=BUSINESS_BOUNDARY_MESSAGE)],
+        [HumanMessage(content=BUSINESS_BOUNDARY_MESSAGE)],
+        [],
+        [
+            AIMessage(content=BUSINESS_BOUNDARY_MESSAGE),
+            AIMessage(content=BUSINESS_BOUNDARY_MESSAGE),
+        ],
+        [AIMessage(content="错误的边界提示")],
+    ],
+    ids=["ai-message-chunk", "human-message", "empty", "multiple", "wrong-content"],
+)
+def test_project_business_boundary_event_rejects_invalid_matching_boundary_shape(
+    messages,
+):
+    from app.services.chat_api.streaming import project_business_boundary_event
+
+    event = {
+        "event": "on_chain_stream",
+        "metadata": {"langgraph_node": "business_boundary"},
+        "data": {"chunk": {"messages": messages}},
+    }
+
+    with pytest.raises(ValueError, match="unsupported business boundary event"):
+        project_business_boundary_event(event)
 
 
 def test_project_clarification_interrupt_projects_real_langgraph_interrupt_value():

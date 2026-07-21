@@ -71,7 +71,7 @@ def project_business_boundary_event(
         raise ValueError("unsupported business boundary event")
 
     message = messages[0]
-    if not isinstance(message, AIMessage) or message.content != BUSINESS_BOUNDARY_MESSAGE:
+    if type(message) is not AIMessage or message.content != BUSINESS_BOUNDARY_MESSAGE:
         raise ValueError("unsupported business boundary event")
     return ContentDeltaPayload(content=BUSINESS_BOUNDARY_MESSAGE)
 

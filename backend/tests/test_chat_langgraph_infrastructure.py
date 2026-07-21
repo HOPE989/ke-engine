@@ -93,6 +93,109 @@ async def test_postgres_checkpointer_uses_dedicated_pool_and_sets_up_once(monkey
 
 
 @pytest.mark.asyncio
+async def test_postgres_checkpointer_configures_exact_business_understanding_allowlist(
+    monkeypatch,
+):
+    from app.infrastructure import langgraph
+
+    calls = []
+    pool = FakePool(calls)
+    captured_kwargs = {}
+    serializer = object()
+
+    def create_serializer(**kwargs):
+        captured_kwargs.update(kwargs)
+        return serializer
+
+    monkeypatch.setattr(langgraph, "_create_pool", lambda dsn: pool)
+    monkeypatch.setattr(langgraph, "JsonPlusSerializer", create_serializer)
+    monkeypatch.setattr(
+        langgraph,
+        "AsyncPostgresSaver",
+        lambda created_pool, *, serde: FakeSaver(created_pool, calls, serde),
+    )
+
+    async with langgraph.postgres_checkpointer(
+        "postgresql+asyncpg://user:pass@db.example/app"
+    ) as saver:
+        assert saver.serde is serializer
+
+    assert captured_kwargs == {
+        "allowed_msgpack_modules": (
+            (
+                "app.domains.chat.graph.business_understanding.models",
+                "BusinessRoute",
+            ),
+            (
+                "app.domains.chat.graph.business_understanding.models",
+                "BusinessIntent",
+            ),
+            (
+                "app.domains.chat.graph.business_understanding.models",
+                "BusinessUnderstandingResult",
+            ),
+        )
+    }
+    assert captured_kwargs["allowed_msgpack_modules"] is not True
+
+
+@pytest.mark.asyncio
+async def test_postgres_checkpointer_serializer_strictly_round_trips_business_state(
+    monkeypatch,
+):
+    from langchain_core.messages import HumanMessage
+
+    from app.domains.chat.graph.business_understanding.models import (
+        BusinessEntities,
+        BusinessIntent,
+        BusinessRoute,
+        BusinessUnderstandingResult,
+    )
+    from app.infrastructure import langgraph
+
+    calls = []
+    pool = FakePool(calls)
+    monkeypatch.setattr(langgraph, "_create_pool", lambda dsn: pool)
+    monkeypatch.setattr(
+        langgraph,
+        "AsyncPostgresSaver",
+        lambda created_pool, *, serde: FakeSaver(created_pool, calls, serde),
+    )
+    result = BusinessUnderstandingResult(
+        reasoning="用户明确查询运输计划",
+        route=BusinessRoute.BUSINESS,
+        intent=BusinessIntent.BUSINESS_DATA_QUERY,
+        entities=BusinessEntities(
+            operation_plan_no="PLAN-001",
+            train_no="TRAIN-002",
+            document_type="运单",
+            document_no="DOC-003",
+        ),
+    )
+    payload = {
+        "business_understanding": result,
+        "messages": [HumanMessage(content="查询 PLAN-001 对应的运单")],
+    }
+
+    async with langgraph.postgres_checkpointer(
+        "postgresql+asyncpg://user:pass@db.example/app"
+    ) as saver:
+        restored = saver.serde.loads_typed(saver.serde.dumps_typed(payload))
+
+    restored_result = restored["business_understanding"]
+    assert type(restored_result) is BusinessUnderstandingResult
+    assert type(restored_result.entities) is BusinessEntities
+    assert type(restored_result.route) is BusinessRoute
+    assert restored_result.route is BusinessRoute.BUSINESS
+    assert type(restored_result.intent) is BusinessIntent
+    assert restored_result.intent is BusinessIntent.BUSINESS_DATA_QUERY
+    assert restored_result == result
+    assert len(restored["messages"]) == 1
+    assert type(restored["messages"][0]) is HumanMessage
+    assert restored["messages"][0] == payload["messages"][0]
+
+
+@pytest.mark.asyncio
 async def test_postgres_checkpointer_closes_pool_when_body_raises(monkeypatch):
     from app.infrastructure import langgraph
 
