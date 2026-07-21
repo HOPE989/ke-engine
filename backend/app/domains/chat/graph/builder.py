@@ -14,7 +14,6 @@ from app.domains.chat.graph.routing import (
     BUSINESS_UNDERSTANDING_NODE,
     CLARIFY_NODE,
     LLM_NODE,
-    route_business_understanding,
 )
 from app.domains.chat.graph.state import ChatState
 
@@ -33,16 +32,6 @@ def build_chat_graph() -> StateGraph:
     graph.add_node(BUSINESS_BOUNDARY_NODE, business_boundary_node)
     graph.add_node(CLARIFY_NODE, clarify_node)
     graph.add_edge(START, BUSINESS_UNDERSTANDING_NODE)
-    graph.add_conditional_edges(
-        BUSINESS_UNDERSTANDING_NODE,
-        route_business_understanding,
-        {
-            LLM_NODE: LLM_NODE,
-            BUSINESS_BOUNDARY_NODE: BUSINESS_BOUNDARY_NODE,
-            CLARIFY_NODE: CLARIFY_NODE,
-        },
-    )
     graph.add_edge(LLM_NODE, END)
     graph.add_edge(BUSINESS_BOUNDARY_NODE, END)
-    graph.add_edge(CLARIFY_NODE, BUSINESS_UNDERSTANDING_NODE)
     return graph

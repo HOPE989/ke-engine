@@ -1563,7 +1563,7 @@ Business Understanding
 1. 定义 `BusinessRoute`、V1 业务意图和最小实体模型；
 2. 编写铁路运输与煤炭经营场景的结构化识别 Prompt；
 3. 将识别结果写入 Chat Graph State；
-4. 增加三路条件路由；
+4. 由 `business_understanding` 返回 `Command(update=..., goto=...)` 控制三路跳转；
 5. 保留现有模型作为 NON_BUSINESS 回答节点；
 6. BUSINESS 只验证识别和路由，不执行 RAG；
 7. CLARIFY 实现端到端 interrupt/resume，包括服务层恢复命令；
@@ -1590,11 +1590,12 @@ business_understanding
                          └─ resume → business_understanding
 ~~~
 
-- `business_understanding` 使用注入的同一个 Chat Model 派生 structured runnable，分类结果进入 checkpoint state，分类 JSON 和 `reasoning` 不进入公开 SSE。
+- `business_understanding` 使用注入的同一个 Chat Model 派生 structured runnable，并返回 `Command(update={"business_understanding": result}, goto=target)`，让做出分类决策的节点同时完成 checkpoint state update 与执行权转移；分类 JSON 和 `reasoning` 不进入公开 SSE。
 - `NON_BUSINESS` 才调用普通模型，并以真实 `on_chat_model_stream` 事件产生公开文本增量。
 - `BUSINESS` 不调用普通模型，只通过 `business_boundary` 发布并持久化固定文本“已识别业务请求，但当前阶段尚未连接业务检索。”。
 - boundary 公开投影要求 `data.chunk.messages` 恰好包含一条完整且精确类型为 `AIMessage` 的固定文本；`AIMessageChunk`、HumanMessage、空/多消息或错误文本即使带有匹配的 boundary provenance 也会进入安全 error 终态，不写 ASSISTANT、不发布 completed，错误 payload 不回显原始内容或对象表示。
-- `CLARIFY` 以真实 LangGraph interrupt 挂起。恢复后，澄清问题和用户回答进入 message state，再回到 `business_understanding` 重新识别。
+- `CLARIFY` 以真实 LangGraph interrupt 挂起。恢复后，clarify 节点返回 `Command(update={"messages": [...]}, goto="business_understanding")`，把澄清问题和用户回答加入 message state 后重新识别。
+- Builder 不再使用 `add_conditional_edges` 或 `clarify -> business_understanding` 静态回边；只保留 `START -> business_understanding`、`llm -> END`、`business_boundary -> END` 这些不含运行时决策的固定边。该控制方式与 DeerFlow 的“决策节点返回 Command(goto)”模式一致。
 - 业务 `conversation_id` 的十进制字符串继续作为 LangGraph `thread_id`；客户端不提交 checkpoint ID、interrupt ID 或 `Command`。
 
 ### 35.2 三条路径的终态与持久化顺序
@@ -1619,11 +1620,12 @@ PostgreSQL saver 对 `BusinessRoute`、`BusinessIntent` 和 `BusinessUnderstandi
 | `uv run pytest tests/test_business_understanding_postgres.py -q -m integration` | `3 passed in 1.83s` |
 | `uv run pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_business_understanding_postgres.py -q -m integration` | `5 passed in 1.74s` |
 | Task 11 指定的 16 个 Chat 单元测试文件 | `133 passed, 1 deselected in 1.83s` |
+| Task 12 Command(goto) 聚焦 Graph/Producer/API 回归 | `81 passed in 1.74s` |
 | `uv run pytest tests/test_chat_completion_lock.py -q -m integration` | `1 passed, 6 deselected in 0.09s`；真实 Redis 同会话互斥、不同会话隔离、释放后重取均通过 |
-| `uv run pytest -q -m "not integration"` | `580 passed, 3 skipped, 6 deselected in 5.25s` |
+| `uv run pytest -q -m "not integration"` | `581 passed, 3 skipped, 6 deselected in 5.97s` |
 | `npm test` | `11/11 tests passed`；保留 Node type stripping 与未声明 module type 的既有 warning |
 | `npm run lint` | exit 0 |
-| `npm run build` | exit 0；Next.js 15.5.19 production build 成功；compile 2.7s |
+| `npm run build` | exit 0；Next.js 15.5.19 production build 成功；compile 1.348s |
 
 ### 35.4 同会话 completion 的粗粒度分布式锁
 

@@ -1358,6 +1358,85 @@ FINAL EVIDENCE COMMIT: test(chat): verify conversation completion lock
 
 ---
 
+## Task 12: Restore DeerFlow-style Command(goto) Control
+
+**Deliverable:** 保留当前 structured Business Understanding 契约和固定节点集合，但由做出决策的节点通过 `Command(update=..., goto=...)` 同时提交 state update 与执行权转移；删除 Business Understanding 显式条件边和 clarification 静态回边。
+
+**Files:**
+
+- Modify: `openspec/changes/add-business-understanding/proposal.md`
+- Modify: `openspec/changes/add-business-understanding/design.md`
+- Modify: `openspec/changes/add-business-understanding/specs/chat-langgraph-runtime/spec.md`
+- Modify: `backend/app/domains/chat/graph/nodes/business_understanding.py`
+- Modify: `backend/app/domains/chat/graph/nodes/clarify.py`
+- Modify: `backend/app/domains/chat/graph/builder.py`
+- Modify: `backend/app/domains/chat/graph/routing.py`
+- Modify: focused Graph tests and implementation documentation
+
+- [x] **Step 12.1: Correct the specification — decision nodes own `Command(goto)` transfer**
+- [x] **Step 12.2: RED — Business Understanding returns typed Command update and all three goto destinations**
+
+```text
+RED: Set-Location backend; uv run pytest tests/test_business_understanding_node.py::test_business_understanding_node_uses_injected_structured_model_and_full_history tests/test_chat_graph_routing.py::test_business_understanding_command_maps_each_route_to_one_node -q
+Exit: 1
+Observed: 4 failed；Business Understanding 仍返回普通 dict，BUSINESS/NON_BUSINESS/CLARIFY 均没有 Command update/goto。
+```
+
+- [x] **Step 12.3: RED — Clarify resume returns Command and builder has no explicit conditional/static decision edges**
+
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_graph_routing.py::test_builder_does_not_install_external_business_decision_edges tests/test_chat_graph_clarification.py::test_clarify_resume_returns_command_to_business_understanding -q
+Exit: 1
+Observed: 2 failed；builder 仍安装 add_conditional_edges，clarify 恢复仍返回 dict 并依赖静态回边。
+```
+
+- [x] **Step 12.4: GREEN — Implement minimal node-owned Command routing and remove the external router**
+
+```text
+GREEN: Set-Location backend; uv run pytest tests/test_business_understanding_node.py tests/test_chat_graph_routing.py tests/test_chat_graph_clarification.py tests/test_chat_graph.py -q
+Exit: 0
+Observed: 23 passed；Business Understanding 用 typed Command 原子提交分类结果并跳转三路，clarify resume 用 Command 回到重评，builder 只保留无决策的固定边。
+```
+
+- [x] **Step 12.5: Verify GREEN — focused Graph, resume/producer, PostgreSQL, backend, frontend, OpenSpec strict, and diff check**
+
+```text
+FOCUSED: Set-Location backend; uv run pytest tests/test_business_understanding_node.py tests/test_chat_graph.py tests/test_chat_graph_routing.py tests/test_chat_graph_clarification.py tests/test_chat_completion_resume.py tests/test_chat_completion_producer.py tests/test_chat_completion_api.py tests/test_chat_completion_disconnect.py tests/test_chat_sse_adapter.py -q -m "not integration"
+Exit: 0
+Observed: 81 passed in 1.74s。
+
+POSTGRES: Set-Location backend; uv run pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_business_understanding_postgres.py -q -m integration
+Exit: 0
+Observed: 5 passed in 1.90s；真实 checkpoint interrupt/resume、三路 Graph 和业务消息持久化均通过。
+
+BACKEND: Set-Location backend; uv run pytest -q -m "not integration"
+Exit: 0
+Observed: 581 passed, 3 skipped, 6 deselected in 5.97s。
+
+FRONTEND: Set-Location frontend; npm test; npm run lint; npm run build
+Exit: 0 / 0 / 0
+Observed: 11/11 passed；ESLint 通过；Next.js 15.5.19 production build 通过。
+
+SPEC: openspec validate add-business-understanding --type change --strict
+Exit: 0
+Observed: Change 'add-business-understanding' is valid。
+
+DIFF: git diff --check
+Exit: 0
+Observed: 无 whitespace error。
+```
+
+- [x] **Step 12.6: Update implementation evidence, commit, and run fresh review**
+
+```text
+FRESH REVIEW: 重新审查 Task 12 的完整生产、测试、OpenSpec 与实现文档 diff。
+Observed: 无 Critical/Important/Minor；无残留外部 route 函数，Command update/goto、compiled topology、interrupt/resume、checkpoint 和终态持久化语义一致。
+
+FINAL COMMIT: fix(chat): route graph with node commands
+```
+
+---
+
 ## Final TDD Compliance Gate
 
 以下项目全部有证据后，才可把 change 标记为 implemented：

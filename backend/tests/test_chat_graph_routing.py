@@ -4,11 +4,17 @@ from pathlib import Path
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.runtime import Runtime
+from langgraph.types import Command
 
 from app.domains.chat.graph.business_understanding import (
     BusinessIntent,
     BusinessRoute,
     BusinessUnderstandingResult,
+)
+from app.domains.chat.graph.context import ChatRuntimeContext
+from app.domains.chat.graph.nodes.business_understanding import (
+    business_understanding_node,
 )
 from chat_graph_test_support import FakeSequentialChatModel
 
@@ -35,19 +41,30 @@ def make_result(route: BusinessRoute) -> BusinessUnderstandingResult:
         (BusinessRoute.CLARIFY, "clarify"),
     ],
 )
-def test_route_business_understanding_maps_each_route_to_one_node(
+@pytest.mark.asyncio
+async def test_business_understanding_command_maps_each_route_to_one_node(
     route: BusinessRoute, expected_node: str
 ):
-    from app.domains.chat.graph.routing import route_business_understanding
+    result = make_result(route)
+    model = FakeSequentialChatModel([result], ordinary_response=None)
 
-    assert route_business_understanding({"business_understanding": make_result(route)}) == expected_node
+    command = await business_understanding_node(
+        {"messages": [HumanMessage(content="test")]},
+        Runtime(context=ChatRuntimeContext(model=model)),
+    )
+
+    assert isinstance(command, Command)
+    assert command.update == {"business_understanding": result}
+    assert command.goto == expected_node
 
 
-def test_route_business_understanding_requires_classification_result():
-    from app.domains.chat.graph.routing import route_business_understanding
+def test_builder_does_not_install_external_business_decision_edges():
+    from app.domains.chat.graph.builder import build_chat_graph
 
-    with pytest.raises(KeyError):
-        route_business_understanding({"messages": []})
+    source = inspect.getsource(build_chat_graph)
+
+    assert "add_conditional_edges" not in source
+    assert "add_edge(CLARIFY_NODE, BUSINESS_UNDERSTANDING_NODE)" not in source
 
 
 def test_business_boundary_node_returns_one_deterministic_ai_message():

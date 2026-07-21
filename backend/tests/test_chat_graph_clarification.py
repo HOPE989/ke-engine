@@ -31,6 +31,23 @@ def make_business_result() -> BusinessUnderstandingResult:
     )
 
 
+def test_clarify_resume_returns_command_to_business_understanding(monkeypatch):
+    from app.domains.chat.graph.nodes import clarify as clarify_module
+
+    monkeypatch.setattr(clarify_module, "interrupt", lambda payload: " YD2026001 ")
+
+    command = clarify_module.clarify_node(
+        {"messages": [], "business_understanding": make_clarify_result()}
+    )
+
+    assert isinstance(command, Command)
+    assert command.goto == "business_understanding"
+    assert [message.content for message in command.update["messages"]] == [
+        "请提供运单号",
+        "YD2026001",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_clarify_route_suspends_with_typed_payload():
     from app.domains.chat.graph.builder import build_chat_graph

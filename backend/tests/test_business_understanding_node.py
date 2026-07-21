@@ -4,6 +4,7 @@ import sys
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
+from langgraph.types import Command
 
 from app.domains.chat.graph.business_understanding import BusinessUnderstandingResult
 from app.domains.chat.graph.context import ChatRuntimeContext
@@ -59,13 +60,15 @@ async def test_business_understanding_node_uses_injected_structured_model_and_fu
         HumanMessage(content="查询当前状态"),
     ]
 
-    update = await business_understanding_node(
+    command = await business_understanding_node(
         {"messages": history}, Runtime(context=ChatRuntimeContext(model=model))
     )
 
     assert model.schemas == [BusinessUnderstandingResult]
     assert runnable.calls[0][1:] == history
-    assert update == {"business_understanding": result}
+    assert isinstance(command, Command)
+    assert command.update == {"business_understanding": result}
+    assert command.goto == "business_boundary"
 
 
 @pytest.mark.asyncio

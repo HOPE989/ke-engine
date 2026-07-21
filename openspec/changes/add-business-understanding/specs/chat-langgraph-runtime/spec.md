@@ -20,6 +20,18 @@ The system SHALL define the Business Understanding Chat Graph as a `StateGraph` 
 - **AND** after resume it SHALL add the clarification question and user response to message state
 - **AND** it SHALL route back to `business_understanding` for re-evaluation
 
+#### Scenario: Decision nodes own execution transfer
+- **WHEN** `business_understanding` produces a valid structured result
+- **THEN** that node SHALL return LangGraph `Command(update=..., goto=...)`
+- **AND** the Command update SHALL persist the result in `business_understanding` state
+- **AND** the Command destination SHALL be exactly the node selected by `BUSINESS`, `NON_BUSINESS`, or `CLARIFY`
+- **AND** the Graph builder MUST NOT install a separate conditional-edge router for that decision
+
+#### Scenario: Resumed clarification owns its return transfer
+- **WHEN** the clarification node resumes with valid non-blank content
+- **THEN** it SHALL return LangGraph `Command(update=..., goto="business_understanding")`
+- **AND** the Graph builder MUST NOT install a static clarification-to-understanding edge
+
 #### Scenario: Message updates use LangGraph message semantics
 - **WHEN** an answer node or resumed clarification returns messages
 - **THEN** the Graph SHALL merge them through `MessagesState` message reduction semantics

@@ -100,7 +100,7 @@ Alternative considered:
 
 - Flatten every route, intent, and entity into top-level state fields: rejected because it creates a wide state contract and makes atomic validation harder.
 
-### 5. Compile an explicit four-node topology
+### 5. Compile fixed nodes and let decision nodes return Command(goto)
 
 The stable topology is:
 
@@ -117,12 +117,15 @@ business_understanding
 
 - `llm` remains the existing general-answer node.
 - `business_boundary` returns a deterministic development-stage AI message and MUST NOT invoke the model, RAG, or SQL. This keeps the current completion/persistence contract valid while proving that BUSINESS reached its intended boundary.
-- `clarify` calls LangGraph `interrupt` with a typed payload containing the question. After resume it returns both the assistant clarification question and the resumed USER answer as message updates; the static edge then returns to `business_understanding`.
+- `business_understanding` returns one `Command(update={"business_understanding": result}, goto=target)` whose typed destination is `llm`, `business_boundary`, or `clarify`. The node that owns the structured decision therefore also owns the execution transfer.
+- `clarify` calls LangGraph `interrupt` with a typed payload containing the question. After resume it returns one `Command(update={"messages": [...]}, goto="business_understanding")`, atomically adding the assistant clarification question and resumed USER answer before re-evaluation.
+- The builder declares the fixed node set plus `START -> business_understanding`, `llm -> END`, and `business_boundary -> END`. It MUST NOT install a separate `add_conditional_edges` router for Business Understanding or a static `clarify -> business_understanding` edge. Fixed edges remain appropriate for transitions that contain no runtime decision.
 
 The development-stage business message is intentionally temporary and is replaced when the next business-answer change connects RAG.
 
 Alternatives considered:
 
+- Keep `route_business_understanding(state)` plus `add_conditional_edges`: rejected because it splits one decision between the classifier node and an external router, and contradicts the DeerFlow-inspired decision that execution transfer is expressed by the responsible node's `Command(goto)`.
 - Route BUSINESS directly to END with no assistant message: rejected because the current completion contract requires a durable assistant message before `completed`.
 - Send BUSINESS through the general LLM: rejected because it would produce ungrounded business answers.
 - Simulate clarification as an ordinary answer followed by a new turn: rejected because it does not exercise checkpoint interrupt/resume and loses the explicit pending state.

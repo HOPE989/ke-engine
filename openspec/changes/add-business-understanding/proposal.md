@@ -6,6 +6,7 @@ The current Chat Graph sends every request directly to a general LLM, so it cann
 
 - Add a structured Business Understanding result with `route`, flat business `intent`, railway/coal business `entities`, concise `reasoning`, and an optional `clarification_question`.
 - Route every Chat request to exactly one of `BUSINESS`, `NON_BUSINESS`, or `CLARIFY` without introducing `BusinessDomain` or a `related` boolean.
+- Make routing decisions inside the responsible Graph nodes with LangGraph `Command(update=..., goto=...)`, following the DeerFlow control pattern; fixed non-decision transitions remain static edges.
 - Define the V1 business intents as `POLICY_RULE_QA`, `TRANSPORT_OPERATION_QA`, `COAL_SALES_QA`, `PROFESSIONAL_KNOWLEDGE_QA`, `BUSINESS_DATA_QUERY`, and `OTHER_BUSINESS`.
 - Keep NON_BUSINESS requests on the existing general-model answer path.
 - Suspend CLARIFY requests with LangGraph interrupt, persist and stream one clarification question, then resume the same checkpoint when the user supplies the next message.
@@ -22,7 +23,7 @@ The current Chat Graph sends every request directly to a general LLM, so it cann
 
 ### Modified Capabilities
 
-- `chat-langgraph-runtime`: Replace the single `START -> llm -> END` topology with a Business Understanding entry point, conditional branches, and resumable clarification state.
+- `chat-langgraph-runtime`: Replace the single `START -> llm -> END` topology with a Business Understanding entry point, node-owned `Command(goto)` branches, and resumable clarification state.
 - `chat-streaming-completion`: Define the public SSE and persistence behavior for an intentional clarification interrupt and its terminal event.
 - `chat-conversation-api`: Define how the next owned-conversation completion resumes a pending clarification checkpoint while keeping the public input shape server-controlled.
 
