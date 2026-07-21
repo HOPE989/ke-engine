@@ -4,7 +4,7 @@
 > 文档性质：讨论纪要、思路复盘和阶段性结论，不是正式技术规格，也不是实施计划。  
 > 记录目的：保留本轮关于 LLMentor know-engine、DeerFlow 1.x、ke-engine 和后续 Agent 项目之间关系的完整思考过程，避免以后只记得结论，却忘记结论产生的背景、争议和边界。
 >
-> 阅读提示：第 1～15 节记录第一轮围绕 AUTO/DEEP 和固定 DeepSearch 子图的推演；第 16 节以后记录第二轮讨论形成的修正版结论。两者冲突时，以第 16 节以后的结论为准。旧结论仍保留，用于说明方案为何发生变化。
+> 阅读提示：第 1～15 节记录第一轮围绕 AUTO/DEEP 和固定 DeepSearch 子图的推演；第 16～27 节记录第二轮讨论形成的修正版结论；第 28～33 节记录第三轮围绕 Business Understanding 和铁路业务意图体系的探索；第 34 节记录第四轮纠偏后的当前实施基线。旧结论仍保留，用于说明方案为何发生变化。发生冲突时，以第 34 节为准。
 
 ## 1. 这次讨论究竟在解决什么问题
 
@@ -1229,3 +1229,347 @@ ke-engine：固定业务拓扑中的 Agentic RAG
 8. SSE 事件类型、顺序和失败语义；
 9. 检索、回答、多轮理解和工具调用评测集；
 10. 哪些能力继续明确留到后续 Agent 项目。
+
+## 28. 第三轮讨论：为什么先做 Business Understanding
+
+在继续讨论开发顺序时，方向进一步收敛为：先建立 Business Understanding 节点，再向后连接 RAG、SQL Tool 和受限 ReAct。
+
+最初设想的最小拓扑为：
+
+```text
+START
+  ↓
+Business Understanding
+  ├── NON_BUSINESS
+  ├── CLARIFY → interrupt / resume
+  └── BUSINESS → RAG（后续实现）
+```
+
+这一阶段的目标不是一次性完成业务回答闭环，而是先验证三个基础能力：
+
+1. 能否结合会话上下文识别用户意图；
+2. 能否把请求稳定路由到 `NON_BUSINESS`、`CLARIFY` 和 `BUSINESS`；
+3. 能否为后续不同业务回答 Prompt、RAG 和结构化查询保留明确入口。
+
+当时对实现范围的设想是：
+
+- `BUSINESS` 分支暂时只需要被正确识别和路由，不要求执行 RAG，也不要求生成业务答案；
+- `NON_BUSINESS` 可以直接使用普通对话 Prompt 回答；
+- `CLARIFY` 可以借助 LangGraph 的 interrupt/resume 完成可恢复澄清；
+- 当前系统尚未面向真实用户，可以接受业务分支暂时停在图中的稳定边界。
+
+这个顺序的价值在于先把语义入口和图路由立住，但它只是讨论中的阶段划分，不表示本轮已经授权实现。
+
+## 29. 对 know-engine 意图机制的重新确认
+
+进一步检查 know-engine 后，确认它当前的意图识别并没有建立独立的 `BusinessDomain` 层，也没有试图建立通用领域本体。其主要作用是：
+
+```text
+会话历史 + 当前问题
+  ↓
+IntentRecognitionService
+  ↓
+related / intent / entities / reasoning
+  ↓
+根据 intent 选择不同的专业回答 Prompt
+```
+
+其中：
+
+- `related` 用于判断是否属于目标业务范围；
+- `intent` 是扁平的业务意图枚举；
+- `entities` 提取当前业务链路需要的关键实体；
+- `reasoning` 用于记录简短的判定依据，不承担业务执行；
+- 下游最直接的消费方式，是依据不同 `intent` 选择不同回答 Prompt。
+
+因此，ke-engine 当前没有必要为了“体系完整”增加一个业务上暂时没有消费者的 `BusinessDomain`。如果领域信息既不改变 Prompt，也不改变检索过滤、工具选择、权限或数据口径，那么它只是额外分类成本。
+
+由此形成的原则是：
+
+> 是否拆出一个意图，不取决于知识库目录里是否存在一个分类，而取决于它是否需要不同的回答策略、Prompt、工具或业务约束。
+
+## 30. 业务材料带来的场景修正
+
+### 30.1 ADS 表反映的是业务查询对象
+
+讨论中查看了 `ADS数据处理情况.xlsx`。表结构覆盖铁路、港口、电力、航运、化工、煤炭等板块，核心数据主题包括：
+
+- 计划与完成量；
+- 库存与运行状态；
+- 历史、实际和模拟版本；
+- 同比、环比和执行偏差；
+- 车站、区段、港口、船舶、列车和煤种；
+- 异常、预警和业务统计。
+
+这说明结构化数据侧的主要问题并不只是“查订单”，而是围绕计划、执行、运输单据、状态和分析指标展开。
+
+### 30.2 知识库目录反映的是知识组织方式
+
+知识库截图显示，文档大体分为两组。
+
+“应知应会”包括：
+
+- 政策法规；
+- 调度规程；
+- 煤炭购销；
+- 产业协调；
+- 智慧调度；
+- 应急监测；
+- 煤炭数质量管理；
+- 集团、板块和区域产业手册；
+- 购销业务；
+- 行业规章；
+- 公文写作、人工智能和其他知识。
+
+“专业知识”包括：
+
+- 煤炭及井工矿、露天矿、煤炭销售；
+- 铁路；
+- 港口；
+- 航运；
+- 电力及火电、水电、风电、光伏；
+- 化工及煤制油、煤制烯烃、煤焦化。
+
+这些分类更适合作为文档元数据、知识库导航和 RAG 检索过滤条件，不能直接等同于对话意图。比如“铁路”是知识领域，但“查询某列车的运行计划”和“解释铁路调度规程”需要的是两种不同回答方式。
+
+### 30.3 铁路业务中的“订单类对象”有自己的语言
+
+讨论随后补充：铁路相关业务并不总使用通用的“订单”一词，而是使用更具体的业务对象：
+
+- 运行计划；
+- 编组；
+- 货单；
+- 运单；
+- 货票。
+
+这项补充修正了早先仅从 ADS 表名推断业务对象的局限。迁移 know-engine 时，不能机械地把汽车领域的 `order_id` 替换为一个笼统的 `order_id`，而应尊重铁路运输领域真实存在的单据、计划和标识。
+
+## 31. 曾讨论过的细粒度意图候选体系
+
+基于文档知识、ADS 数据和铁路业务术语，讨论中形成过一组可演进的候选意图：
+
+| 候选意图 | 主要问题 | 可能的回答或执行方式 |
+|---|---|---|
+| `POLICY_RULE_QA` | 政策、法规、调度规程、行业规章 | 规则类 Prompt + 文档 RAG |
+| `BUSINESS_KNOWLEDGE_QA` | 煤炭购销、运输流程、单据规则、产业协调 | 业务知识 Prompt + 文档 RAG |
+| `PROFESSIONAL_KNOWLEDGE_QA` | 煤炭、铁路、港口、航运、电力、化工专业知识 | 专业知识 Prompt + 文档 RAG |
+| `PLAN_OPERATION_QUERY` | 运行计划、编组、装车、调运、库存和运行状态 | 结构化查询 + 口径化回答 |
+| `FREIGHT_DOCUMENT_QUERY` | 查询具体货单、运单和货票 | 按单据标识查询结构化数据 |
+| `BUSINESS_ANALYSIS` | 计划完成率、运量、单据量、同比环比、模拟和历史比较 | 聚合查询 + 分析 Prompt |
+| `EMERGENCY_EXCEPTION_HANDLING` | 延误、积压、编组错误、数质量偏差、单据异常和应急处置 | 异常诊断 + 规则/数据联合证据 |
+| `OTHER_BUSINESS` | 已确认属于业务，但尚无更合适分类 | 业务兜底 Prompt |
+| `GENERAL_CHAT` | 闲聊或通用非业务问答 | 普通对话 Prompt |
+
+这套候选体系的关键不是名词数量，而是按照“用户想做什么”分类，而不是按照“问题属于哪个产业板块”分类。
+
+同一个业务对象可以因为用户动作不同而落入不同意图：
+
+| 用户问题 | 候选意图 |
+|---|---|
+| 运单应该包含哪些信息？ | `BUSINESS_KNOWLEDGE_QA` |
+| 查询运单 YD2026001 | `FREIGHT_DOCUMENT_QUERY` |
+| 统计本月各客户运单量 | `BUSINESS_ANALYSIS` |
+| 这张运单为什么一直没有到站？ | `EMERGENCY_EXCEPTION_HANDLING` |
+
+讨论中还列出过一组可能的实体：
+
+```text
+operation_plan_no
+plan_type
+train_no
+formation_no
+cargo_order_no
+waybill_no
+freight_ticket_no
+wagon_no
+consignor
+consignee
+customer
+supplier
+cargo_name
+coal_type
+loading_station
+departure_station
+arrival_station
+railway_section
+port
+time_range
+plan_date
+data_version
+exception_description
+```
+
+其中 `data_version` 特别重要，因为 ADS 数据中存在历史、实际和模拟等不同数据版本；用户未说明版本时，可能导致查询口径不同。
+
+## 32. 对候选体系的反思
+
+这套细粒度体系能够较完整地描述未来业务，但在当前阶段存在三个问题。
+
+第一，它混入了未来执行能力。`PLAN_OPERATION_QUERY`、`FREIGHT_DOCUMENT_QUERY` 和 `BUSINESS_ANALYSIS` 的真正价值，要等 SQL Tool、数据口径和权限体系存在后才能体现。当前仅做 Prompt 选择时，提前拆分的收益有限。
+
+第二，它可能把知识目录、检索过滤、业务对象和对话意图揉成一个枚举。知识属于哪个板块、需要检索哪类文档、用户要执行什么动作，本质上是不同维度，不应为了一个看似完整的枚举强行合并。
+
+第三，意图粒度必须由下游消费者倒推。如果两个意图最终使用相同 Prompt、相同检索策略和相同工具，那么暂时拆成两个枚举只会增加分类歧义和评测成本。
+
+因此，这组候选意图适合作为未来演进清单和测试语料组织参考，不适合作为当前必须落地的 V1 枚举。
+
+## 33. 第三轮当前决定：记录探索，实施继续对齐 know-engine
+
+本轮最终决定是：
+
+1. 将上述思路、材料、对话演进和候选体系完整记录下来；
+2. 本轮不据此修改应用代码，不创建实现，不把候选意图写入正式规格；
+3. 当前实现仍以 know-engine 的实际意图识别机制为基线；
+4. 保持“扁平业务意图 + 实体提取 + 根据意图选择不同 Prompt”的核心方式；
+5. 暂不引入 `BusinessDomain`，也不一次性实现上述全部细粒度意图；
+6. 铁路运输场景的真实术语和实体会在迁移时做必要适配，但具体字段、枚举和 Prompt 应以实现前再次核对 know-engine 代码及当前数据为准；
+7. `NON_BUSINESS / CLARIFY / BUSINESS` 三路控制设想继续保留为图演进方向，但不因本纪要而自动进入本次开发范围；
+8. 当不同问题确实需要不同 Prompt、检索过滤、SQL 查询、权限或回答口径时，再从候选体系中逐步增加意图。
+
+当前可以用下面这张图概括“现在实施”和“未来演进”的边界：
+
+```text
+当前实现基线
+────────────────────────────────────────
+know-engine 风格的单层意图识别
+  ├── 业务相关性判断
+  ├── 扁平 intent
+  ├── 关键 entities
+  └── intent → 专业回答 Prompt
+
+                 │ 真实需求与评测驱动
+                 ▼
+
+未来可选演进
+────────────────────────────────────────
+NON_BUSINESS / CLARIFY / BUSINESS 图路由
+  ├── 文档知识问答细分
+  ├── 运行计划与运输单据查询
+  ├── 业务统计分析
+  └── 异常与应急处理
+```
+
+第三轮的一句话结论是：
+
+> 先忠实迁移 know-engine 已经验证过的意图识别和 Prompt 分流机制；铁路运输、运行计划、编组、货单、运单、货票等场景化意图作为演进储备保留，等真实下游能力和评测证明需要时再逐步加入。
+
+## 34. 第四轮纠偏：功能复刻、场景迁移与 route 协议升级
+
+第三轮结论中存在一处需要纠正的混淆：将“以 know-engine 为功能基线”错误地等同于“复制 know-engine 的全部输出字段”，从而把已经决定舍弃的 `related` 又带回了 ke-engine。
+
+重新核对后，最终边界如下。
+
+### 34.1 项目目标
+
+ke-engine 是一个面向面试展示的企业 RAG 场景迁移与工程化重构项目：
+
+- 功能上参考 know-engine 已验证的企业 RAG 业务闭环；
+- 场景上迁移到铁路运输、煤炭运输和销售业务；
+- 控制流使用当前 ke-engine 的 Python、LangGraph、Checkpoint 和 SSE 运行时；
+- 只选择少量文档和一两个结构化查询场景形成纵向闭环；
+- 不建设完整铁路调度系统，也不接入全部 ADS 表。
+
+### 34.2 复刻与升级的边界
+
+从 know-engine 保留：
+
+- 单次模型调用完成扁平意图分类和业务实体提取；
+- 会话历史参与意图识别；
+- 根据不同 `intent` 选择专业回答 Prompt；
+- Query Rewrite、检索路由、多路检索、聚合和 Rerank 的功能链路；
+- 通过 bad case、Few-shot 和标注数据集迭代 Prompt。
+
+不直接复制：
+
+- 汽车领域意图和实体；
+- `related` 布尔硬门控；
+- 巨型 Application Service；
+- 固定消息窗口；
+- 字符串事件协议；
+- 全量业务表和完整铁路领域本体。
+
+其中，`related` 仍可以出现在本文对 know-engine 历史实现的描述中，但不属于 ke-engine 的新输出协议。
+
+### 34.3 Business Understanding 的当前输出协议
+
+ke-engine 使用 `route` 直接表达 Graph 控制决策：
+
+~~~json
+{
+  "reasoning": "用户提供了具体运单号并查询到站状态",
+  "route": "BUSINESS",
+  "intent": "BUSINESS_DATA_QUERY",
+  "entities": {
+    "document_type": "运单",
+    "document_no": "YD2026001",
+    "time_range": null,
+    "data_version": null
+  },
+  "clarification_question": null
+}
+~~~
+
+字段职责为：
+
+| 字段 | 职责 |
+|---|---|
+| `route` | 决定 Graph 下一步进入 `BUSINESS`、`NON_BUSINESS` 或 `CLARIFY` |
+| `intent` | 决定业务问题使用的专业 Prompt 或未来工具 |
+| `entities` | 提供检索和结构化查询参数 |
+| `reasoning` | 记录简短、可审计的判定依据，不输出详细思维链 |
+| `clarification_question` | 在信息不足时生成单个明确的澄清问题 |
+
+约束：
+
+- `BUSINESS` 时 `intent` 必填；
+- `NON_BUSINESS` 时 `intent` 为 `null`；
+- `CLARIFY` 时 `clarification_question` 必填；
+- 不增加 `BusinessDomain`；
+- 暂不增加 `confidence` 和阈值路由；
+- 知识库分类作为 RAG Metadata，不直接等同于对话意图。
+
+### 34.4 V1 扁平业务意图
+
+V1 只保留能够对应专业 Prompt 或明确未来执行方式的最小意图：
+
+~~~text
+POLICY_RULE_QA
+TRANSPORT_OPERATION_QA
+COAL_SALES_QA
+PROFESSIONAL_KNOWLEDGE_QA
+BUSINESS_DATA_QUERY
+OTHER_BUSINESS
+~~~
+
+`GENERAL_CHAT` 不再作为业务意图；非业务请求由 `route=NON_BUSINESS` 表达。
+
+运行计划查询、运输单据查询、业务分析和异常处理等细粒度候选，等出现独立 Prompt、工具或数据口径后再拆分。
+
+### 34.5 第一项正式变更范围
+
+第一项变更只实现 Business Understanding：
+
+~~~text
+START
+  ↓
+Business Understanding
+  ├── NON_BUSINESS → 普通对话 → END
+  ├── CLARIFY → interrupt → 用户补充 → resume
+  └── BUSINESS → 暂时结束，后续连接 RAG
+~~~
+
+变更包括：
+
+1. 定义 `BusinessRoute`、V1 业务意图和最小实体模型；
+2. 编写铁路运输与煤炭经营场景的结构化识别 Prompt；
+3. 将识别结果写入 Chat Graph State；
+4. 增加三路条件路由；
+5. 保留现有模型作为 NON_BUSINESS 回答节点；
+6. BUSINESS 只验证识别和路由，不执行 RAG；
+7. CLARIFY 实现端到端 interrupt/resume，包括服务层恢复命令；
+8. 建立单轮、多轮、边界、实体和结构化输出测试；
+9. 保证现有 Checkpoint、SSE 和消息持久化语义不被破坏。
+
+### 34.6 当前一句话结论
+
+> ke-engine 复刻 know-engine 的企业 RAG 功能链路和 Prompt 分流思想，使用真实但克制的铁路煤炭场景完成迁移，并将 `related` 硬门控升级为 `BUSINESS / NON_BUSINESS / CLARIFY` 三态 `route`；第一项正式变更只完成 Business Understanding，业务 RAG 和结构化查询后续逐步接入。
