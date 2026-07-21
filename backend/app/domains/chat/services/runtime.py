@@ -67,7 +67,7 @@ async def resolve_graph_input(
     """把普通新轮次与唯一受支持的澄清恢复严格分流。"""
 
     snapshot = await graph.aget_state(config)
-    if not snapshot.tasks:
+    if snapshot.next == () and snapshot.tasks == ():
         return {"messages": [HumanMessage(content=content)]}
     if snapshot.next != (CLARIFY_NODE,) or len(snapshot.tasks) != 1:
         raise ValueError("unsupported pending graph state")

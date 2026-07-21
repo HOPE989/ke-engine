@@ -202,6 +202,14 @@ async def test_pending_clarification_resumes_with_content_on_same_thread():
     [
         make_snapshot(
             next_nodes=(CLARIFY_NODE,),
+            tasks=(),
+        ),
+        make_snapshot(
+            next_nodes=("unknown",),
+            tasks=(),
+        ),
+        make_snapshot(
+            next_nodes=(CLARIFY_NODE,),
             tasks=(make_task(name="unknown"),),
         ),
         make_snapshot(
@@ -266,6 +274,8 @@ async def test_pending_clarification_resumes_with_content_on_same_thread():
         ),
     ],
     ids=[
+        "clarify_next_without_tasks",
+        "unknown_next_without_tasks",
         "unknown-task",
         "multiple-tasks",
         "no-interrupt",
