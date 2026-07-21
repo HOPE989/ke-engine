@@ -24,11 +24,11 @@
 
 ## 4. Business-understanding Dataset and scoring
 
-- [ ] 4.1 Map all 18 repository cases to stable Langfuse Dataset item IDs and payloads
-- [ ] 4.2 Reconstruct EvaluationCase from Langfuse inputs and reuse the existing five-dimension scorer
-- [ ] 4.3 Convert the five numerator/denominator results to numeric Langfuse Evaluations with explanatory details
-- [ ] 4.4 Execute the real business-understanding node from each Dataset item using complete LangChain message history
-- [ ] 4.5 Add offline mapping, scoring and real-node task tests with fake model and SDK objects
+- [x] 4.1 Map all 18 repository cases to stable Langfuse Dataset item IDs and payloads
+- [x] 4.2 Reconstruct EvaluationCase from Langfuse inputs and reuse the existing five-dimension scorer
+- [x] 4.3 Convert the five numerator/denominator results to numeric Langfuse Evaluations with explanatory details
+- [x] 4.4 Execute the real business-understanding node from each Dataset item using complete LangChain message history
+- [x] 4.5 Add offline mapping, scoring and real-node task tests with fake model and SDK objects
 
 ## 5. Live Experiment command
 
