@@ -30,6 +30,7 @@ mineru_timeout_seconds: 45
 redis_url: redis://redis.example:6379/3
 kafka_bootstrap_servers: kafka.example:9092
 document_convert_lock_expire_seconds: 180
+chat_completion_lock_expire_seconds: 240
 snowflake_worker_id: 7
 openai_base_url: https://openai.example.com/v1
 openai_model: test-model
@@ -67,6 +68,7 @@ def test_document_settings_load_from_env_and_config_yaml(tmp_path, monkeypatch):
     assert settings.redis_url == "redis://redis.example:6379/3"
     assert settings.kafka_bootstrap_servers == "kafka.example:9092"
     assert settings.document_convert_lock_expire_seconds == 180
+    assert settings.chat_completion_lock_expire_seconds == 240
     assert settings.snowflake_worker_id == 7
     assert settings.openai_api_key == "openai-key"
     assert settings.openai_base_url == "https://openai.example.com/v1"
@@ -113,6 +115,7 @@ def test_env_example_documents_user_required_and_secret_configuration_names():
         "REDIS_URL",
         "KAFKA_BOOTSTRAP_SERVERS",
         "DOCUMENT_CONVERT_LOCK_EXPIRE_SECONDS",
+        "CHAT_COMPLETION_LOCK_EXPIRE_SECONDS",
         "SNOWFLAKE_WORKER_ID",
         "OPENAI_BASE_URL",
         "OPENAI_MODEL",
@@ -141,6 +144,7 @@ def test_config_yaml_documents_non_secret_runtime_defaults():
         "redis_url",
         "kafka_bootstrap_servers",
         "document_convert_lock_expire_seconds",
+        "chat_completion_lock_expire_seconds",
         "snowflake_worker_id",
         "openai_base_url",
         "openai_model",
@@ -215,6 +219,7 @@ def test_settings_document_startup_and_request_time_boundaries():
         "redis_url",
         "kafka_bootstrap_servers",
         "document_convert_lock_expire_seconds",
+        "chat_completion_lock_expire_seconds",
         "snowflake_worker_id",
         "elasticsearch_url",
         "elasticsearch_index",

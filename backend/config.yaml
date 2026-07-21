@@ -16,6 +16,7 @@ mineru_timeout_seconds: 60
 redis_url: redis://127.0.0.1:6379/0
 kafka_bootstrap_servers: 127.0.0.1:9092
 document_convert_lock_expire_seconds: 120
+chat_completion_lock_expire_seconds: 120
 snowflake_worker_id: 1
 openai_base_url:
 openai_model: gpt-4o-mini

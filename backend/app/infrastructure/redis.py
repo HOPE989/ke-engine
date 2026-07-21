@@ -12,6 +12,22 @@ def create_redis_client(redis_url: str) -> redis.Redis:
     return redis.Redis.from_url(redis_url)
 
 
+def chat_completion_lock(
+    *,
+    redis_client: Any,
+    conversation_id: int,
+    expire_seconds: int,
+):
+    """创建覆盖整次 Chat completion 的 conversation 级锁。"""
+
+    return redis_lock.Lock(
+        redis_client,
+        name=f"chat:conversation:{conversation_id}:completion",
+        expire=expire_seconds,
+        auto_renewal=True,
+    )
+
+
 def document_conversion_lock(
     *,
     redis_client: Any,

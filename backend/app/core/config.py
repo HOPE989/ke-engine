@@ -118,6 +118,15 @@ class Settings(BaseSettings):
         validation_alias="DOCUMENT_CONVERT_LOCK_EXPIRE_SECONDS",
         description="startup-only: document conversion Redis lock expiry is fixed for workers.",
     )
+    chat_completion_lock_expire_seconds: int = Field(
+        default=120,
+        gt=0,
+        validation_alias="CHAT_COMPLETION_LOCK_EXPIRE_SECONDS",
+        description=(
+            "startup-only: crash-recovery expiry for the auto-renewed Chat "
+            "completion lock."
+        ),
+    )
     snowflake_worker_id: int = Field(
         default=1,
         validation_alias="SNOWFLAKE_WORKER_ID",
@@ -198,6 +207,7 @@ STARTUP_ONLY_SETTINGS = {
     "redis_url",
     "kafka_bootstrap_servers",
     "document_convert_lock_expire_seconds",
+    "chat_completion_lock_expire_seconds",
     "snowflake_worker_id",
     "elasticsearch_url",
     "elasticsearch_index",
