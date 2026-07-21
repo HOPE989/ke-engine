@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+from types import SimpleNamespace
+
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.types import Interrupt, StateSnapshot
 import pytest
@@ -102,6 +105,17 @@ class FakeSessionFactory:
 class FakeIdGenerator:
     def next_id(self):
         return 3001
+
+
+class RecordingTrace:
+    def __init__(self, *, update_error=None):
+        self.update_error = update_error
+        self.updates = []
+
+    def update(self, **kwargs):
+        self.updates.append(kwargs)
+        if self.update_error is not None:
+            raise self.update_error
 
 
 class FailingGraph(FakeGraph):
@@ -294,6 +308,109 @@ async def test_completion_producer_success_persists_before_completed_and_preserv
         "finish_reason": "stop",
     }
     assert all(event != "error" for event, _ in publisher.events)
+
+
+@pytest.mark.asyncio
+async def test_completion_producer_traces_root_callback_input_mode_and_terminal(
+    monkeypatch,
+):
+    from app.domains.chat.services import runtime
+
+    calls = []
+    publisher = FakePublisher(calls)
+    graph = FakeGraph(calls, publisher)
+    session = FakeSession(calls)
+    handler = object()
+    langfuse = SimpleNamespace(handler=handler)
+    trace = RecordingTrace()
+    trace_start = {}
+
+    @contextmanager
+    def fake_completion_trace(resources, **kwargs):
+        assert resources is langfuse
+        trace_start.update(kwargs)
+        yield trace
+
+    monkeypatch.setattr(runtime, "completion_trace", fake_completion_trace)
+    producer = runtime.CompletionProducer(
+        graph=graph,
+        model=SimpleNamespace(model_name="gpt-test"),
+        session_factory=FakeSessionFactory(session),
+        id_generator=FakeIdGenerator(),
+        publisher=publisher,
+        langfuse=langfuse,
+    )
+    turn = AcceptedUserTurn(1001, 2001, "完整原始消息")
+
+    await producer.run(turn=turn, user_id="alice")
+
+    assert trace_start == {
+        "input": {
+            "conversation_id": "1001",
+            "user_message_id": "2001",
+            "content": "完整原始消息",
+        },
+        "session_id": "1001",
+        "user_id": "alice",
+        "metadata": {
+            "conversation_id": "1001",
+            "user_message_id": "2001",
+            "model": "gpt-test",
+        },
+        "tags": ["chat", "langgraph", "source:chat-api"],
+    }
+    assert graph.invocations[0]["config"] == {
+        "configurable": {"thread_id": "1001"},
+        "callbacks": [handler],
+    }
+    assert trace.updates == [
+        {"metadata": {"input_mode": "new"}},
+        {
+            "output": {
+                "status": "completed",
+                "content": "你好",
+                "finish_reason": "stop",
+            }
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_trace_update_failure_does_not_change_completion_error_semantics(monkeypatch):
+    from app.domains.chat.services import runtime
+
+    calls = []
+    publisher = FakePublisher(calls)
+    graph = FailingGraph(calls, publisher)
+    session = FakeSession(calls)
+    langfuse = SimpleNamespace(handler=object())
+    trace = RecordingTrace(update_error=RuntimeError("trace update failed"))
+
+    @contextmanager
+    def fake_completion_trace(resources, **kwargs):
+        yield trace
+
+    monkeypatch.setattr(runtime, "completion_trace", fake_completion_trace)
+    producer = runtime.CompletionProducer(
+        graph=graph,
+        model=SimpleNamespace(model_name="gpt-test"),
+        session_factory=FakeSessionFactory(session),
+        id_generator=FakeIdGenerator(),
+        publisher=publisher,
+        langfuse=langfuse,
+    )
+
+    await producer.run(
+        turn=AcceptedUserTurn(1001, 2001, "hello"),
+        user_id="alice",
+    )
+
+    assert [event for event, _ in publisher.events] == [
+        "metadata",
+        "content_delta",
+        "error",
+    ]
+    assert all(event != "completed" for event, _ in publisher.events)
 
 
 @pytest.mark.asyncio

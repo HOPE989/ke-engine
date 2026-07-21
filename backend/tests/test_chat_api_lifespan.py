@@ -31,6 +31,7 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
     title_model = object()
     saver = object()
     graph = object()
+    langfuse = object()
     class FakeRedis:
         def close(self):
             calls.append("redis_close")
@@ -66,6 +67,7 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
                 "model_create:qwen3.6-flash",
                 "saver_open",
                 "redis_open",
+                "langfuse_open",
                 "build_graph",
             ]
             assert checkpointer is saver
@@ -83,6 +85,14 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
         calls.append("redis_open")
         return redis_client
 
+    def fake_create_langfuse_resources(settings):
+        calls.append("langfuse_open")
+        return langfuse
+
+    async def fake_shutdown_langfuse(resources):
+        assert resources is langfuse
+        calls.append("langfuse_shutdown")
+
     monkeypatch.setattr(deps, "initialize_database_deps", fake_initialize_database_deps)
     monkeypatch.setattr(deps, "create_chat_model", fake_create_chat_model)
     monkeypatch.setattr(deps, "postgres_checkpointer", fake_postgres_checkpointer)
@@ -90,6 +100,18 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
         deps,
         "create_redis_client",
         fake_create_redis_client,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        deps,
+        "create_langfuse_resources",
+        fake_create_langfuse_resources,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        deps,
+        "shutdown_langfuse",
+        fake_shutdown_langfuse,
         raising=False,
     )
     monkeypatch.setattr(
@@ -111,6 +133,7 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
             "model_create:qwen3.6-flash",
             "saver_open",
             "redis_open",
+            "langfuse_open",
             "build_graph",
             "compile_graph",
             "registry_create",
@@ -124,10 +147,12 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
             redis_client=redis_client,
             completion_lock_expire_seconds=120,
             producer_registry=registry,
+            langfuse=langfuse,
         )
 
-    assert calls[-4:] == [
+    assert calls[-5:] == [
         "registry_shutdown",
+        "langfuse_shutdown",
         "redis_close",
         "saver_close",
         "database_close",

@@ -1,4 +1,5 @@
 import json
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessageChunk
@@ -181,6 +182,7 @@ def _app_with_runtime(
     graph=None,
     completion_lock=None,
     producer_registry=None,
+    langfuse=None,
 ):
     app = create_app()
     lock = completion_lock or FakeCompletionLock()
@@ -194,6 +196,7 @@ def _app_with_runtime(
         completion_lock_expire_seconds=120,
         producer_registry=producer_registry
         or CompletionProducerRegistry(shutdown_timeout=1),
+        langfuse=langfuse,
     )
     return app
 
@@ -335,6 +338,44 @@ async def test_completion_metadata_reuses_owned_conversation():
     }
     assert calls.index("transaction_commit") < calls.index("aget_state")
     assert graph.state_configs == [{"configurable": {"thread_id": "42"}}]
+
+
+@pytest.mark.asyncio
+async def test_completion_api_passes_langfuse_callback_to_background_producer(
+    monkeypatch,
+):
+    from app.domains.chat.services import runtime
+
+    @contextmanager
+    def fake_completion_trace(resources, **kwargs):
+        assert resources is langfuse
+        yield None
+
+    monkeypatch.setattr(runtime, "completion_trace", fake_completion_trace)
+    handler = object()
+    langfuse = SimpleNamespace(handler=handler)
+    graph = FakeGraph()
+    session = FakeSession()
+    app = _app_with_runtime(
+        session,
+        [1001, 2001, 3001],
+        graph=graph,
+        langfuse=langfuse,
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/api/v1/chat/completions",
+            headers={"X-Mock-User-Id": "alice"},
+            json={"content": "hello"},
+        )
+
+    assert response.status_code == 200
+    _, config = graph.stream_invocations[0][0][:2]
+    assert config["callbacks"] == [handler]
 
 
 @pytest.mark.asyncio

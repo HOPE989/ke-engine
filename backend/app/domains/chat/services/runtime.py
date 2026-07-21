@@ -46,6 +46,11 @@ from app.domains.chat.graph.routing import CLARIFY_NODE, LLM_NODE
 from app.domains.chat.repositories import MessageRepository
 from app.domains.chat.services.conversation import AcceptedUserTurn
 from app.domains.chat.services.completion_lock import release_completion_lock
+from app.infrastructure.langfuse import (
+    LangfuseResources,
+    completion_trace,
+    safe_update_trace,
+)
 from app.services.chat_api.streaming import (
     project_business_boundary_event,
     project_clarification_interrupt,
@@ -305,12 +310,14 @@ class CompletionProducer:
         session_factory: Any,
         id_generator: Any,
         publisher: Any,
+        langfuse: LangfuseResources | None = None,
     ) -> None:
         self._graph = graph
         self._model = model
         self._session_factory = session_factory
         self._id_generator = id_generator
         self._publisher = publisher
+        self._langfuse = langfuse
 
     async def run(self, *, turn: AcceptedUserTurn, user_id: str) -> None:
         """运行已接受的用户轮次，并发布且仅发布一个终态事件。
@@ -321,6 +328,27 @@ class CompletionProducer:
         正常情况下事件顺序为 ``metadata -> content_delta* -> completed``；失败情况下为
         ``metadata -> content_delta* -> error``。无论成功失败，都只发布一个终态事件。
         """
+
+        with completion_trace(
+            self._langfuse,
+            input={
+                "conversation_id": str(turn.conversation_id),
+                "user_message_id": str(turn.user_message_id),
+                "content": turn.content,
+            },
+            session_id=str(turn.conversation_id),
+            user_id=user_id,
+            metadata={
+                "conversation_id": str(turn.conversation_id),
+                "user_message_id": str(turn.user_message_id),
+                "model": _model_name(self._model),
+            },
+            tags=["chat", "langgraph", "source:chat-api"],
+        ) as trace:
+            await self._run_traced(turn=turn, trace=trace)
+
+    async def _run_traced(self, *, turn: AcceptedUserTurn, trace: Any | None) -> None:
+        """执行原有 completion 语义，并尽力补全根 trace 的输入模式和终态。"""
 
         # 步骤 1：先发布 metadata。此时 USER 消息已经在 Router 前置事务中提交，所以
         # conversation_id 和 user_message_id 都是稳定、可立即交给客户端的业务 ID。
@@ -334,7 +362,7 @@ class CompletionProducer:
 
         try:
             # 步骤 2：消费 Graph 流并在内存中拼接最终回答；每个 delta 同时实时发布。
-            completion = await self._consume_graph_events(turn)
+            completion = await self._consume_graph_events(turn, trace=trace)
             # 步骤 3：完整回答必须先提交业务表。completed 的语义不是“模型流结束”，
             # 而是“模型流结束且 ASSISTANT 消息已经成功落库”。
             assistant_message_id = await self._commit_assistant(turn, completion.content)
@@ -355,8 +383,31 @@ class CompletionProducer:
             )
         # try/except/else 统一汇合到此处，保证业务错误只产生一个终态事件。
         await self._publisher.publish(terminal_event, terminal_payload)
+        if terminal_event == "completed":
+            trace_output = {
+                "status": "completed",
+                "content": completion.content,
+                "finish_reason": completion.finish_reason,
+            }
+            safe_update_trace(trace, output=trace_output)
+        else:
+            safe_update_trace(
+                trace,
+                output={
+                    "status": "error",
+                    "content": None,
+                    "finish_reason": None,
+                },
+                level="ERROR",
+                status_message="Completion failed",
+            )
 
-    async def _consume_graph_events(self, turn: AcceptedUserTurn) -> GraphCompletion:
+    async def _consume_graph_events(
+        self,
+        turn: AcceptedUserTurn,
+        *,
+        trace: Any | None = None,
+    ) -> GraphCompletion:
         """运行指定会话的 Graph，发布公开增量并收集可持久化结果。
 
         Conversation ID 的十进制字符串直接作为 LangGraph ``thread_id``，使同一业务
@@ -367,7 +418,15 @@ class CompletionProducer:
 
         answer_parts: list[str] = []
         config = {"configurable": {"thread_id": str(turn.conversation_id)}}
+        if self._langfuse is not None:
+            config["callbacks"] = [self._langfuse.handler]
         graph_input = await resolve_graph_input(self._graph, config, turn.content)
+        safe_update_trace(
+            trace,
+            metadata={
+                "input_mode": "resume" if isinstance(graph_input, Command) else "new"
+            },
+        )
         # astream_events() 是异步迭代器：Graph 每产生一个事件就进入循环，不必等待整段
         # 回答完成。普通轮次使用 HumanMessage；挂起澄清使用同 thread 的 Command resume。
         async for event in self._graph.astream_events(
@@ -424,3 +483,13 @@ class CompletionProducer:
                     content=answer,
                 )
         return assistant_message_id
+
+
+def _model_name(model: Any) -> str:
+    """尽量取得可读模型名，缺失时使用实现类名。"""
+
+    for attribute in ("model_name", "model"):
+        value = getattr(model, attribute, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return type(model).__name__

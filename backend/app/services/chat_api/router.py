@@ -109,6 +109,7 @@ async def create_completion(
                 session_factory=chat_deps.session_factory,
                 id_generator=chat_deps.id_generator,
                 publisher=publisher,
+                langfuse=chat_deps.langfuse,
             ),
             turn=accepted.turn,
             completion_lock=accepted.lock,

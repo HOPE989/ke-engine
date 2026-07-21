@@ -8,11 +8,11 @@
 
 ## 2. Production Chat tracing
 
-- [ ] 2.1 Create and close optional Langfuse resources in Chat API lifespan after managed producers
-- [ ] 2.2 Pass the optional resource through Chat dependencies and Router to each CompletionProducer
-- [ ] 2.3 Wrap each accepted completion in one root observation with raw input, session, user and model attributes
-- [ ] 2.4 Add the callback only to the Chat Graph invocation and record input mode plus terminal output
-- [ ] 2.5 Prove tracing failures preserve existing success, error, interrupt, disconnect and shutdown semantics
+- [x] 2.1 Create and close optional Langfuse resources in Chat API lifespan after managed producers
+- [x] 2.2 Pass the optional resource through Chat dependencies and Router to each CompletionProducer
+- [x] 2.3 Wrap each accepted completion in one root observation with raw input, session, user and model attributes
+- [x] 2.4 Add the callback only to the Chat Graph invocation and record input mode plus terminal output
+- [x] 2.5 Prove tracing failures preserve existing success, error, interrupt, disconnect and shutdown semantics
 
 ## 3. Thin Studio adapter
 

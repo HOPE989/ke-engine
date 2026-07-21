@@ -15,6 +15,11 @@ from fastapi import FastAPI, HTTPException, Request
 from app.core.config import Settings, validate_chat_startup_settings
 from app.domains.chat.graph import build_chat_graph
 from app.domains.chat.services.title import TITLE_MODEL
+from app.infrastructure.langfuse import (
+    LangfuseResources,
+    create_langfuse_resources,
+    shutdown_langfuse,
+)
 from app.infrastructure.langgraph import postgres_checkpointer
 from app.infrastructure.llm import create_chat_model
 from app.infrastructure.redis import create_redis_client
@@ -73,6 +78,7 @@ class ChatApiDeps:
     redis_client: Any
     completion_lock_expire_seconds: int
     producer_registry: Any
+    langfuse: LangfuseResources | None
 
 
 def get_chat_deps(request: Request) -> ChatApiDeps:
@@ -110,6 +116,12 @@ async def application_lifespan_resources(
         redis_client = create_redis_client(settings.redis_url)
         stack.push_cleanup(redis_client.close)
 
+        # Langfuse 缺少配置或初始化失败时返回 None，业务仍可正常启动。其清理动作
+        # 注册在 Redis 之后、Registry 之前，保证后台 completion 先结束再刷新 trace。
+        langfuse = create_langfuse_resources(settings)
+        if langfuse is not None:
+            stack.push_cleanup(shutdown_langfuse, langfuse)
+
         # 步骤 4：只有 saver 完成 setup 后才编译生产 Graph，确保首次请求即可持久化 state。
         graph = build_chat_graph().compile(checkpointer=saver)
         producer_registry = create_producer_registry()
@@ -125,6 +137,7 @@ async def application_lifespan_resources(
             redis_client=redis_client,
             completion_lock_expire_seconds=settings.chat_completion_lock_expire_seconds,
             producer_registry=producer_registry,
+            langfuse=langfuse,
         )
         stack.push_cleanup(_discard_app_state_attr, application, "chat_deps")
         yield
