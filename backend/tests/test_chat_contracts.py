@@ -1,9 +1,12 @@
 from datetime import UTC, datetime
+from inspect import getsource
 from typing import get_args
 
 import pytest
 from pydantic import ValidationError
 
+import app.contracts.chat
+from app.contracts.chat import CompletionFinishReason
 from app.contracts.chat.http import (
     CompletionRequest,
     ConversationPage,
@@ -12,7 +15,6 @@ from app.contracts.chat.http import (
     MessageSummary,
 )
 from app.contracts.chat.stream import (
-    CompletionFinishReason,
     CompletedPayload,
     ContentDeltaPayload,
     ErrorPayload,
@@ -112,7 +114,9 @@ def test_completed_payload_accepts_only_stop_or_interrupt():
 
 
 def test_completion_finish_reason_alias_is_reused_by_completed_payload():
+    assert "CompletionFinishReason" in app.contracts.chat.__all__
     assert get_args(CompletionFinishReason) == ("stop", "interrupt")
     assert CompletedPayload.model_fields["finish_reason"].annotation == (
         CompletionFinishReason
     )
+    assert "finish_reason: CompletionFinishReason" in getsource(CompletedPayload)
