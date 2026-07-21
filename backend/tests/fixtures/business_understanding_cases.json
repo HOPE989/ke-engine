@@ -1,0 +1,154 @@
+[
+  {
+    "id": "passenger-refund",
+    "category": "public_passenger_negative",
+    "messages": [{"role": "user", "content": "高铁票怎么退票"}],
+    "expected_route": "NON_BUSINESS",
+    "expected_intent": null,
+    "expected_key_entities": {},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "waybill-knowledge",
+    "category": "freight_document_knowledge",
+    "messages": [{"role": "user", "content": "铁路货运运单一般包含哪些信息"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "TRANSPORT_OPERATION_QA",
+    "expected_key_entities": {"document_type": "运单"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "waybill-lookup",
+    "category": "freight_document_lookup",
+    "messages": [{"role": "user", "content": "查一下运单YD2026001现在到哪了"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "BUSINESS_DATA_QUERY",
+    "expected_key_entities": {"document_type": "运单", "document_no": "YD2026001"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "missing-waybill",
+    "category": "focused_clarification",
+    "messages": [{"role": "user", "content": "查一下我的运单"}],
+    "expected_route": "CLARIFY",
+    "expected_intent": "BUSINESS_DATA_QUERY",
+    "expected_key_entities": {"document_type": "运单"},
+    "expected_clarification_contains": "运单号"
+  },
+  {
+    "id": "actual-followup",
+    "category": "multi_turn_ellipsis",
+    "messages": [
+      {"role": "user", "content": "查神木站本月模拟装车计划"},
+      {"role": "assistant", "content": "开发阶段暂不执行业务查询"},
+      {"role": "user", "content": "按实际版呢"}
+    ],
+    "expected_route": "BUSINESS",
+    "expected_intent": "BUSINESS_DATA_QUERY",
+    "expected_key_entities": {"departure_station": "神木站", "time_range": "本月", "data_version": "实际版", "metric_name": "装车计划"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "passenger-schedule",
+    "category": "public_passenger_negative",
+    "messages": [{"role": "user", "content": "北京到上海的高铁客票多少钱"}],
+    "expected_route": "NON_BUSINESS",
+    "expected_intent": null,
+    "expected_key_entities": {},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "freight-bill-knowledge",
+    "category": "freight_document_knowledge",
+    "messages": [{"role": "user", "content": "货票在铁路货运中有什么作用"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "TRANSPORT_OPERATION_QA",
+    "expected_key_entities": {"document_type": "货票"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "freight-bill-lookup",
+    "category": "freight_document_lookup",
+    "messages": [{"role": "user", "content": "查询货票HP2026008的状态"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "BUSINESS_DATA_QUERY",
+    "expected_key_entities": {"document_type": "货票", "document_no": "HP2026008"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "policy-contract",
+    "category": "policy_vs_professional",
+    "messages": [{"role": "user", "content": "煤炭销售合同审批制度有哪些要求"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "POLICY_RULE_QA",
+    "expected_key_entities": {},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "professional-coal-quality",
+    "category": "policy_vs_professional",
+    "messages": [{"role": "user", "content": "煤炭发热量指标是什么意思"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "PROFESSIONAL_KNOWLEDGE_QA",
+    "expected_key_entities": {"metric_name": "发热量"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "transport-formation",
+    "category": "transport_vs_coal_sales",
+    "messages": [{"role": "user", "content": "铁路编组计划的调整流程是什么"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "TRANSPORT_OPERATION_QA",
+    "expected_key_entities": {"metric_name": "编组计划"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "coal-sales-contract",
+    "category": "transport_vs_coal_sales",
+    "messages": [{"role": "user", "content": "煤炭销售合同履约出现异常如何处理"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "COAL_SALES_QA",
+    "expected_key_entities": {"exception_description": "合同履约异常"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "plan-followup",
+    "category": "multi_turn_ellipsis",
+    "messages": [
+      {"role": "user", "content": "查榆林站昨日实际装车数量"},
+      {"role": "assistant", "content": "开发阶段暂不执行业务查询"},
+      {"role": "user", "content": "模拟版也要"}
+    ],
+    "expected_route": "BUSINESS",
+    "expected_intent": "BUSINESS_DATA_QUERY",
+    "expected_key_entities": {"departure_station": "榆林站", "time_range": "昨日", "data_version": "模拟版", "metric_name": "装车数量"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "missing-operation-plan",
+    "category": "focused_clarification",
+    "messages": [{"role": "user", "content": "查一下运行计划"}],
+    "expected_route": "CLARIFY",
+    "expected_intent": "BUSINESS_DATA_QUERY",
+    "expected_key_entities": {"metric_name": "运行计划"},
+    "expected_clarification_contains": "运行计划号"
+  },
+  {
+    "id": "optional-document-entity",
+    "category": "optional_entity_no_clarification",
+    "messages": [{"role": "user", "content": "铁路货运运单的流转流程是什么"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "TRANSPORT_OPERATION_QA",
+    "expected_key_entities": {"document_type": "运单"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "unsupported-schema-request",
+    "category": "unsupported_schema",
+    "messages": [{"role": "user", "content": "查运单YD2026009并额外返回旧版状态字段"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "BUSINESS_DATA_QUERY",
+    "expected_key_entities": {"document_type": "运单", "document_no": "YD2026009"},
+    "expected_clarification_contains": null
+  }
+]
