@@ -1,6 +1,7 @@
 import asyncio
 
 from langchain_core.messages import AIMessageChunk
+from langgraph.types import Interrupt
 import pytest
 
 from app.domains.chat.services.conversation import AcceptedUserTurn
@@ -26,6 +27,39 @@ class GatedGraph:
                 "data": {"chunk": AIMessageChunk(content="second")},
             }
             self.calls.append("graph_complete")
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+
+
+class GatedClarificationGraph:
+    def __init__(self, interrupt_ready, release_interrupt, calls):
+        self.interrupt_ready = interrupt_ready
+        self.release_interrupt = release_interrupt
+        self.calls = calls
+        self.cancelled = False
+
+    async def astream_events(self, *args, **kwargs):
+        try:
+            self.interrupt_ready.set()
+            await self.release_interrupt.wait()
+            self.calls.append("graph_released")
+            yield {
+                "event": "on_chain_stream",
+                "data": {
+                    "chunk": {
+                        "__interrupt__": (
+                            Interrupt(
+                                value={
+                                    "kind": "business_clarification",
+                                    "question": "请提供运单号",
+                                },
+                                id="internal-interrupt-id",
+                            ),
+                        )
+                    }
+                },
+            }
         except asyncio.CancelledError:
             self.cancelled = True
             raise
@@ -111,6 +145,49 @@ async def test_subscriber_disconnect_does_not_cancel_producer_or_queue_later_tok
     assert graph.cancelled is False
     assert calls == ["graph_complete", "assistant_commit"]
     assert session.added[0].content == "firstsecond"
+    assert subscriber.pending_count == pending_at_detach == 0
+    assert registry.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_disconnect_after_metadata_still_persists_clarification_interrupt():
+    from app.domains.chat.services.runtime import (
+        CompletionProducer,
+        CompletionProducerRegistry,
+    )
+
+    calls = []
+    interrupt_ready = asyncio.Event()
+    release_interrupt = asyncio.Event()
+    graph = GatedClarificationGraph(interrupt_ready, release_interrupt, calls)
+    session = FakeSession(calls)
+    registry = CompletionProducerRegistry(shutdown_timeout=1)
+
+    def producer_factory(publisher):
+        return CompletionProducer(
+            graph=graph,
+            model=object(),
+            session_factory=FakeSessionFactory(session),
+            id_generator=FakeIdGenerator(),
+            publisher=publisher,
+        )
+
+    subscriber = registry.start(
+        producer_factory=producer_factory,
+        turn=AcceptedUserTurn(1001, 2001, "查一下我的运单"),
+        user_id="alice",
+    )
+    assert (await subscriber.receive())[0] == "metadata"
+
+    subscriber.detach()
+    await interrupt_ready.wait()
+    pending_at_detach = subscriber.pending_count
+    release_interrupt.set()
+    await registry.shutdown()
+
+    assert graph.cancelled is False
+    assert calls == ["graph_released", "assistant_commit"]
+    assert session.added[0].content == "请提供运单号"
     assert subscriber.pending_count == pending_at_detach == 0
     assert registry.active_count == 0
 

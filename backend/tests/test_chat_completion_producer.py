@@ -1,4 +1,5 @@
 from langchain_core.messages import AIMessageChunk, HumanMessage
+from langgraph.types import Interrupt
 import pytest
 
 from app.domains.chat.services.conversation import AcceptedUserTurn
@@ -106,6 +107,67 @@ class FailingCommitSession(FakeSession):
         return FailingCommitTransaction(self)
 
 
+class ClarificationInterruptGraph(FakeGraph):
+    async def astream_events(self, graph_input, config, *, context, version):
+        assert self.publisher.events[0][0] == "metadata"
+        self.invocations.append(
+            {
+                "input": graph_input,
+                "config": config,
+                "context": context,
+                "version": version,
+            }
+        )
+        self.calls.append("graph_start")
+        yield {
+            "event": "on_chain_stream",
+            "data": {
+                "chunk": {
+                    "__interrupt__": (
+                        Interrupt(
+                            value={
+                                "kind": "business_clarification",
+                                "question": "请提供运单号",
+                            },
+                            id="internal-interrupt-id",
+                        ),
+                    )
+                }
+            },
+        }
+
+
+class UnsupportedInterruptGraph(FakeGraph):
+    def __init__(self, calls, publisher, interrupt_value):
+        super().__init__(calls, publisher)
+        self.interrupt_value = interrupt_value
+
+    async def astream_events(self, graph_input, config, *, context, version):
+        assert self.publisher.events[0][0] == "metadata"
+        self.invocations.append(
+            {
+                "input": graph_input,
+                "config": config,
+                "context": context,
+                "version": version,
+            }
+        )
+        self.calls.append("graph_start")
+        yield {
+            "event": "on_chain_stream",
+            "data": {
+                "chunk": {
+                    "__interrupt__": (
+                        Interrupt(
+                            value=self.interrupt_value,
+                            id="raw-internal-interrupt-id",
+                        ),
+                    )
+                }
+            },
+        }
+
+
 @pytest.mark.asyncio
 async def test_completion_producer_success_persists_before_completed_and_preserves_deltas():
     from app.domains.chat.services.runtime import CompletionProducer
@@ -157,6 +219,83 @@ async def test_completion_producer_success_persists_before_completed_and_preserv
         "finish_reason": "stop",
     }
     assert all(event != "error" for event, _ in publisher.events)
+
+
+@pytest.mark.asyncio
+async def test_clarification_interrupt_persists_before_interrupted_completion():
+    from app.domains.chat.services.runtime import CompletionProducer
+
+    calls = []
+    publisher = FakePublisher(calls)
+    graph = ClarificationInterruptGraph(calls, publisher)
+    session = FakeSession(calls)
+    producer = CompletionProducer(
+        graph=graph,
+        model=object(),
+        session_factory=FakeSessionFactory(session),
+        id_generator=FakeIdGenerator(),
+        publisher=publisher,
+    )
+
+    await producer.run(
+        turn=AcceptedUserTurn(
+            conversation_id=1001,
+            user_message_id=2001,
+            content="查一下我的运单",
+        ),
+        user_id="alice",
+    )
+
+    assert [event for event, _ in publisher.events] == [
+        "metadata",
+        "content_delta",
+        "completed",
+    ]
+    assert publisher.events[1][1].content == "请提供运单号"
+    assert session.added[0].content == "请提供运单号"
+    assert calls.index("publish_content_delta") < calls.index("assistant_commit")
+    assert calls.index("assistant_commit") < calls.index("publish_completed")
+    assert publisher.events[-1][1].finish_reason == "interrupt"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "interrupt_value",
+    [
+        {"kind": "unknown", "question": "raw-question-must-not-leak"},
+        {"kind": "business_clarification", "question": ""},
+    ],
+    ids=["unknown-kind", "empty-question"],
+)
+async def test_unsupported_interrupt_emits_only_safe_error_without_assistant(
+    interrupt_value,
+):
+    from app.domains.chat.services.runtime import CompletionProducer
+
+    calls = []
+    publisher = FakePublisher(calls)
+    graph = UnsupportedInterruptGraph(calls, publisher, interrupt_value)
+    session = FakeSession(calls)
+    producer = CompletionProducer(
+        graph=graph,
+        model=object(),
+        session_factory=FakeSessionFactory(session),
+        id_generator=FakeIdGenerator(),
+        publisher=publisher,
+    )
+
+    await producer.run(
+        turn=AcceptedUserTurn(1001, 2001, "查一下我的运单"),
+        user_id="alice",
+    )
+
+    assert [event for event, _ in publisher.events] == ["metadata", "error"]
+    assert session.added == []
+    assert all(event != "completed" for event, _ in publisher.events)
+    error_json = publisher.events[-1][1].model_dump_json()
+    assert "raw-internal-interrupt-id" not in error_json
+    assert "raw-question-must-not-leak" not in error_json
+    assert "Interrupt" not in error_json
 
 
 @pytest.mark.asyncio

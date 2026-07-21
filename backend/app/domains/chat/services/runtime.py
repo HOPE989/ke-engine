@@ -25,15 +25,33 @@
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from app.contracts.chat.stream import CompletedPayload, ErrorPayload, MetadataPayload
+from app.contracts.chat import (
+    CompletionFinishReason,
+    CompletedPayload,
+    ContentDeltaPayload,
+    ErrorPayload,
+    MetadataPayload,
+)
 from app.domains.chat.graph import ChatRuntimeContext
 from app.domains.chat.repositories import MessageRepository
 from app.domains.chat.services.conversation import AcceptedUserTurn
-from app.services.chat_api.streaming import project_graph_event
+from app.services.chat_api.streaming import (
+    project_clarification_interrupt,
+    project_graph_event,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class GraphCompletion:
+    """Graph 本轮可持久化内容及其成功终止原因。"""
+
+    content: str
+    finish_reason: CompletionFinishReason
 
 
 class _CompletionChannel:
@@ -249,10 +267,10 @@ class CompletionProducer:
 
         try:
             # 步骤 2：消费 Graph 流并在内存中拼接最终回答；每个 delta 同时实时发布。
-            answer = await self._accumulate_answer(turn)
+            completion = await self._consume_graph_events(turn)
             # 步骤 3：完整回答必须先提交业务表。completed 的语义不是“模型流结束”，
             # 而是“模型流结束且 ASSISTANT 消息已经成功落库”。
-            assistant_message_id = await self._commit_assistant(turn, answer)
+            assistant_message_id = await self._commit_assistant(turn, completion.content)
         except Exception:
             # 不把原始异常文本发送给客户端，避免数据库地址、密钥或内部栈信息泄露。
             # 已经发出的 delta 无法收回，但失败时不会保存不完整的 ASSISTANT 消息。
@@ -264,18 +282,23 @@ class CompletionProducer:
             )
         else:
             terminal_event = "completed"
-            terminal_payload = CompletedPayload(assistant_message_id=assistant_message_id)
+            terminal_payload = CompletedPayload(
+                assistant_message_id=assistant_message_id,
+                finish_reason=completion.finish_reason,
+            )
         # try/except/else 统一汇合到此处，保证业务错误只产生一个终态事件。
         await self._publisher.publish(terminal_event, terminal_payload)
 
-    async def _consume_graph_events(self, turn: AcceptedUserTurn):
-        """运行指定会话的 Graph，并只 yield 应用认可的文本增量。
+    async def _consume_graph_events(self, turn: AcceptedUserTurn) -> GraphCompletion:
+        """运行指定会话的 Graph，发布公开增量并收集可持久化结果。
 
         Conversation ID 的十进制字符串直接作为 LangGraph ``thread_id``，使同一业务
         会话的多轮调用稳定落到同一份 checkpoint；原始 LangGraph 事件不会越过本方法
-        泄露给 transport。
+        泄露给 transport。Graph 正常到达 END 时返回普通回答；受支持澄清中断则立即
+        发布公开问题并返回中断结果。
         """
 
+        answer_parts: list[str] = []
         # astream_events() 是异步迭代器：Graph 每产生一个事件就进入循环，不必等待整段
         # 回答完成。HumanMessage 是本轮输入；历史状态由 thread_id 对应的 checkpoint 提供。
         async for event in self._graph.astream_events(
@@ -288,20 +311,19 @@ class CompletionProducer:
             # 增量，并转换成稳定的应用层 payload，避免 transport 依赖 LangGraph 内部格式。
             delta = project_graph_event(event)
             if delta is not None:
-                yield delta
+                answer_parts.append(delta.content)
+                await self._publisher.publish("content_delta", delta)
 
-    async def _accumulate_answer(self, turn: AcceptedUserTurn) -> str:
-        """顺序转发文本增量，同时拼接最终需要持久化的完整回答。
+            clarification = project_clarification_interrupt(event)
+            if clarification is not None:
+                question_delta = ContentDeltaPayload(content=clarification.question)
+                await self._publisher.publish("content_delta", question_delta)
+                return GraphCompletion(
+                    content=clarification.question,
+                    finish_reason="interrupt",
+                )
 
-        实时推送与最终落库使用同一批 delta：每个 delta 先加入 answer_parts，再发布给
-        Subscriber。Graph 正常结束后统一 join，避免在循环中反复拼接字符串。
-        """
-
-        answer_parts: list[str] = []
-        async for delta in self._consume_graph_events(turn):
-            answer_parts.append(delta.content)
-            await self._publisher.publish("content_delta", delta)
-        return "".join(answer_parts)
+        return GraphCompletion(content="".join(answer_parts), finish_reason="stop")
 
     async def _commit_assistant(self, turn: AcceptedUserTurn, answer: str) -> int:
         """在独立业务事务中保存完整 ASSISTANT 消息并返回其 Snowflake ID。
