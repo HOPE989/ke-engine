@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessageChunk
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.domains.chat.graph.routing import LLM_NODE
 from app.domains.chat.services.runtime import CompletionProducerRegistry
 from app.domains.chat.shared.models import Conversation
 from app.services.chat_api.app import create_app
@@ -84,6 +85,7 @@ class FakeGraph:
         yield {
             "event": "on_chat_model_stream",
             "data": {"chunk": AIMessageChunk(content="answer")},
+            "metadata": {"langgraph_node": LLM_NODE},
         }
 
 

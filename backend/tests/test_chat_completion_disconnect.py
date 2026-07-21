@@ -4,6 +4,7 @@ from langchain_core.messages import AIMessageChunk
 from langgraph.types import Interrupt
 import pytest
 
+from app.domains.chat.graph.routing import CLARIFY_NODE, LLM_NODE
 from app.domains.chat.services.conversation import AcceptedUserTurn
 
 
@@ -19,12 +20,14 @@ class GatedGraph:
             yield {
                 "event": "on_chat_model_stream",
                 "data": {"chunk": AIMessageChunk(content="first")},
+                "metadata": {"langgraph_node": LLM_NODE},
             }
             self.first_delta_sent.set()
             await self.continue_running.wait()
             yield {
                 "event": "on_chat_model_stream",
                 "data": {"chunk": AIMessageChunk(content="second")},
+                "metadata": {"langgraph_node": LLM_NODE},
             }
             self.calls.append("graph_complete")
         except asyncio.CancelledError:
@@ -59,6 +62,56 @@ class GatedClarificationGraph:
                         )
                     }
                 },
+                "metadata": {"langgraph_node": CLARIFY_NODE},
+            }
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+
+
+class FullQueueThenClarificationGraph:
+    def __init__(
+        self,
+        blocked_publish_started,
+        publish_resumed,
+        release_interrupt,
+        calls,
+    ):
+        self.blocked_publish_started = blocked_publish_started
+        self.publish_resumed = publish_resumed
+        self.release_interrupt = release_interrupt
+        self.calls = calls
+        self.cancelled = False
+
+    async def astream_events(self, *args, **kwargs):
+        try:
+            for index in range(17):
+                if index == 16:
+                    self.blocked_publish_started.set()
+                yield {
+                    "event": "on_chat_model_stream",
+                    "data": {"chunk": AIMessageChunk(content=str(index))},
+                    "metadata": {"langgraph_node": LLM_NODE},
+                }
+
+            self.publish_resumed.set()
+            await self.release_interrupt.wait()
+            yield {
+                "event": "on_chain_stream",
+                "data": {
+                    "chunk": {
+                        "__interrupt__": (
+                            Interrupt(
+                                value={
+                                    "kind": "business_clarification",
+                                    "question": "请提供运单号",
+                                },
+                                id="internal-interrupt-id",
+                            ),
+                        )
+                    }
+                },
+                "metadata": {"langgraph_node": CLARIFY_NODE},
             }
         except asyncio.CancelledError:
             self.cancelled = True
@@ -189,6 +242,65 @@ async def test_disconnect_after_metadata_still_persists_clarification_interrupt(
     assert calls == ["graph_released", "assistant_commit"]
     assert session.added[0].content == "请提供运单号"
     assert subscriber.pending_count == pending_at_detach == 0
+    assert registry.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_detach_unblocks_publish_when_channel_queue_is_full():
+    from app.domains.chat.services.runtime import (
+        CompletionProducer,
+        CompletionProducerRegistry,
+    )
+
+    calls = []
+    blocked_publish_started = asyncio.Event()
+    publish_resumed = asyncio.Event()
+    release_interrupt = asyncio.Event()
+    graph = FullQueueThenClarificationGraph(
+        blocked_publish_started,
+        publish_resumed,
+        release_interrupt,
+        calls,
+    )
+    session = FakeSession(calls)
+    registry = CompletionProducerRegistry(shutdown_timeout=1)
+
+    def producer_factory(publisher):
+        return CompletionProducer(
+            graph=graph,
+            model=object(),
+            session_factory=FakeSessionFactory(session),
+            id_generator=FakeIdGenerator(),
+            publisher=publisher,
+        )
+
+    subscriber = registry.start(
+        producer_factory=producer_factory,
+        turn=AcceptedUserTurn(1001, 2001, "查一下我的运单"),
+        user_id="alice",
+    )
+    assert (await subscriber.receive())[0] == "metadata"
+    await blocked_publish_started.wait()
+    assert subscriber.pending_count == 16
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(publish_resumed.wait(), timeout=0.05)
+
+    subscriber.detach()
+    try:
+        await asyncio.wait_for(publish_resumed.wait(), timeout=0.1)
+        detach_unblocked_publish = True
+    except TimeoutError:
+        detach_unblocked_publish = False
+        await subscriber.receive()
+        await asyncio.wait_for(publish_resumed.wait(), timeout=0.1)
+
+    release_interrupt.set()
+    await registry.shutdown()
+
+    assert detach_unblocked_publish is True
+    assert graph.cancelled is False
+    assert session.added[0].content == "请提供运单号"
+    assert subscriber.pending_count == 0
     assert registry.active_count == 0
 
 

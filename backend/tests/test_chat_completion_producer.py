@@ -2,6 +2,11 @@ from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.types import Interrupt
 import pytest
 
+from app.domains.chat.graph.routing import (
+    BUSINESS_UNDERSTANDING_NODE,
+    CLARIFY_NODE,
+    LLM_NODE,
+)
 from app.domains.chat.services.conversation import AcceptedUserTurn
 
 
@@ -26,6 +31,7 @@ class FakeGraph:
             yield {
                 "event": "on_chat_model_stream",
                 "data": {"chunk": AIMessageChunk(content=content)},
+                "metadata": {"langgraph_node": LLM_NODE},
             }
 
 
@@ -90,6 +96,7 @@ class FailingGraph(FakeGraph):
         yield {
             "event": "on_chat_model_stream",
             "data": {"chunk": AIMessageChunk(content="partial")},
+            "metadata": {"langgraph_node": LLM_NODE},
         }
         raise RuntimeError(
             "postgresql://user:password@db/app api_key=[TEST_SECRET] traceback"
@@ -134,6 +141,33 @@ class ClarificationInterruptGraph(FakeGraph):
                     )
                 }
             },
+            "metadata": {"langgraph_node": CLARIFY_NODE},
+        }
+
+
+class ClassifierThenClarificationGraph(ClarificationInterruptGraph):
+    async def astream_events(self, graph_input, config, *, context, version):
+        yield {
+            "event": "on_chat_model_stream",
+            "data": {
+                "chunk": AIMessageChunk(
+                    content='{"reasoning":"CLASSIFIER_REASONING_MUST_NOT_LEAK"}'
+                )
+            },
+            "metadata": {"langgraph_node": BUSINESS_UNDERSTANDING_NODE},
+        }
+        async for event in super().astream_events(
+            graph_input,
+            config,
+            context=context,
+            version=version,
+        ):
+            yield event
+        self.calls.append("consumed_after_interrupt")
+        yield {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": AIMessageChunk(content="trailing-answer")},
+            "metadata": {"langgraph_node": LLM_NODE},
         }
 
 
@@ -256,6 +290,47 @@ async def test_clarification_interrupt_persists_before_interrupted_completion():
     assert calls.index("publish_content_delta") < calls.index("assistant_commit")
     assert calls.index("assistant_commit") < calls.index("publish_completed")
     assert publisher.events[-1][1].finish_reason == "interrupt"
+
+
+@pytest.mark.asyncio
+async def test_clarification_interrupt_never_streams_classifier_output():
+    from app.domains.chat.services.runtime import CompletionProducer
+
+    calls = []
+    publisher = FakePublisher(calls)
+    graph = ClassifierThenClarificationGraph(calls, publisher)
+    session = FakeSession(calls)
+    producer = CompletionProducer(
+        graph=graph,
+        model=object(),
+        session_factory=FakeSessionFactory(session),
+        id_generator=FakeIdGenerator(),
+        publisher=publisher,
+    )
+
+    await producer.run(
+        turn=AcceptedUserTurn(1001, 2001, "查一下我的运单"),
+        user_id="alice",
+    )
+
+    assert [event for event, _ in publisher.events] == [
+        "metadata",
+        "content_delta",
+        "completed",
+    ]
+    deltas = [
+        payload.content
+        for event, payload in publisher.events
+        if event == "content_delta"
+    ]
+    assert deltas == ["请提供运单号"]
+    public_payloads = " ".join(
+        payload.model_dump_json() for _, payload in publisher.events
+    )
+    assert "CLASSIFIER_REASONING_MUST_NOT_LEAK" not in public_payloads
+    assert session.added[0].content == "请提供运单号"
+    assert publisher.events[-1][1].finish_reason == "interrupt"
+    assert "consumed_after_interrupt" not in calls
 
 
 @pytest.mark.asyncio

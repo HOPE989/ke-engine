@@ -38,6 +38,7 @@ from app.contracts.chat import (
     MetadataPayload,
 )
 from app.domains.chat.graph import ChatRuntimeContext
+from app.domains.chat.graph.routing import LLM_NODE
 from app.domains.chat.repositories import MessageRepository
 from app.domains.chat.services.conversation import AcceptedUserTurn
 from app.services.chat_api.streaming import (
@@ -62,8 +63,8 @@ class _CompletionChannel:
     调用 ``queue.get()`` 从同一个队列读取，因此不需要额外的事件转发器。
 
     Channel 只服务当前 HTTP 连接，不承担跨进程传输或断线重放。Subscriber detach 后，
-    ``attached`` 变为 False，``publish()`` 会直接忽略后续事件，避免已无人消费的 token
-    持续占用内存。这个状态不会反向取消 Producer，Producer 仍会生成完整回答并落库。
+    ``attached`` 变为 False，待发事件会被清空，``publish()`` 会跳过后续事件并从已阻塞
+    的背压等待中恢复。这个状态不会反向取消 Producer，Producer 仍会生成完整回答并落库。
     """
 
     def __init__(self, *, maxsize: int) -> None:
@@ -82,6 +83,23 @@ class _CompletionChannel:
 
         if self.attached:
             await self.queue.put((event, payload))
+            if not self.attached:
+                self._discard_pending()
+
+    def detach(self) -> None:
+        """解除订阅、丢弃待发事件，并唤醒可能阻塞于背压的 Publisher。"""
+
+        self.attached = False
+        self._discard_pending()
+
+    def _discard_pending(self) -> None:
+        """同步清空当前队列；每次 get 同时唤醒一个等待 queue.put 的协程。"""
+
+        while True:
+            try:
+                self.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
 
 
 class CompletionSubscriber:
@@ -109,11 +127,11 @@ class CompletionSubscriber:
     def detach(self) -> None:
         """解除当前连接的实时订阅，不取消正在运行的 completion。
 
-        Router 在 SSE 正常结束、客户端断开或响应异常时都会调用此方法。它只修改共享
-        Channel 的 attached 标记；后台 task 不在 Subscriber 中，因此不会被取消。
+        Router 在 SSE 正常结束、客户端断开或响应异常时都会调用此方法。它只解除共享
+        Channel 的实时交付并清空待发事件；后台 task 不在 Subscriber 中，因此不会被取消。
         """
 
-        self._channel.attached = False
+        self._channel.detach()
 
     @property
     def pending_count(self) -> int:
@@ -309,7 +327,13 @@ class CompletionProducer:
         ):
             # Graph 会产生节点、链、模型等多类底层事件。这里只保留 API 协议认可的文本
             # 增量，并转换成稳定的应用层 payload，避免 transport 依赖 LangGraph 内部格式。
-            delta = project_graph_event(event)
+            metadata = event.get("metadata")
+            delta = (
+                project_graph_event(event)
+                if isinstance(metadata, dict)
+                and metadata.get("langgraph_node") == LLM_NODE
+                else None
+            )
             if delta is not None:
                 answer_parts.append(delta.content)
                 await self._publisher.publish("content_delta", delta)
