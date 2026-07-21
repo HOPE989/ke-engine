@@ -1,5 +1,5 @@
 from langchain_core.messages import AIMessageChunk, HumanMessage
-from langgraph.types import Interrupt
+from langgraph.types import Interrupt, StateSnapshot
 import pytest
 
 from app.domains.chat.graph.routing import (
@@ -15,6 +15,18 @@ class FakeGraph:
         self.calls = calls
         self.publisher = publisher
         self.invocations = []
+
+    async def aget_state(self, config):
+        return StateSnapshot(
+            values={},
+            next=(),
+            config=config,
+            metadata=None,
+            created_at=None,
+            parent_config=None,
+            tasks=(),
+            interrupts=(),
+        )
 
     async def astream_events(self, graph_input, config, *, context, version):
         assert self.publisher.events[0][0] == "metadata"

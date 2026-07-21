@@ -2,10 +2,11 @@ import json
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessageChunk
+from langgraph.types import Interrupt, PregelTask, StateSnapshot
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.domains.chat.graph.routing import LLM_NODE
+from app.domains.chat.graph.routing import CLARIFY_NODE, LLM_NODE
 from app.domains.chat.services.runtime import CompletionProducerRegistry
 from app.domains.chat.shared.models import Conversation
 from app.services.chat_api.app import create_app
@@ -30,16 +31,18 @@ class FakeTransaction:
     async def __aexit__(self, exc_type, exc, tb):
         if exc_type is None:
             if self.session.fail_commit_at == self.session.commits + 1:
-                raise RuntimeError("assistant commit failed")
+                raise RuntimeError("transaction commit failed")
             self.session.commits += 1
+            self.session.calls.append("transaction_commit")
         else:
             self.session.rollbacks += 1
 
 
 class FakeSession:
-    def __init__(self, *, owned_conversation=None, fail_commit_at=None):
+    def __init__(self, *, owned_conversation=None, fail_commit_at=None, calls=None):
         self.owned_conversation = owned_conversation
         self.fail_commit_at = fail_commit_at
+        self.calls = calls if calls is not None else []
         self.added = []
         self.begins = 0
         self.commits = 0
@@ -81,7 +84,31 @@ class FakeIdGenerator:
 
 
 class FakeGraph:
+    def __init__(self, *, snapshot=None, calls=None):
+        self.snapshot = snapshot
+        self.calls = calls if calls is not None else []
+        self.state_configs = []
+        self.stream_invocations = []
+
+    async def aget_state(self, config):
+        self.calls.append("aget_state")
+        self.state_configs.append(config)
+        if self.snapshot is not None:
+            return self.snapshot
+        return StateSnapshot(
+            values={},
+            next=(),
+            config=config,
+            metadata=None,
+            created_at=None,
+            parent_config=None,
+            tasks=(),
+            interrupts=(),
+        )
+
     async def astream_events(self, *args, **kwargs):
+        self.calls.append("astream_events")
+        self.stream_invocations.append((args, kwargs))
         yield {
             "event": "on_chat_model_stream",
             "data": {"chunk": AIMessageChunk(content="answer")},
@@ -127,6 +154,32 @@ def _app_with_runtime(session, ids, *, graph=None):
     return app
 
 
+def _pending_clarification_snapshot():
+    interrupt = Interrupt(
+        value={
+            "kind": "business_clarification",
+            "question": "请提供运单号",
+        },
+        id="internal-interrupt-id",
+    )
+    task = PregelTask(
+        id="task-1",
+        name=CLARIFY_NODE,
+        path=("__pregel_pull", CLARIFY_NODE),
+        interrupts=(interrupt,),
+    )
+    return StateSnapshot(
+        values={},
+        next=(CLARIFY_NODE,),
+        config={"configurable": {"thread_id": "42"}},
+        metadata=None,
+        created_at=None,
+        parent_config=None,
+        tasks=(task,),
+        interrupts=(interrupt,),
+    )
+
+
 @pytest.mark.asyncio
 async def test_completion_metadata_creates_first_conversation_and_sets_stream_headers():
     session = FakeSession()
@@ -154,9 +207,11 @@ async def test_completion_metadata_creates_first_conversation_and_sets_stream_he
 
 @pytest.mark.asyncio
 async def test_completion_metadata_reuses_owned_conversation():
+    calls = []
     conversation = Conversation(id=42, user_id="alice", title="existing", status="ACTIVE")
-    session = FakeSession(owned_conversation=conversation)
-    app = _app_with_runtime(session, [2002, 3002])
+    session = FakeSession(owned_conversation=conversation, calls=calls)
+    graph = FakeGraph(calls=calls)
+    app = _app_with_runtime(session, [2002, 3002], graph=graph)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             "/api/v1/chat/completions",
@@ -168,6 +223,8 @@ async def test_completion_metadata_reuses_owned_conversation():
         "conversation_id": "42",
         "user_message_id": "2002",
     }
+    assert calls.index("transaction_commit") < calls.index("aget_state")
+    assert graph.state_configs == [{"configurable": {"thread_id": "42"}}]
 
 
 @pytest.mark.asyncio
@@ -178,17 +235,25 @@ async def test_completion_metadata_reuses_owned_conversation():
         {"content": "hello", "model": "client-model"},
         {"content": "hello", "idempotency_key": "key"},
         {"content": "hello", "thread_id": "42"},
+        {"content": "hello", "checkpoint_id": "checkpoint-1"},
+        {"content": "hello", "interrupt_id": "interrupt-1"},
+        {"content": "hello", "command": {"resume": "answer"}},
+        {"content": "hello", "route": "BUSINESS"},
+        {"content": "hello", "intent": "BUSINESS_DATA_QUERY"},
     ],
 )
 async def test_completion_validation_rejects_invalid_or_unsupported_input_without_writes(payload):
     session = FakeSession()
-    app = _app_with_runtime(session, [])
+    graph = FakeGraph()
+    app = _app_with_runtime(session, [], graph=graph)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/api/v1/chat/completions", json=payload)
 
     assert response.status_code == 422
     assert session.added == []
     assert session.begins == 0
+    assert graph.state_configs == []
+    assert graph.stream_invocations == []
 
 
 @pytest.mark.asyncio
@@ -196,7 +261,8 @@ async def test_completion_ownership_conceals_foreign_conversation():
     session = FakeSession(
         owned_conversation=Conversation(id=42, user_id="bob", title="foreign")
     )
-    app = _app_with_runtime(session, [2001])
+    graph = FakeGraph(snapshot=_pending_clarification_snapshot())
+    app = _app_with_runtime(session, [2001], graph=graph)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             "/api/v1/chat/completions",
@@ -207,6 +273,31 @@ async def test_completion_ownership_conceals_foreign_conversation():
     assert response.status_code == 404
     assert response.json() == {"code": 404, "message": "conversation not found", "data": None}
     assert session.added == []
+    assert graph.state_configs == []
+    assert graph.stream_invocations == []
+
+
+@pytest.mark.asyncio
+async def test_user_commit_failure_does_not_inspect_or_resume_pending_checkpoint():
+    conversation = Conversation(id=42, user_id="alice", title="existing", status="ACTIVE")
+    session = FakeSession(owned_conversation=conversation, fail_commit_at=1)
+    pending_snapshot = _pending_clarification_snapshot()
+    graph = FakeGraph(snapshot=pending_snapshot)
+    app = _app_with_runtime(session, [2001], graph=graph)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with pytest.raises(RuntimeError, match="transaction commit failed"):
+            await client.post(
+                "/api/v1/chat/completions",
+                headers={"X-Mock-User-Id": "alice"},
+                json={"conversation_id": "42", "content": "YD2026001"},
+            )
+
+    assert session.commits == 0
+    assert graph.snapshot is pending_snapshot
+    assert graph.state_configs == []
+    assert graph.stream_invocations == []
+    assert app.state.chat_deps.producer_registry.active_count == 0
 
 
 @pytest.mark.asyncio

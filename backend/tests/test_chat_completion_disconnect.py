@@ -1,14 +1,28 @@
 import asyncio
 
 from langchain_core.messages import AIMessageChunk
-from langgraph.types import Interrupt
+from langgraph.types import Interrupt, StateSnapshot
 import pytest
 
 from app.domains.chat.graph.routing import CLARIFY_NODE, LLM_NODE
 from app.domains.chat.services.conversation import AcceptedUserTurn
 
 
-class GatedGraph:
+class NoPendingStateGraph:
+    async def aget_state(self, config):
+        return StateSnapshot(
+            values={},
+            next=(),
+            config=config,
+            metadata=None,
+            created_at=None,
+            parent_config=None,
+            tasks=(),
+            interrupts=(),
+        )
+
+
+class GatedGraph(NoPendingStateGraph):
     def __init__(self, first_delta_sent, continue_running, calls):
         self.first_delta_sent = first_delta_sent
         self.continue_running = continue_running
@@ -35,7 +49,7 @@ class GatedGraph:
             raise
 
 
-class GatedClarificationGraph:
+class GatedClarificationGraph(NoPendingStateGraph):
     def __init__(self, interrupt_ready, release_interrupt, calls):
         self.interrupt_ready = interrupt_ready
         self.release_interrupt = release_interrupt
@@ -69,7 +83,7 @@ class GatedClarificationGraph:
             raise
 
 
-class FullQueueThenClarificationGraph:
+class FullQueueThenClarificationGraph(NoPendingStateGraph):
     def __init__(
         self,
         blocked_publish_started,

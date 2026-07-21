@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 
 from app.contracts.chat import (
     CompletionFinishReason,
@@ -38,7 +39,10 @@ from app.contracts.chat import (
     MetadataPayload,
 )
 from app.domains.chat.graph import ChatRuntimeContext
-from app.domains.chat.graph.routing import LLM_NODE
+from app.domains.chat.graph.business_understanding import (
+    ClarificationInterruptPayload,
+)
+from app.domains.chat.graph.routing import CLARIFY_NODE, LLM_NODE
 from app.domains.chat.repositories import MessageRepository
 from app.domains.chat.services.conversation import AcceptedUserTurn
 from app.services.chat_api.streaming import (
@@ -53,6 +57,26 @@ class GraphCompletion:
 
     content: str
     finish_reason: CompletionFinishReason
+
+
+async def resolve_graph_input(
+    graph: Any,
+    config: dict[str, Any],
+    content: str,
+) -> dict[str, list[HumanMessage]] | Command:
+    """把普通新轮次与唯一受支持的澄清恢复严格分流。"""
+
+    snapshot = await graph.aget_state(config)
+    if not snapshot.tasks:
+        return {"messages": [HumanMessage(content=content)]}
+    if snapshot.next != (CLARIFY_NODE,) or len(snapshot.tasks) != 1:
+        raise ValueError("unsupported pending graph state")
+
+    task = snapshot.tasks[0]
+    if task.name != CLARIFY_NODE or len(task.interrupts) != 1:
+        raise ValueError("unsupported pending graph task")
+    ClarificationInterruptPayload.model_validate(task.interrupts[0].value)
+    return Command(resume=content)
 
 
 class _CompletionChannel:
@@ -317,11 +341,13 @@ class CompletionProducer:
         """
 
         answer_parts: list[str] = []
+        config = {"configurable": {"thread_id": str(turn.conversation_id)}}
+        graph_input = await resolve_graph_input(self._graph, config, turn.content)
         # astream_events() 是异步迭代器：Graph 每产生一个事件就进入循环，不必等待整段
-        # 回答完成。HumanMessage 是本轮输入；历史状态由 thread_id 对应的 checkpoint 提供。
+        # 回答完成。普通轮次使用 HumanMessage；挂起澄清使用同 thread 的 Command resume。
         async for event in self._graph.astream_events(
-            {"messages": [HumanMessage(content=turn.content)]},
-            {"configurable": {"thread_id": str(turn.conversation_id)}},
+            graph_input,
+            config,
             context=ChatRuntimeContext(model=self._model),
             version="v2",
         ):
