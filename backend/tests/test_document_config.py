@@ -88,6 +88,38 @@ def test_process_environment_overrides_config_yaml(tmp_path, monkeypatch):
     assert settings.max_upload_size_mb == 99
 
 
+def test_langfuse_settings_load_standard_environment_names(tmp_path, monkeypatch):
+    env_file = tmp_path / "backend.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LANGFUSE_PUBLIC_KEY=pk-test",
+                "LANGFUSE_SECRET_KEY=sk-test",
+                "LANGFUSE_BASE_URL=http://langfuse.example:3000",
+                "LANGFUSE_TRACING_ENVIRONMENT=test",
+                "LANGFUSE_RELEASE=release-1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    for name in [
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_BASE_URL",
+        "LANGFUSE_TRACING_ENVIRONMENT",
+        "LANGFUSE_RELEASE",
+    ]:
+        monkeypatch.delenv(name, raising=False)
+
+    settings = config.create_settings(env_file=env_file)
+
+    assert settings.langfuse_public_key == "pk-test"
+    assert settings.langfuse_secret_key == "sk-test"
+    assert settings.langfuse_base_url == "http://langfuse.example:3000"
+    assert settings.langfuse_environment == "test"
+    assert settings.langfuse_release == "release-1"
+
+
 def test_env_example_documents_user_required_and_secret_configuration_names():
     env_example = Path(config.BACKEND_DIR, ".env.example").read_text(encoding="utf-8")
 
@@ -97,6 +129,11 @@ def test_env_example_documents_user_required_and_secret_configuration_names():
         "MINIO_SECRET_KEY",
         "MINERU_API_KEY",
         "OPENAI_API_KEY",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_BASE_URL",
+        "LANGFUSE_TRACING_ENVIRONMENT",
+        "LANGFUSE_RELEASE",
     ]:
         assert f"{name}=" in env_example
 
@@ -220,6 +257,11 @@ def test_settings_document_startup_and_request_time_boundaries():
         "kafka_bootstrap_servers",
         "document_convert_lock_expire_seconds",
         "chat_completion_lock_expire_seconds",
+        "langfuse_public_key",
+        "langfuse_secret_key",
+        "langfuse_base_url",
+        "langfuse_environment",
+        "langfuse_release",
         "snowflake_worker_id",
         "elasticsearch_url",
         "elasticsearch_index",

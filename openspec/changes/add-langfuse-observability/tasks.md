@@ -1,10 +1,10 @@
 ## 1. Langfuse dependency and resources
 
-- [ ] 1.1 Add Langfuse runtime and LangGraph CLI development dependencies with a refreshed uv lockfile
-- [ ] 1.2 Add standard Langfuse connection, environment and release Settings fields without an enable switch
-- [ ] 1.3 Implement one concrete optional Langfuse client/handler resource pair
-- [ ] 1.4 Implement fail-open completion observation entry, update, cleanup and asynchronous shutdown
-- [ ] 1.5 Add offline tests for missing configuration and failures at every Langfuse lifecycle boundary
+- [x] 1.1 Add Langfuse runtime and LangGraph CLI development dependencies with a refreshed uv lockfile
+- [x] 1.2 Add standard Langfuse connection, environment and release Settings fields without an enable switch
+- [x] 1.3 Implement one concrete optional Langfuse client/handler resource pair
+- [x] 1.4 Implement fail-open completion observation entry, update, cleanup and asynchronous shutdown
+- [x] 1.5 Add offline tests for missing configuration and failures at every Langfuse lifecycle boundary
 
 ## 2. Production Chat tracing
 

@@ -127,6 +127,39 @@ class Settings(BaseSettings):
             "completion lock."
         ),
     )
+    langfuse_public_key: str | None = Field(
+        default=None,
+        validation_alias="LANGFUSE_PUBLIC_KEY",
+        description=(
+            "startup-only: Langfuse tracing client is created during process startup."
+        ),
+    )
+    langfuse_secret_key: str | None = Field(
+        default=None,
+        validation_alias="LANGFUSE_SECRET_KEY",
+        description=(
+            "startup-only: Langfuse tracing client is created during process startup."
+        ),
+    )
+    langfuse_base_url: str | None = Field(
+        default=None,
+        validation_alias="LANGFUSE_BASE_URL",
+        description="startup-only: Langfuse endpoint is fixed for the process lifetime.",
+    )
+    langfuse_environment: str = Field(
+        default="development",
+        validation_alias="LANGFUSE_TRACING_ENVIRONMENT",
+        description=(
+            "startup-only: Langfuse trace environment is fixed for the process lifetime."
+        ),
+    )
+    langfuse_release: str | None = Field(
+        default=None,
+        validation_alias="LANGFUSE_RELEASE",
+        description=(
+            "startup-only: Langfuse release label is fixed for the process lifetime."
+        ),
+    )
     snowflake_worker_id: int = Field(
         default=1,
         validation_alias="SNOWFLAKE_WORKER_ID",
@@ -208,6 +241,11 @@ STARTUP_ONLY_SETTINGS = {
     "kafka_bootstrap_servers",
     "document_convert_lock_expire_seconds",
     "chat_completion_lock_expire_seconds",
+    "langfuse_public_key",
+    "langfuse_secret_key",
+    "langfuse_base_url",
+    "langfuse_environment",
+    "langfuse_release",
     "snowflake_worker_id",
     "elasticsearch_url",
     "elasticsearch_index",

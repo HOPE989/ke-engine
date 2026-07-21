@@ -29,6 +29,8 @@ The infrastructure module creates one `LangfuseResources(client, handler)` from 
 
 The alternative of letting each caller instantiate `get_client()` from process environment is rejected because this project loads `backend/.env` through Pydantic without exporting values to `os.environ`, which could give the callback and application different configuration.
 
+Langfuse 4.14.1 的官方 `CallbackHandler` 会导入 LangChain 元包，因此运行依赖显式包含兼容的 LangChain 1.3.x；仅安装 `langchain-core` 和 `langchain-openai` 不足以加载该 integration。
+
 ### Trace at the CompletionProducer boundary
 
 `CompletionProducer.run()` encloses the existing metadata, Graph, ASSISTANT commit and terminal flow in one `chat-completion` root observation. The callback is added to that invocation's `RunnableConfig`; the title model and unrelated calls do not receive it. The root records session/user identity, raw turn input, final content, finish reason and completed/error status.

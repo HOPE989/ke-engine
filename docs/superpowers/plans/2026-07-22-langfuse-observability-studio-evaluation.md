@@ -6,7 +6,7 @@
 
 **Architecture:** FastAPI lifespan best-effort 创建一个具体的 Langfuse client/handler 资源，`CompletionProducer` 在应用级根 observation 中运行现有 Graph，并通过标准 callback 生成子 observations。Studio 只预绑定模型并调用现有 builder；评测 CLI 把本地 fixture 幂等同步到 Langfuse Dataset，直接执行真实 `business_understanding_node` 并用现有评分器生成五项 Scores。
 
-**Tech Stack:** Python 3.11、FastAPI、LangGraph 1.2.9、LangChain、Langfuse Python SDK 4.14.1、LangGraph CLI 0.4.31、Pydantic Settings、pytest、uv、OpenSpec。
+**Tech Stack:** Python 3.11、FastAPI、LangGraph 1.2.9、LangChain 1.3.14、Langfuse Python SDK 4.14.1、LangGraph CLI 0.4.31、Pydantic Settings、pytest、uv、OpenSpec。
 
 ## Global Constraints
 
@@ -19,6 +19,7 @@
 - 不追踪每个 SSE delta、Redis lock token、SQL、原始 checkpoint 或 title model。
 - 首版评测固定 `max_concurrency=1`，不增加 LLM-as-a-Judge、CI 门禁、跨模型矩阵或生产 trace 回流。
 - 运行依赖使用 `langfuse>=4.14.1,<5.0.0`；开发依赖使用 `langgraph-cli[inmem]>=0.4.31,<0.5.0`。
+- Langfuse 官方 `CallbackHandler` 需要 LangChain 元包，运行依赖使用 `langchain>=1.3.14,<2.0.0`。
 - 所有默认 pytest 使用 fake client/handler/model，不访问 Langfuse 或模型网络。
 
 ---
@@ -141,6 +142,7 @@ Run:
 ```powershell
 Set-Location backend
 uv add "langfuse>=4.14.1,<5.0.0"
+uv add "langchain>=1.3.14,<2.0.0"
 uv add --optional dev "langgraph-cli[inmem]>=0.4.31,<0.5.0"
 ```
 

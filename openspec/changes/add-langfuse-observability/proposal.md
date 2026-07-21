@@ -24,7 +24,7 @@
 
 ## Impact
 
-- 后端增加 Langfuse 运行依赖和 LangGraph CLI 开发依赖。
+- 后端增加 Langfuse 与其官方 callback 所需的 LangChain 元包运行依赖，以及 LangGraph CLI 开发依赖。
 - Chat API lifespan、依赖对象、Router 和 `CompletionProducer` 增加可选 Langfuse 接线。
 - Chat graph builder 和两个模型节点增加开发模型预绑定入口，但不改变节点名称、状态、边或 `Command(goto)` 路由。
 - 新增 Studio `langgraph.json`、评测 CLI、聚焦测试和 README 命令。
