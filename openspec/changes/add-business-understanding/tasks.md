@@ -1220,6 +1220,31 @@ git commit -m "test(chat): verify business understanding flow"
 
 ---
 
+## Task 11: Final Review — Coarse Conversation Lock and Prompt Contract
+
+**Deliverable:** 复用现有 Redis/`python-redis-lock` 基础设施，以 conversation ID 为键粗粒度锁住整次 completion；同会话冲突在 USER 落库前失败，不同会话互不阻塞。同时补齐设计已要求、但生产 Prompt 尚未明确写出的多轮继承与三路结构化示例。
+
+**Files:**
+
+- Modify: `backend/app/infrastructure/redis.py`
+- Modify: `backend/app/core/config.py`
+- Modify: `backend/app/services/chat_api/deps.py`
+- Modify: `backend/app/services/chat_api/router.py`
+- Modify: `backend/app/domains/chat/services/conversation.py`
+- Modify: `backend/app/domains/chat/services/runtime.py`
+- Modify: `backend/app/domains/chat/graph/business_understanding/prompt.py`
+- Modify/Add focused Chat tests and Redis integration tests
+
+- [ ] **Step 11.1: RED — 锁工厂使用 conversation 级 key、过期时间和自动续期**
+- [ ] **Step 11.2: RED — 同会话第二个请求在 USER 落库和 Graph 访问前冲突，不同会话不冲突**
+- [ ] **Step 11.3: RED — 锁覆盖断连后的后台执行，并在 success/error/cancel/shutdown 后释放**
+- [ ] **Step 11.4: GREEN — 在 Chat lifespan 注入 Redis client，并用单把粗粒度锁覆盖完整 completion lifecycle**
+- [ ] **Step 11.5: RED/GREEN — Prompt 明确唯一上下文继承、禁止臆造和 BUSINESS/NON_BUSINESS/CLARIFY 三路合法示例**
+- [ ] **Step 11.6: Verify GREEN — 复跑 Chat、真实 PostgreSQL、Redis 锁、后端非 integration、离线评测、前端 test/lint/build、OpenSpec strict 与 diff check**
+- [ ] **Step 11.7: Commit and fresh final review**
+
+---
+
 ## Final TDD Compliance Gate
 
 以下项目全部有证据后，才可把 change 标记为 implemented：

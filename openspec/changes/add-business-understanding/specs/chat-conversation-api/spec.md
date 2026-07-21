@@ -34,3 +34,32 @@ The system SHALL commit the resumed USER business message before starting or res
 - **WHEN** the USER business-message transaction fails
 - **THEN** the backend MUST NOT resume the LangGraph thread
 - **AND** the prior clarification checkpoint SHALL remain pending
+
+### Requirement: One conversation has at most one active completion
+The system SHALL guard the complete completion lifecycle for one conversation with one coarse Redis distributed lock while allowing different conversations to execute independently.
+
+#### Scenario: Completion lock covers persistence and Graph execution
+- **WHEN** the backend accepts a completion for an owned conversation
+- **THEN** it SHALL acquire the conversation lock before persisting the USER message
+- **AND** it SHALL hold the same lock through checkpoint inspection, Graph start or resume, ASSISTANT persistence, and terminal completion handling
+
+#### Scenario: Concurrent completion fails before user persistence
+- **WHEN** the same conversation already has an active completion lock
+- **THEN** another completion request for that conversation SHALL fail with a conflict
+- **AND** it MUST NOT persist another USER message
+- **AND** it MUST NOT inspect or mutate the LangGraph checkpoint
+
+#### Scenario: Ownership remains hidden before lock state
+- **WHEN** a user submits a completion for a missing or foreign-owned conversation
+- **THEN** the API SHALL return the same HTTP 404 behavior
+- **AND** it MUST NOT reveal whether that conversation currently has an active lock
+
+#### Scenario: Disconnect does not release active work
+- **WHEN** the HTTP subscriber disconnects after the completion is accepted
+- **THEN** the background completion SHALL retain the conversation lock
+- **AND** it SHALL release the lock only after its success, failure, cancellation, or shutdown cleanup path finishes
+
+#### Scenario: Redis lock infrastructure is unavailable
+- **WHEN** the backend cannot acquire or verify the conversation lock because Redis is unavailable
+- **THEN** the completion SHALL fail closed
+- **AND** it MUST NOT persist the USER message or start Graph execution

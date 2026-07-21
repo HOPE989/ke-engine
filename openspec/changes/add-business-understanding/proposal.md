@@ -9,6 +9,7 @@ The current Chat Graph sends every request directly to a general LLM, so it cann
 - Define the V1 business intents as `POLICY_RULE_QA`, `TRANSPORT_OPERATION_QA`, `COAL_SALES_QA`, `PROFESSIONAL_KNOWLEDGE_QA`, `BUSINESS_DATA_QUERY`, and `OTHER_BUSINESS`.
 - Keep NON_BUSINESS requests on the existing general-model answer path.
 - Suspend CLARIFY requests with LangGraph interrupt, persist and stream one clarification question, then resume the same checkpoint when the user supplies the next message.
+- Serialize the complete lifecycle of each conversation completion with one coarse Redis distributed lock so concurrent requests cannot race the same LangGraph thread.
 - Terminate BUSINESS requests at an explicit business boundary in this change; RAG, SQL execution, and grounded business answering remain out of scope.
 - Add deterministic graph tests and a railway/coal intent evaluation dataset covering single-turn routing, multi-turn ellipsis, boundary negatives, clarification, entity extraction, and schema validity.
 - **BREAKING**: extend the Chat completion terminal contract so an intentional clarification interrupt can end the current HTTP completion without being reported as an error, while preserving the checkpoint for resume.
@@ -27,7 +28,7 @@ The current Chat Graph sends every request directly to a general LLM, so it cann
 
 ## Impact
 
-- Affected code: Chat Graph state, builder, nodes, runtime context, completion producer/service, SSE schemas, and Chat API orchestration.
+- Affected code: Chat Graph state, builder, nodes, runtime context, completion producer/service, SSE schemas, Chat API orchestration, and the existing Redis lock infrastructure.
 - Affected prompts and tests: new Business Understanding Prompt, structured output models, intent evaluation cases, graph routing tests, and interrupt/resume integration tests.
 - Persistence impact: no business-table migration is required; USER and ASSISTANT clarification messages continue to use the existing message schema, while resumable runtime state remains in the LangGraph PostgreSQL checkpointer.
 - Deferred work: business RAG, SQL Tool execution, fine-grained plan/document/analysis intents, prompt-specific grounded answers, and production data-source integration.
