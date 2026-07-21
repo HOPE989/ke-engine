@@ -6,6 +6,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START
 from langgraph.runtime import Runtime
 
+from app.domains.chat.graph.business_understanding import BusinessUnderstandingResult
+from chat_graph_test_support import FakeSequentialChatModel
+
 
 class FakeChatModel:
     def __init__(self, response):
@@ -53,18 +56,28 @@ def test_importing_chat_graph_does_not_initialize_runtime_resources(monkeypatch)
     assert callable(imported.build_chat_graph)
 
 
-def test_chat_graph_has_only_start_llm_end_and_no_retry_policy():
+def test_chat_graph_has_business_understanding_routes_and_no_retry_policy():
     from app.domains.chat.graph.builder import build_chat_graph
 
     builder = build_chat_graph()
     compiled = builder.compile()
 
     assert {(edge.source, edge.target) for edge in compiled.get_graph().edges} == {
-        (START, "llm"),
+        (START, "business_understanding"),
+        ("business_understanding", "business_boundary"),
+        ("business_understanding", "clarify"),
+        ("business_understanding", "llm"),
+        ("business_boundary", END),
+        ("clarify", "business_understanding"),
         ("llm", END),
     }
-    assert set(builder.nodes) == {"llm"}
-    assert builder.nodes["llm"].retry_policy is None
+    assert set(builder.nodes) == {
+        "business_understanding",
+        "business_boundary",
+        "clarify",
+        "llm",
+    }
+    assert all(node.retry_policy is None for node in builder.nodes.values())
 
 
 @pytest.mark.asyncio
@@ -92,7 +105,16 @@ async def test_chat_graph_merges_llm_update_with_messages_state_semantics():
 
     user_message = HumanMessage(content="hello")
     ai_message = AIMessage(content="world")
-    model = FakeChatModel(ai_message)
+    classification = BusinessUnderstandingResult.model_validate(
+        {
+            "reasoning": "普通问候",
+            "route": "NON_BUSINESS",
+            "intent": None,
+            "entities": {},
+            "clarification_question": None,
+        }
+    )
+    model = FakeSequentialChatModel([classification], ai_message)
     graph = build_chat_graph().compile()
 
     result = await graph.ainvoke(

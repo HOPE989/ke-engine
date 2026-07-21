@@ -3,13 +3,14 @@ import inspect
 from pathlib import Path
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.domains.chat.graph.business_understanding import (
     BusinessIntent,
     BusinessRoute,
     BusinessUnderstandingResult,
 )
+from chat_graph_test_support import FakeSequentialChatModel
 
 
 def make_result(route: BusinessRoute) -> BusinessUnderstandingResult:
@@ -85,3 +86,52 @@ def test_business_boundary_module_has_no_runtime_or_data_access_imports():
         for module in imported_modules
         for forbidden_name in forbidden
     )
+
+
+@pytest.mark.asyncio
+async def test_non_business_graph_calls_structured_and_ordinary_model_once():
+    from app.domains.chat.graph.builder import build_chat_graph
+    from app.domains.chat.graph.context import ChatRuntimeContext
+
+    classification = make_result(BusinessRoute.NON_BUSINESS)
+    answer = AIMessage(content="通用回答")
+    model = FakeSequentialChatModel([classification], answer)
+    user_message = HumanMessage(content="你好")
+
+    result = await build_chat_graph().compile().ainvoke(
+        {"messages": [user_message]},
+        context=ChatRuntimeContext(model=model),
+    )
+
+    assert len(model.structured_runnable.calls) == 1
+    assert len(model.ordinary_calls) == 1
+    assert result["messages"] == [user_message, answer]
+    assert classification.reasoning not in [
+        message.content for message in result["messages"]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_business_graph_ends_at_boundary_without_ordinary_model_call():
+    from app.domains.chat.graph.builder import build_chat_graph
+    from app.domains.chat.graph.context import ChatRuntimeContext
+    from app.domains.chat.graph.nodes.business_boundary import BUSINESS_BOUNDARY_MESSAGE
+
+    classification = make_result(BusinessRoute.BUSINESS)
+    model = FakeSequentialChatModel([classification], ordinary_response=None)
+    user_message = HumanMessage(content="铁路货运规程是什么？")
+
+    result = await build_chat_graph().compile().ainvoke(
+        {"messages": [user_message]},
+        context=ChatRuntimeContext(model=model),
+    )
+
+    assert len(model.structured_runnable.calls) == 1
+    assert model.ordinary_calls == []
+    assert [message.content for message in result["messages"]] == [
+        user_message.content,
+        BUSINESS_BOUNDARY_MESSAGE,
+    ]
+    assert classification.reasoning not in [
+        message.content for message in result["messages"]
+    ]
