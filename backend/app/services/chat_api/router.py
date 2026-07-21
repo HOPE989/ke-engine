@@ -29,6 +29,11 @@ from app.contracts.chat.http import (
 )
 from app.core.exceptions import AppException
 from app.domains.chat.repositories import ConversationRepository, MessageRepository
+from app.domains.chat.services.completion_lock import (
+    ConversationBusy,
+    ConversationLockUnavailable,
+    release_completion_lock,
+)
 from app.domains.chat.services.conversation import ConversationNotFound, ConversationService
 from app.domains.chat.services.runtime import CompletionProducer
 from app.identity import Principal, get_current_principal
@@ -58,10 +63,11 @@ async def create_completion(
     # 这一步在启动后台任务之前完成，因此只要进入流式响应，metadata 中引用的会话和
     # USER 消息就一定已经落库。反过来，前置事务失败时不会产生孤立的后台任务。
     try:
-        turn = await ConversationService(
+        accepted = await ConversationService(
             chat_deps.session_factory,
             chat_deps.id_generator,
             chat_deps.title_model,
+            completion_lock_factory=chat_deps.completion_lock_factory,
         ).accept_user_turn(
             user_id=principal.user_id,
             content=request.content,
@@ -73,6 +79,13 @@ async def create_completion(
         )
     except ConversationNotFound as exc:
         raise AppException("conversation not found", status.HTTP_404_NOT_FOUND) from exc
+    except ConversationBusy as exc:
+        raise AppException("conversation busy", status.HTTP_409_CONFLICT) from exc
+    except ConversationLockUnavailable as exc:
+        raise AppException(
+            "conversation lock unavailable",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        ) from exc
 
     # 步骤 2：业务事务成功后才注册后台 Producer；请求协程不直接拥有 Graph task。
     #
@@ -87,17 +100,23 @@ async def create_completion(
     # 最后一行调用下面的 lambda 时，Python 按位置参数规则把 channel 赋给 lambda 的
     # 第一个形参 publisher。因此 publisher 并不是 FastAPI 注入或从外层捕获的变量，
     # 它就是 Registry 主动传入的 channel；随后又被保存到 CompletionProducer 中。
-    subscriber = chat_deps.producer_registry.start(
-        producer_factory=lambda publisher: CompletionProducer(
-            graph=chat_deps.graph,
-            model=chat_deps.model,
-            session_factory=chat_deps.session_factory,
-            id_generator=chat_deps.id_generator,
-            publisher=publisher,
-        ),
-        turn=turn,
-        user_id=principal.user_id,
-    )
+    try:
+        subscriber = chat_deps.producer_registry.start(
+            producer_factory=lambda publisher: CompletionProducer(
+                graph=chat_deps.graph,
+                model=chat_deps.model,
+                session_factory=chat_deps.session_factory,
+                id_generator=chat_deps.id_generator,
+                publisher=publisher,
+            ),
+            turn=accepted.turn,
+            completion_lock=accepted.lock,
+            user_id=principal.user_id,
+        )
+    except BaseException:
+        # Registry.start() 返回后锁的所有权才转移给后台 task；此前失败由请求侧释放。
+        await release_completion_lock(accepted.lock)
+        raise
 
     async def event_stream():
         """转发当前连接的实时事件，并在终态或断连时解除订阅。

@@ -28,9 +28,10 @@ class FakeTransaction:
 
 
 class FakeSession:
-    def __init__(self, *, owned_conversation=None, fail_on_type=None):
+    def __init__(self, *, owned_conversation=None, fail_on_type=None, calls=None):
         self.owned_conversation = owned_conversation
         self.fail_on_type = fail_on_type
+        self.calls = calls if calls is not None else []
         self.added = []
         self.statements = []
         self.begins = 0
@@ -56,6 +57,7 @@ class FakeSession:
     def add(self, value):
         if isinstance(value, self.fail_on_type or ()):  # pragma: no branch
             raise RuntimeError("write failed")
+        self.calls.append(f"add:{type(value).__name__}")
         self.added.append(value)
 
 
@@ -86,6 +88,163 @@ class FakeTitleSubmitter:
         self.calls.append((self.session.commits, kwargs))
 
 
+class FakeCompletionLock:
+    def __init__(self, calls, *, acquired=True, acquire_error=None):
+        self.calls = calls
+        self.acquired = acquired
+        self.acquire_error = acquire_error
+        self.releases = 0
+
+    def acquire(self, *, blocking):
+        self.calls.append(f"lock_acquire:{blocking}")
+        if self.acquire_error is not None:
+            raise self.acquire_error
+        return self.acquired
+
+    def release(self):
+        self.calls.append("lock_release")
+        self.releases += 1
+
+
+class FakeCompletionLockFactory:
+    def __init__(self, calls, lock):
+        self.calls = calls
+        self.lock = lock
+
+    def __call__(self, *, conversation_id):
+        self.calls.append(f"lock_factory:{conversation_id}")
+        return self.lock
+
+
+def available_completion_lock_factory():
+    calls = []
+    return FakeCompletionLockFactory(calls, FakeCompletionLock(calls))
+
+
+@pytest.mark.asyncio
+async def test_accept_user_turn_acquires_conversation_lock_before_user_write():
+    from app.domains.chat.services.conversation import ConversationService
+
+    calls = []
+    conversation = Conversation(id=1001, user_id="alice", title="existing")
+    session = FakeSession(owned_conversation=conversation, calls=calls)
+    lock = FakeCompletionLock(calls)
+    service = ConversationService(
+        session_factory=FakeSessionFactory(session),
+        id_generator=FakeIdGenerator(2002),
+        title_model=object(),
+        completion_lock_factory=FakeCompletionLockFactory(calls, lock),
+        title_submitter=FakeTitleSubmitter(session),
+    )
+
+    accepted = await service.accept_user_turn(
+        user_id="alice",
+        content=" next ",
+        conversation_id=1001,
+    )
+
+    assert calls.index("lock_acquire:False") < calls.index("add:Message")
+    assert accepted.turn.content == "next"
+    assert accepted.lock is lock
+    assert lock.releases == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("lock", "error_type"),
+    [
+        (FakeCompletionLock([], acquired=False), "busy"),
+        (FakeCompletionLock([], acquire_error=OSError("redis down")), "unavailable"),
+    ],
+)
+async def test_lock_admission_failure_rolls_back_before_user_write(lock, error_type):
+    from app.domains.chat.services.completion_lock import (
+        ConversationBusy,
+        ConversationLockUnavailable,
+    )
+    from app.domains.chat.services.conversation import ConversationService
+
+    calls = []
+    lock.calls = calls
+    session = FakeSession(
+        owned_conversation=Conversation(id=1001, user_id="alice", title="existing"),
+        calls=calls,
+    )
+    service = ConversationService(
+        session_factory=FakeSessionFactory(session),
+        id_generator=FakeIdGenerator(2002),
+        title_model=object(),
+        completion_lock_factory=FakeCompletionLockFactory(calls, lock),
+        title_submitter=FakeTitleSubmitter(session),
+    )
+    expected = ConversationBusy if error_type == "busy" else ConversationLockUnavailable
+
+    with pytest.raises(expected):
+        await service.accept_user_turn(
+            user_id="alice",
+            content="next",
+            conversation_id=1001,
+        )
+
+    assert session.added == []
+    assert session.commits == 0
+    assert session.rollbacks == 1
+    assert lock.releases == 0
+
+
+@pytest.mark.asyncio
+async def test_foreign_conversation_does_not_observe_completion_lock_state():
+    from app.domains.chat.services.conversation import (
+        ConversationNotFound,
+        ConversationService,
+    )
+
+    calls = []
+    session = FakeSession(
+        owned_conversation=Conversation(id=1001, user_id="bob", title="foreign"),
+        calls=calls,
+    )
+    lock = FakeCompletionLock(calls, acquired=False)
+    service = ConversationService(
+        session_factory=FakeSessionFactory(session),
+        id_generator=FakeIdGenerator(2002),
+        title_model=object(),
+        completion_lock_factory=FakeCompletionLockFactory(calls, lock),
+        title_submitter=FakeTitleSubmitter(session),
+    )
+
+    with pytest.raises(ConversationNotFound):
+        await service.accept_user_turn(
+            user_id="alice",
+            content="next",
+            conversation_id=1001,
+        )
+
+    assert not any(call.startswith("lock_") for call in calls)
+
+
+@pytest.mark.asyncio
+async def test_user_transaction_failure_releases_acquired_completion_lock():
+    from app.domains.chat.services.conversation import ConversationService
+
+    calls = []
+    session = FakeSession(fail_on_type=Message, calls=calls)
+    lock = FakeCompletionLock(calls)
+    service = ConversationService(
+        session_factory=FakeSessionFactory(session),
+        id_generator=FakeIdGenerator(1001, 2001),
+        title_model=object(),
+        completion_lock_factory=FakeCompletionLockFactory(calls, lock),
+        title_submitter=FakeTitleSubmitter(session),
+    )
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await service.accept_user_turn(user_id="alice", content="hello")
+
+    assert lock.releases == 1
+    assert calls[-1] == "lock_release"
+
+
 @pytest.mark.asyncio
 async def test_accept_first_user_turn_creates_active_conversation_and_message_atomically():
     from app.domains.chat.services.conversation import ConversationService
@@ -98,12 +257,14 @@ async def test_accept_first_user_turn_creates_active_conversation_and_message_at
         session_factory=FakeSessionFactory(session),
         id_generator=FakeIdGenerator(1001, 2001),
         title_model=title_model,
+        completion_lock_factory=available_completion_lock_factory(),
         title_submitter=title_submitter,
         now=lambda: now,
     )
     content = "  " + "x" * 300 + "  "
 
-    turn = await service.accept_user_turn(user_id="alice", content=content)
+    accepted = await service.accept_user_turn(user_id="alice", content=content)
+    turn = accepted.turn
 
     conversation, message = session.added
     assert isinstance(conversation, Conversation)
@@ -148,15 +309,17 @@ async def test_accept_user_turn_appends_to_owned_conversation_and_updates_activi
         session_factory=FakeSessionFactory(session),
         id_generator=FakeIdGenerator(2002),
         title_model=object(),
+        completion_lock_factory=available_completion_lock_factory(),
         title_submitter=title_submitter,
         now=lambda: now,
     )
 
-    turn = await service.accept_user_turn(
+    accepted = await service.accept_user_turn(
         user_id="alice",
         content=" next question ",
         conversation_id=1001,
     )
+    turn = accepted.turn
 
     assert conversation.updated_at == now
     assert len(session.statements) == 1
@@ -177,6 +340,7 @@ async def test_blank_content_is_rejected_before_opening_session_or_transaction()
         factory,
         FakeIdGenerator(),
         title_model=object(),
+        completion_lock_factory=available_completion_lock_factory(),
         title_submitter=FakeTitleSubmitter(factory.session),
     )
 
@@ -200,6 +364,7 @@ async def test_missing_and_foreign_conversations_raise_same_not_found(owned_conv
         FakeSessionFactory(session),
         FakeIdGenerator(2001),
         title_model=object(),
+        completion_lock_factory=available_completion_lock_factory(),
         title_submitter=title_submitter,
     )
 
@@ -226,6 +391,7 @@ async def test_first_turn_rolls_back_when_either_write_fails(fail_on_type):
         FakeSessionFactory(session),
         FakeIdGenerator(1001, 2001),
         title_model=object(),
+        completion_lock_factory=available_completion_lock_factory(),
         title_submitter=title_submitter,
     )
 

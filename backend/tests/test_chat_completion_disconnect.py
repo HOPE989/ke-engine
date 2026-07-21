@@ -175,6 +175,14 @@ class FakeIdGenerator:
         return 3001
 
 
+class FakeCompletionLock:
+    def __init__(self):
+        self.releases = 0
+
+    def release(self):
+        self.releases += 1
+
+
 @pytest.mark.asyncio
 async def test_subscriber_disconnect_does_not_cancel_producer_or_queue_later_tokens():
     from app.domains.chat.services.runtime import CompletionProducer, CompletionProducerRegistry
@@ -185,6 +193,7 @@ async def test_subscriber_disconnect_does_not_cancel_producer_or_queue_later_tok
     graph = GatedGraph(first_delta_sent, continue_running, calls)
     session = FakeSession(calls)
     registry = CompletionProducerRegistry(shutdown_timeout=1)
+    completion_lock = FakeCompletionLock()
 
     def producer_factory(publisher):
         return CompletionProducer(
@@ -198,6 +207,7 @@ async def test_subscriber_disconnect_does_not_cancel_producer_or_queue_later_tok
     subscriber = registry.start(
         producer_factory=producer_factory,
         turn=AcceptedUserTurn(1001, 2001, "hello"),
+        completion_lock=completion_lock,
         user_id="alice",
     )
     assert (await subscriber.receive())[0] == "metadata"
@@ -205,6 +215,7 @@ async def test_subscriber_disconnect_does_not_cancel_producer_or_queue_later_tok
     await first_delta_sent.wait()
 
     subscriber.detach()
+    assert completion_lock.releases == 0
     pending_at_detach = subscriber.pending_count
     continue_running.set()
     await registry.shutdown()
@@ -214,6 +225,7 @@ async def test_subscriber_disconnect_does_not_cancel_producer_or_queue_later_tok
     assert session.added[0].content == "firstsecond"
     assert subscriber.pending_count == pending_at_detach == 0
     assert registry.active_count == 0
+    assert completion_lock.releases == 1
 
 
 @pytest.mark.asyncio
@@ -242,6 +254,7 @@ async def test_disconnect_after_metadata_still_persists_clarification_interrupt(
     subscriber = registry.start(
         producer_factory=producer_factory,
         turn=AcceptedUserTurn(1001, 2001, "查一下我的运单"),
+        completion_lock=FakeCompletionLock(),
         user_id="alice",
     )
     assert (await subscriber.receive())[0] == "metadata"
@@ -291,6 +304,7 @@ async def test_detach_unblocks_publish_when_channel_queue_is_full():
     subscriber = registry.start(
         producer_factory=producer_factory,
         turn=AcceptedUserTurn(1001, 2001, "查一下我的运单"),
+        completion_lock=FakeCompletionLock(),
         user_id="alice",
     )
     assert (await subscriber.receive())[0] == "metadata"
@@ -329,5 +343,6 @@ async def test_registry_shutdown_rejects_new_producers():
         registry.start(
             producer_factory=lambda publisher: object(),
             turn=AcceptedUserTurn(1001, 2001, "hello"),
+            completion_lock=FakeCompletionLock(),
             user_id="alice",
         )

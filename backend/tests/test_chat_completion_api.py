@@ -128,6 +128,23 @@ class FakeTitleModel:
         return SimpleNamespace(content="测试会话标题")
 
 
+class FakeCompletionLock:
+    def __init__(self, *, acquired=True, acquire_error=None):
+        self.acquired = acquired
+        self.acquire_error = acquire_error
+        self.acquire_calls = []
+        self.releases = 0
+
+    def acquire(self, *, blocking):
+        self.acquire_calls.append({"blocking": blocking})
+        if self.acquire_error is not None:
+            raise self.acquire_error
+        return self.acquired
+
+    def release(self):
+        self.releases += 1
+
+
 def _parse_sse(body):
     events = []
     for block in body.strip().split("\n\n"):
@@ -141,17 +158,55 @@ def _parse_sse(body):
     return events
 
 
-def _app_with_runtime(session, ids, *, graph=None):
+def _app_with_runtime(session, ids, *, graph=None, completion_lock=None):
     app = create_app()
+    lock = completion_lock or FakeCompletionLock()
     app.state.chat_deps = SimpleNamespace(
         session_factory=FakeSessionFactory(session),
         id_generator=FakeIdGenerator(*ids),
         graph=graph or FakeGraph(),
         model=object(),
         title_model=FakeTitleModel(),
+        completion_lock_factory=lambda *, conversation_id: lock,
         producer_registry=CompletionProducerRegistry(shutdown_timeout=1),
     )
     return app
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("completion_lock", "expected_status"),
+    [
+        (FakeCompletionLock(acquired=False), 409),
+        (FakeCompletionLock(acquire_error=OSError("redis down")), 503),
+    ],
+)
+async def test_completion_lock_admission_failure_has_no_user_or_graph(
+    completion_lock,
+    expected_status,
+):
+    conversation = Conversation(id=42, user_id="alice", title="existing")
+    session = FakeSession(owned_conversation=conversation)
+    graph = FakeGraph()
+    app = _app_with_runtime(
+        session,
+        [2001],
+        graph=graph,
+        completion_lock=completion_lock,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/chat/completions",
+            headers={"X-Mock-User-Id": "alice"},
+            json={"conversation_id": "42", "content": "next"},
+        )
+
+    assert response.status_code == expected_status
+    assert session.added == []
+    assert graph.state_configs == []
+    assert graph.stream_invocations == []
+    assert completion_lock.releases == 0
 
 
 def _pending_clarification_snapshot():

@@ -45,6 +45,7 @@ from app.domains.chat.graph.business_understanding import (
 from app.domains.chat.graph.routing import CLARIFY_NODE, LLM_NODE
 from app.domains.chat.repositories import MessageRepository
 from app.domains.chat.services.conversation import AcceptedUserTurn
+from app.domains.chat.services.completion_lock import release_completion_lock
 from app.services.chat_api.streaming import (
     project_business_boundary_event,
     project_clarification_interrupt,
@@ -186,6 +187,7 @@ class CompletionProducerRegistry:
         *,
         producer_factory: Callable[[Any], "CompletionProducer"],
         turn: AcceptedUserTurn,
+        completion_lock: Any,
         user_id: str,
     ) -> CompletionSubscriber:
         """创建 Producer task，并返回供当前 HTTP 连接消费的 Subscriber。
@@ -212,12 +214,34 @@ class CompletionProducerRegistry:
         producer = producer_factory(channel)
         # 第四步：把 Producer 放入独立 task。start() 不等待 run() 完成，而是立即把
         # Subscriber 返回给 Router，使 HTTP 响应可以一边等待事件、一边实时发送 SSE。
-        task = asyncio.create_task(producer.run(turn=turn, user_id=user_id))
+        task = asyncio.create_task(
+            self._run_locked_producer(
+                producer,
+                turn=turn,
+                user_id=user_id,
+                completion_lock=completion_lock,
+            )
+        )
         # 保存强引用既明确了 task 的所有权，也让 shutdown() 能统一等待或取消它们。
         self._tasks.add(task)
         # task 结束时自动从集合移除，避免已经完成的任务长期滞留。
         task.add_done_callback(self._task_done)
         return subscriber
+
+    async def _run_locked_producer(
+        self,
+        producer: "CompletionProducer",
+        *,
+        turn: AcceptedUserTurn,
+        user_id: str,
+        completion_lock: Any,
+    ) -> None:
+        """让后台 task 在所有退出路径统一释放 conversation 分布式锁。"""
+
+        try:
+            await producer.run(turn=turn, user_id=user_id)
+        finally:
+            await release_completion_lock(completion_lock)
 
     def _task_done(self, task: asyncio.Task[None]) -> None:
         """移除已结束任务，并显式读取异常以避免未检索异常告警。"""
