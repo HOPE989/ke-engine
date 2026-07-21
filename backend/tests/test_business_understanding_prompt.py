@@ -33,3 +33,21 @@ def test_prompt_builder_keeps_checkpoint_history_after_single_system_message():
 
     assert isinstance(built[0], SystemMessage)
     assert built[1:] == history
+
+
+def test_prompt_explicitly_defines_history_inheritance_and_all_route_examples():
+    from app.domains.chat.graph.business_understanding.prompt import (
+        BUSINESS_UNDERSTANDING_SYSTEM_PROMPT,
+    )
+
+    for token in [
+        "唯一确定",
+        "按实际版呢",
+        "继承",
+        "不得臆造",
+        '"route":"BUSINESS"',
+        '"route":"NON_BUSINESS"',
+        '"route":"CLARIFY"',
+        '"clarification_question":"请提供运单号"',
+    ]:
+        assert token in BUSINESS_UNDERSTANDING_SYSTEM_PROMPT
