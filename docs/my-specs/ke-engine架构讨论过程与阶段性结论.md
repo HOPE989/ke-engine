@@ -1617,13 +1617,27 @@ PostgreSQL saver 对 `BusinessRoute`、`BusinessIntent` 和 `BusinessUnderstandi
 | 命令 | 结果 |
 |---|---|
 | `uv run pytest tests/test_business_understanding_postgres.py -q -m integration` | `3 passed in 1.83s` |
-| `uv run pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_business_understanding_postgres.py -q -m integration` | `5 passed in 3.05s`；命令 wall 7.78s |
-| brief 指定的 14 个 Chat 单元测试文件 | `113 passed in 2.85s`；命令 wall 7.81s |
-| `uv run pytest -q -m "not integration"` | `563 passed, 3 skipped, 5 deselected in 6.19s`；命令 wall 11.27s |
-| `npm test` | `11/11 tests passed`；Node duration 302.76ms，命令 wall 4.53s；保留 Node type stripping 与未声明 module type 的既有 warning |
-| `npm run lint` | exit 0；命令 wall 8.72s |
-| `npm run build` | exit 0；Next.js 15.5.19 production build 成功；compile 2.1s，命令 wall 22.61s |
+| `uv run pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_business_understanding_postgres.py -q -m integration` | `5 passed in 1.74s` |
+| Task 11 指定的 16 个 Chat 单元测试文件 | `133 passed, 1 deselected in 1.83s` |
+| `uv run pytest tests/test_chat_completion_lock.py -q -m integration` | `1 passed, 6 deselected in 0.09s`；真实 Redis 同会话互斥、不同会话隔离、释放后重取均通过 |
+| `uv run pytest -q -m "not integration"` | `580 passed, 3 skipped, 6 deselected in 5.25s` |
+| `npm test` | `11/11 tests passed`；保留 Node type stripping 与未声明 module type 的既有 warning |
+| `npm run lint` | exit 0 |
+| `npm run build` | exit 0；Next.js 15.5.19 production build 成功；compile 2.7s |
 
-### 35.4 仍然延期的范围
+### 35.4 同会话 completion 的粗粒度分布式锁
+
+最终审查确认同一 conversation 的多个 completion 不能安全并行：USER 落库、checkpoint inspect/resume、Graph 执行、ASSISTANT commit 和终态发布必须作为一段串行生命周期。当前实现复用 Redis 与 `python-redis-lock`，使用固定 key `chat:conversation:{conversation_id}:completion`、正数 expiry 和自动续期。
+
+- existing conversation 先做 owner scope 查询，再观察锁状态，因此 missing 与 foreign-owned conversation 保持统一 404；
+- 锁在 USER 消息写入前以非阻塞方式获取；同会话已有 active completion 时返回 409，Redis 不可用时 fail closed 返回 503，两者都不写 USER、不访问 Graph；
+- 新会话先分配稳定 conversation ID，再取得同一把 conversation 级锁；
+- 请求事务成功后把锁 ownership 交给 `CompletionProducerRegistry`，由后台 task 的 `finally` 在 success、error 或 shutdown cancellation 后统一释放；
+- 客户端断连只 detach subscriber，不缩短后台执行和持锁周期；
+- Chat lifespan 在启动期共享 Redis client，关闭顺序为 Registry → Redis → PostgreSQL saver → 业务数据库，保证后台 task 仍能完成锁释放。
+
+本轮刻意不引入细粒度节点锁、数据库 advisory lock、进程内锁、fencing token 或跨存储原子补偿状态机；这些复杂度需要独立的故障模型与 change 才能展开。
+
+### 35.5 仍然延期的范围
 
 本轮没有实现业务 RAG、SQL Tool 或结构化查询执行，也没有生成业务事实答案。引用、证据校验、证据冲突处理、Grounded Answer 和更细粒度的运行计划/运输单据/分析/异常意图仍需后续 change 与独立测试证明；固定 boundary 文本不能被解释为业务回答能力已经完成。

@@ -158,7 +158,14 @@ def _parse_sse(body):
     return events
 
 
-def _app_with_runtime(session, ids, *, graph=None, completion_lock=None):
+def _app_with_runtime(
+    session,
+    ids,
+    *,
+    graph=None,
+    completion_lock=None,
+    producer_registry=None,
+):
     app = create_app()
     lock = completion_lock or FakeCompletionLock()
     app.state.chat_deps = SimpleNamespace(
@@ -168,7 +175,8 @@ def _app_with_runtime(session, ids, *, graph=None, completion_lock=None):
         model=object(),
         title_model=FakeTitleModel(),
         completion_lock_factory=lambda *, conversation_id: lock,
-        producer_registry=CompletionProducerRegistry(shutdown_timeout=1),
+        producer_registry=producer_registry
+        or CompletionProducerRegistry(shutdown_timeout=1),
     )
     return app
 
@@ -207,6 +215,36 @@ async def test_completion_lock_admission_failure_has_no_user_or_graph(
     assert graph.state_configs == []
     assert graph.stream_invocations == []
     assert completion_lock.releases == 0
+
+
+@pytest.mark.asyncio
+async def test_registry_start_failure_releases_completion_lock_before_handoff():
+    class RejectingRegistry:
+        def start(self, **kwargs):
+            raise RuntimeError("registry shutting down")
+
+    conversation = Conversation(id=42, user_id="alice", title="existing")
+    session = FakeSession(owned_conversation=conversation)
+    completion_lock = FakeCompletionLock()
+    app = _app_with_runtime(
+        session,
+        [2001],
+        completion_lock=completion_lock,
+        producer_registry=RejectingRegistry(),
+    )
+
+    with pytest.raises(RuntimeError, match="registry shutting down"):
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            await client.post(
+                "/api/v1/chat/completions",
+                headers={"X-Mock-User-Id": "alice"},
+                json={"conversation_id": "42", "content": "next"},
+            )
+
+    assert completion_lock.releases == 1
 
 
 def _pending_clarification_snapshot():

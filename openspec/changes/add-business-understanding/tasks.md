@@ -1235,13 +1235,126 @@ git commit -m "test(chat): verify business understanding flow"
 - Modify: `backend/app/domains/chat/graph/business_understanding/prompt.py`
 - Modify/Add focused Chat tests and Redis integration tests
 
-- [ ] **Step 11.1: RED — 锁工厂使用 conversation 级 key、过期时间和自动续期**
-- [ ] **Step 11.2: RED — 同会话第二个请求在 USER 落库和 Graph 访问前冲突，不同会话不冲突**
-- [ ] **Step 11.3: RED — 锁覆盖断连后的后台执行，并在 success/error/cancel/shutdown 后释放**
-- [ ] **Step 11.4: GREEN — 在 Chat lifespan 注入 Redis client，并用单把粗粒度锁覆盖完整 completion lifecycle**
-- [ ] **Step 11.5: RED/GREEN — Prompt 明确唯一上下文继承、禁止臆造和 BUSINESS/NON_BUSINESS/CLARIFY 三路合法示例**
-- [ ] **Step 11.6: Verify GREEN — 复跑 Chat、真实 PostgreSQL、Redis 锁、后端非 integration、离线评测、前端 test/lint/build、OpenSpec strict 与 diff check**
-- [ ] **Step 11.7: Commit and fresh final review**
+- [x] **Step 11.1: RED — 锁工厂使用 conversation 级 key、过期时间和自动续期**
+
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_completion_lock.py -q
+Exit: 1
+Observed: 6 failed；锁工厂、异步 ownership wrapper 和 Chat expiry 配置均尚不存在。
+
+GREEN: Set-Location backend; uv run pytest tests/test_chat_completion_lock.py tests/test_document_config.py -q
+Exit: 0
+Observed: 17 passed；固定 conversation key、120 秒正数配置、auto_renewal、非阻塞 acquire 和 release error 收口通过。
+Commit: a1262ae feat(chat): add conversation completion lock
+```
+
+- [x] **Step 11.2: RED — 同会话第二个请求在 USER 落库和 Graph 访问前冲突，不同会话不冲突**
+
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_conversation_service.py -q
+Exit: 1
+Observed: 5 failed；ConversationService 尚不接收 completion_lock_factory，也不返回锁 ownership。
+
+RED: Set-Location backend; uv run pytest tests/test_chat_completion_api.py::test_completion_lock_admission_failure_has_no_user_or_graph -q
+Exit: 1
+Observed: 2 failed；Router 尚未注入锁工厂和映射 409/503。
+
+GREEN: Set-Location backend; uv run pytest tests/test_chat_conversation_service.py tests/test_chat_completion_api.py tests/test_chat_completion_disconnect.py tests/test_chat_completion_resume.py tests/test_chat_completion_producer.py -q
+Exit: 0
+Observed: 52 passed；owner concealment 后、USER 写入前获取锁，冲突/Redis 故障均无 USER/Graph 副作用。
+Commit: 4dcc6aa fix(chat): serialize conversation completions
+```
+
+- [x] **Step 11.3: RED — 锁覆盖断连后的后台执行，并在 success/error/cancel/shutdown 后释放**
+
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_completion_disconnect.py::test_subscriber_disconnect_does_not_cancel_producer_or_queue_later_tokens -q
+Exit: 1
+Observed: Registry.start 不接受 completion_lock，断连后的后台 task 尚未拥有锁。
+
+GREEN: Set-Location backend; uv run pytest tests/test_chat_completion_disconnect.py -q
+Exit: 0
+Observed: 6 passed；detach 不释放锁，后台 success、逃逸 exception 和 shutdown cancellation 均由 task finally 恰好释放一次。
+
+GREEN: Set-Location backend; uv run pytest tests/test_chat_completion_api.py::test_registry_start_failure_releases_completion_lock_before_handoff -q
+Exit: 0
+Observed: 1 passed；Registry 尚未接管时的 start failure 由请求侧释放锁。
+```
+
+- [x] **Step 11.4: GREEN — 在 Chat lifespan 注入 Redis client，并用单把粗粒度锁覆盖完整 completion lifecycle**
+
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_api_lifespan.py::test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order -q
+Exit: 1
+Observed: Redis client 未打开，ChatApiDeps 未暴露 bound completion_lock_factory。
+
+GREEN: Set-Location backend; uv run pytest tests/test_chat_api_lifespan.py tests/test_chat_completion_api.py -q
+Exit: 0
+Observed: 21 passed；cleanup 顺序为 Registry → Redis → saver → database。
+Commit: 6ffa206 feat(chat): inject completion redis lock
+```
+
+- [x] **Step 11.5: RED/GREEN — Prompt 明确唯一上下文继承、禁止臆造和 BUSINESS/NON_BUSINESS/CLARIFY 三路合法示例**
+
+```text
+RED: Set-Location backend; uv run pytest tests/test_business_understanding_prompt.py -q
+Exit: 1
+Observed: 1 failed, 2 passed；生产 Prompt 缺少显式唯一继承规则和三路合法 JSON 示例。
+
+GREEN: Set-Location backend; uv run pytest tests/test_business_understanding_prompt.py tests/test_business_understanding_evaluation.py tests/test_business_understanding_models.py -q
+Exit: 0
+Observed: 16 passed；Prompt version 保持 v1，契约、离线评分器与模型校验回归通过。
+Commit: 672e647 fix(chat): clarify business prompt context rules
+```
+
+- [x] **Step 11.6: Verify GREEN — 复跑 Chat、真实 PostgreSQL、Redis 锁、后端非 integration、离线评测、前端 test/lint/build、OpenSpec strict 与 diff check**
+
+```text
+INFRA: docker compose up -d postgres redis
+Exit: 0
+Observed: ke-engine-postgres Running；ke-engine-redis Started。
+
+REDIS: Set-Location backend; uv run pytest tests/test_chat_completion_lock.py -q -m integration
+Exit: 0
+Observed: 1 passed, 6 deselected；真实 Redis 证明同会话互斥、不同会话隔离、释放后可重新获取。
+
+CHAT: Set-Location backend; uv run pytest tests/test_business_understanding_models.py tests/test_business_understanding_prompt.py tests/test_business_understanding_evaluation.py tests/test_business_understanding_node.py tests/test_chat_graph.py tests/test_chat_graph_routing.py tests/test_chat_graph_clarification.py tests/test_chat_contracts.py tests/test_chat_sse_adapter.py tests/test_chat_completion_producer.py tests/test_chat_completion_resume.py tests/test_chat_completion_api.py tests/test_chat_completion_disconnect.py tests/test_chat_conversation_service.py tests/test_chat_completion_lock.py tests/test_chat_api_lifespan.py -q -m "not integration"
+Exit: 0
+Observed: 133 passed, 1 deselected in 1.83s。
+
+POSTGRES: Set-Location backend; uv run pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_business_understanding_postgres.py -q -m integration
+Exit: 0
+Observed: 5 passed in 1.74s。
+
+BACKEND: Set-Location backend; uv run pytest -q -m "not integration"
+Exit: 0
+Observed: 580 passed, 3 skipped, 6 deselected in 5.25s。
+
+EVALUATION: Set-Location backend; uv run pytest tests/test_business_understanding_evaluation.py -q -s
+Exit: 0
+Observed: 3 passed；cases=18, live_model=false；route=18/18, intent=18/18, key_entities=24/24, clarification=18/18, schema_validity=18/18。结果仅为 deterministic contract/evaluator validation。
+
+FRONTEND: Set-Location frontend; npm test; npm run lint; npm run build
+Exit: 0 / 0 / 0
+Observed: 11/11 passed；ESLint 通过；Next.js 15.5.19 production build 通过。
+
+SPEC: openspec validate add-business-understanding --type change --strict
+Exit: 0
+Observed: Change 'add-business-understanding' is valid。
+
+DIFF: git diff --check
+Exit: 0
+Observed: 无 whitespace error。
+```
+
+- [x] **Step 11.7: Commit and fresh final review**
+
+```text
+FRESH FINAL REVIEW: 独立全新上下文审查 merge-base f132c5f5 至当前工作区。
+Observed: 无 Critical/Important blocker，无值得报告的 Minor；conversation lock 获取顺序、完整 lifecycle ownership、404 concealment、409/503、断连语义、LIFO cleanup、Prompt 契约和测试证据均满足 OpenSpec。
+
+FINAL EVIDENCE COMMIT: test(chat): verify conversation completion lock
+```
 
 ---
 

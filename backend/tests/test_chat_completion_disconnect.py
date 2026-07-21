@@ -346,3 +346,58 @@ async def test_registry_shutdown_rejects_new_producers():
             completion_lock=FakeCompletionLock(),
             user_id="alice",
         )
+
+
+@pytest.mark.asyncio
+async def test_registry_releases_completion_lock_when_producer_raises():
+    from app.domains.chat.services.runtime import CompletionProducerRegistry
+
+    class FailingProducer:
+        async def run(self, *, turn, user_id):
+            raise RuntimeError("producer failed")
+
+    registry = CompletionProducerRegistry(shutdown_timeout=1)
+    completion_lock = FakeCompletionLock()
+    registry.start(
+        producer_factory=lambda publisher: FailingProducer(),
+        turn=AcceptedUserTurn(1001, 2001, "hello"),
+        completion_lock=completion_lock,
+        user_id="alice",
+    )
+
+    await registry.shutdown()
+
+    assert completion_lock.releases == 1
+    assert registry.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_registry_shutdown_cancellation_releases_completion_lock():
+    from app.domains.chat.services.runtime import CompletionProducerRegistry
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class BlockingProducer:
+        async def run(self, *, turn, user_id):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    registry = CompletionProducerRegistry(shutdown_timeout=0)
+    completion_lock = FakeCompletionLock()
+    registry.start(
+        producer_factory=lambda publisher: BlockingProducer(),
+        turn=AcceptedUserTurn(1001, 2001, "hello"),
+        completion_lock=completion_lock,
+        user_id="alice",
+    )
+    await started.wait()
+
+    await registry.shutdown()
+
+    assert cancelled.is_set()
+    assert completion_lock.releases == 1
+    assert registry.active_count == 0

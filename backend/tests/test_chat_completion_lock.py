@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 import pytest
 
 
@@ -132,3 +134,53 @@ def test_chat_completion_lock_expiry_is_positive_startup_configuration():
     ].description
     assert description is not None
     assert description.startswith("startup-only:")
+
+
+@pytest.mark.integration
+def test_real_redis_excludes_same_conversation_and_isolates_different_conversations():
+    from app.core.config import create_settings
+    from app.infrastructure.redis import chat_completion_lock, create_redis_client
+
+    settings = create_settings()
+    redis_client = create_redis_client(settings.redis_url)
+    first_conversation_id = uuid4().int
+    second_conversation_id = uuid4().int
+    first = chat_completion_lock(
+        redis_client=redis_client,
+        conversation_id=first_conversation_id,
+        expire_seconds=settings.chat_completion_lock_expire_seconds,
+    )
+    contender = chat_completion_lock(
+        redis_client=redis_client,
+        conversation_id=first_conversation_id,
+        expire_seconds=settings.chat_completion_lock_expire_seconds,
+    )
+    independent = chat_completion_lock(
+        redis_client=redis_client,
+        conversation_id=second_conversation_id,
+        expire_seconds=settings.chat_completion_lock_expire_seconds,
+    )
+
+    first_acquired = False
+    contender_acquired = False
+    independent_acquired = False
+    try:
+        first_acquired = first.acquire(blocking=False)
+        assert first_acquired is True
+        assert contender.acquire(blocking=False) is False
+
+        independent_acquired = independent.acquire(blocking=False)
+        assert independent_acquired is True
+
+        first.release()
+        first_acquired = False
+        contender_acquired = contender.acquire(blocking=False)
+        assert contender_acquired is True
+    finally:
+        if contender_acquired:
+            contender.release()
+        if first_acquired:
+            first.release()
+        if independent_acquired:
+            independent.release()
+        redis_client.close()
