@@ -12,7 +12,7 @@ def test_studio_graph_binds_one_model_to_existing_builder(monkeypatch):
     settings = SimpleNamespace(openai_model="gpt-test")
     handler = object()
     resources = SimpleNamespace(handler=handler)
-    model = object()
+    bound_model = object()
     compiled = object()
     calls = []
 
@@ -40,9 +40,8 @@ def test_studio_graph_binds_one_model_to_existing_builder(monkeypatch):
                 {"settings": value, "model": model, "callbacks": callbacks},
             )
         )
-        return globals_model
+        return bound_model
 
-    globals_model = model
     monkeypatch.setattr(studio, "create_chat_model", fake_create_chat_model)
     monkeypatch.setattr(
         studio,
@@ -62,7 +61,7 @@ def test_studio_graph_binds_one_model_to_existing_builder(monkeypatch):
                 "callbacks": [handler],
             },
         ),
-        ("builder", {"bound_model": model}),
+        ("builder", {"bound_model": bound_model}),
         ("compile", {}),
     ]
 

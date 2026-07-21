@@ -40,9 +40,20 @@
 
 ## 6. Verification and evidence
 
-- [ ] 6.1 Run focused Langfuse, Graph, Chat and evaluation tests
-- [ ] 6.2 Run the complete backend non-integration suite without network access
-- [ ] 6.3 Verify the installed LangGraph CLI exposes the local dev command
-- [ ] 6.4 Run strict OpenSpec validation and git diff checks
-- [ ] 6.5 Review the complete change for masked business exceptions, duplicate topology, accidental infrastructure tracing and silent Experiment success
-- [ ] 6.6 Record exact verification evidence and keep live-model execution explicitly manual without credentials
+- [x] 6.1 Run focused Langfuse, Graph, Chat and evaluation tests
+- [x] 6.2 Run the complete backend non-integration suite without network access
+- [x] 6.3 Verify the installed LangGraph CLI exposes the local dev command
+- [x] 6.4 Run strict OpenSpec validation and git diff checks
+- [x] 6.5 Review the complete change for masked business exceptions, duplicate topology, accidental infrastructure tracing and silent Experiment success
+- [x] 6.6 Record exact verification evidence and keep live-model execution explicitly manual without credentials
+
+## Verification evidence
+
+- Focused observability, Studio, Graph, Chat and evaluation suite: `103 passed in 1.99s`.
+- Complete backend non-integration suite: `613 passed, 3 skipped, 6 deselected in 4.54s`.
+- LangGraph CLI: `uv run --extra dev langgraph dev --help` exited successfully and exposed the development server command.
+- Dependency lock: `uv lock --check` resolved 138 packages without changing the lockfile.
+- Studio config/import smoke check printed `studio_config_import_ok`; the focused Studio suite reported `5 passed in 0.89s` after review cleanup.
+- OpenSpec strict validation reported `Change 'add-langfuse-observability' is valid`; `git diff --check` reported no whitespace errors.
+- Final five-axis review found no required correctness, simplicity, architecture, security or performance changes. In particular, telemetry cleanup preserves business exceptions, Studio has one topology and no production resources, and the Experiment requires a Dataset Run URL.
+- All pytest runs use fake clients/handlers/models (`live_model=false`) and make no Langfuse or model network call. The real 18-case run remains the documented manual `python -m app.evaluation.business_understanding_langfuse` command and was not executed without credentials.
