@@ -18,7 +18,7 @@ class ContentDeltaPayload(BaseModel):
 
 class CompletedPayload(BaseModel):
     assistant_message_id: ResponseId
-    finish_reason: Literal["stop"] = "stop"
+    finish_reason: Literal["stop", "interrupt"] = "stop"
 
 
 class ErrorPayload(BaseModel):

@@ -97,3 +97,13 @@ def test_chat_sse_payloads_have_fixed_public_fields_and_string_ids():
         "user_message_id": "2036854775808",
     }
     assert payloads[2].model_dump(mode="json")["assistant_message_id"] == "2036854775809"
+
+
+def test_completed_payload_accepts_only_stop_or_interrupt():
+    assert CompletedPayload(assistant_message_id=1).finish_reason == "stop"
+    assert CompletedPayload(
+        assistant_message_id=1, finish_reason="interrupt"
+    ).finish_reason == "interrupt"
+
+    with pytest.raises(ValidationError):
+        CompletedPayload(assistant_message_id=1, finish_reason="length")

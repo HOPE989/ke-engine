@@ -1,6 +1,8 @@
 import json
 
+import pytest
 from langchain_core.messages import AIMessageChunk
+from langgraph.types import Interrupt
 
 from app.contracts.chat.stream import (
     CompletedPayload,
@@ -80,3 +82,72 @@ def test_project_graph_event_ignores_empty_and_non_public_events():
     ]
 
     assert [project_graph_event(event) for event in events] == [None, None, None, None]
+
+
+def test_project_clarification_interrupt_projects_real_langgraph_interrupt_value():
+    from app.services.chat_api.streaming import project_clarification_interrupt
+
+    event = {
+        "event": "on_chain_stream",
+        "data": {
+            "chunk": {
+                "__interrupt__": (
+                    Interrupt(
+                        value={
+                            "kind": "business_clarification",
+                            "question": "请提供运单号",
+                        },
+                        id="internal-id",
+                    ),
+                )
+            }
+        },
+    }
+
+    payload = project_clarification_interrupt(event)
+
+    assert payload is not None
+    assert payload.model_dump(mode="json") == {
+        "kind": "business_clarification",
+        "question": "请提供运单号",
+    }
+    assert "internal-id" not in payload.model_dump_json()
+
+
+def test_project_clarification_interrupt_ignores_non_interrupt_events():
+    from app.services.chat_api.streaming import project_clarification_interrupt
+
+    event = {
+        "event": "on_chat_model_stream",
+        "data": {"chunk": AIMessageChunk(content="普通回答")},
+    }
+
+    assert project_clarification_interrupt(event) is None
+
+
+@pytest.mark.parametrize(
+    "interrupts",
+    [
+        (Interrupt(value={"kind": "unknown", "question": "请提供运单号"}),),
+        (Interrupt(value={"kind": "business_clarification", "question": "   "}),),
+        (object(),),
+        (
+            Interrupt(
+                value={"kind": "business_clarification", "question": "请提供运单号"}
+            ),
+            Interrupt(
+                value={"kind": "business_clarification", "question": "请提供合同号"}
+            ),
+        ),
+    ],
+)
+def test_project_clarification_interrupt_rejects_unsupported_payloads(interrupts):
+    from app.services.chat_api.streaming import project_clarification_interrupt
+
+    event = {
+        "event": "on_chain_stream",
+        "data": {"chunk": {"__interrupt__": interrupts}},
+    }
+
+    with pytest.raises(ValueError):
+        project_clarification_interrupt(event)
