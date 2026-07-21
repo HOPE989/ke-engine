@@ -15,14 +15,9 @@ class ConversationLockUnavailable(Exception):
     """Redis 锁基础设施不可用。"""
 
 
-async def acquire_completion_lock(
-    lock_factory: Any,
-    *,
-    conversation_id: int,
-) -> Any:
+async def acquire_completion_lock(lock: Any) -> Any:
     """非阻塞获取 conversation 锁，并把同步 Redis I/O 移出事件循环。"""
 
-    lock = lock_factory(conversation_id=conversation_id)
     try:
         acquired = await asyncio.to_thread(lock.acquire, blocking=False)
     except Exception as exc:

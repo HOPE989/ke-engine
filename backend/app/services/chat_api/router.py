@@ -67,7 +67,8 @@ async def create_completion(
             chat_deps.session_factory,
             chat_deps.id_generator,
             chat_deps.title_model,
-            completion_lock_factory=chat_deps.completion_lock_factory,
+            redis_client=chat_deps.redis_client,
+            completion_lock_expire_seconds=chat_deps.completion_lock_expire_seconds,
         ).accept_user_turn(
             user_id=principal.user_id,
             content=request.content,

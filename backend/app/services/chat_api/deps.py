@@ -7,7 +7,6 @@
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
-from functools import partial
 import inspect
 from typing import Any
 
@@ -18,7 +17,7 @@ from app.domains.chat.graph import build_chat_graph
 from app.domains.chat.services.title import TITLE_MODEL
 from app.infrastructure.langgraph import postgres_checkpointer
 from app.infrastructure.llm import create_chat_model
-from app.infrastructure.redis import chat_completion_lock, create_redis_client
+from app.infrastructure.redis import create_redis_client
 from app.infrastructure.snowflake import SnowflakeIdGenerator
 from app.services.document_api.deps import initialize_database_deps
 
@@ -71,7 +70,8 @@ class ChatApiDeps:
     graph: Any
     model: Any
     title_model: Any
-    completion_lock_factory: Any
+    redis_client: Any
+    completion_lock_expire_seconds: int
     producer_registry: Any
 
 
@@ -109,11 +109,6 @@ async def application_lifespan_resources(
         # 执行的 completion 可以在最终退出路径释放分布式锁。
         redis_client = create_redis_client(settings.redis_url)
         stack.push_cleanup(redis_client.close)
-        completion_lock_factory = partial(
-            chat_completion_lock,
-            redis_client=redis_client,
-            expire_seconds=settings.chat_completion_lock_expire_seconds,
-        )
 
         # 步骤 4：只有 saver 完成 setup 后才编译生产 Graph，确保首次请求即可持久化 state。
         graph = build_chat_graph().compile(checkpointer=saver)
@@ -127,7 +122,8 @@ async def application_lifespan_resources(
             graph=graph,
             model=model,
             title_model=title_model,
-            completion_lock_factory=completion_lock_factory,
+            redis_client=redis_client,
+            completion_lock_expire_seconds=settings.chat_completion_lock_expire_seconds,
             producer_registry=producer_registry,
         )
         stack.push_cleanup(_discard_app_state_attr, application, "chat_deps")

@@ -23,6 +23,7 @@ from app.domains.chat.shared.models import (
     Message,
     MessageRole,
 )
+from app.infrastructure.redis import chat_completion_lock
 
 
 class ConversationNotFound(Exception):
@@ -73,14 +74,16 @@ class ConversationService:
         id_generator: Any,
         title_model: Any,
         *,
-        completion_lock_factory: Any,
+        redis_client: Any,
+        completion_lock_expire_seconds: int,
         title_submitter: Any = submit_title_generation,
         now: Any = None,
     ) -> None:
         self._session_factory = session_factory
         self._id_generator = id_generator
         self._title_model = title_model
-        self._completion_lock_factory = completion_lock_factory
+        self._redis_client = redis_client
+        self._completion_lock_expire_seconds = completion_lock_expire_seconds
         self._title_submitter = title_submitter
         self._now = now or (lambda: datetime.now(UTC))
 
@@ -128,8 +131,11 @@ class ConversationService:
                             raise ConversationNotFound()
 
                     completion_lock = await acquire_completion_lock(
-                        self._completion_lock_factory,
-                        conversation_id=conversation_id,
+                        chat_completion_lock(
+                            redis_client=self._redis_client,
+                            conversation_id=conversation_id,
+                            expire_seconds=self._completion_lock_expire_seconds,
+                        )
                     )
 
                     if is_new_conversation:

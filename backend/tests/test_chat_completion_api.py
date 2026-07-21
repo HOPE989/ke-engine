@@ -145,6 +145,22 @@ class FakeCompletionLock:
         self.releases += 1
 
 
+@pytest.fixture(autouse=True)
+def build_concrete_completion_lock_from_test_redis_client(monkeypatch):
+    from app.domains.chat.services import conversation
+
+    def build_lock(*, redis_client, conversation_id, expire_seconds):
+        assert conversation_id > 0
+        assert expire_seconds == 120
+        return redis_client
+
+    monkeypatch.setattr(
+        conversation,
+        "chat_completion_lock",
+        build_lock,
+    )
+
+
 def _parse_sse(body):
     events = []
     for block in body.strip().split("\n\n"):
@@ -174,7 +190,8 @@ def _app_with_runtime(
         graph=graph or FakeGraph(),
         model=object(),
         title_model=FakeTitleModel(),
-        completion_lock_factory=lambda *, conversation_id: lock,
+        redis_client=lock,
+        completion_lock_expire_seconds=120,
         producer_registry=producer_registry
         or CompletionProducerRegistry(shutdown_timeout=1),
     )

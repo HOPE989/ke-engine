@@ -1437,6 +1437,80 @@ FINAL COMMIT: fix(chat): route graph with node commands
 
 ---
 
+## Task 13: Simplify Chat Lock Construction Without Weakening Ownership
+
+**Deliverable:** Keep the coarse Redis lock lifecycle and failure semantics while removing the bound lock-factory abstraction from lifespan, API dependencies, and the conversation service.
+
+**Files:**
+
+- Modify: `openspec/changes/add-business-understanding/design.md`
+- Modify: `backend/app/services/chat_api/deps.py`
+- Modify: `backend/app/services/chat_api/router.py`
+- Modify: `backend/app/domains/chat/services/conversation.py`
+- Modify: `backend/app/domains/chat/services/completion_lock.py`
+- Modify: focused Chat lock, lifespan, service, and API tests
+- Modify: implementation handoff documentation
+
+- [x] **Step 13.1: Correct the design — direct concrete lock construction is the intended boundary**
+- [x] **Step 13.2: RED — Require raw Redis dependencies and concrete-lock acquisition without a factory surface**
+
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_completion_lock.py tests/test_chat_api_lifespan.py tests/test_chat_conversation_service.py tests/test_chat_completion_api.py -q -m "not integration"
+Exit: 1
+Observed: 26 failed, 14 passed, 1 deselected；失败集中在 acquire helper 仍要求 factory/ID、ChatApiDeps 与 ConversationService 不接受原始 Redis 依赖，以及 Router 仍读取 completion_lock_factory。
+```
+
+- [x] **Step 13.3: GREEN — Remove partial/factory plumbing and preserve lock ownership transfer**
+
+```text
+GREEN: Set-Location backend; uv run pytest tests/test_chat_completion_lock.py tests/test_chat_api_lifespan.py tests/test_chat_conversation_service.py tests/test_chat_completion_api.py -q -m "not integration"
+Exit: 0
+Observed: 40 passed, 1 deselected；lifespan 直接挂载共享 Redis client/expiry，ConversationService 在稳定 conversation ID 后构造具体锁，异步 helper 只负责 acquire 与错误映射。
+```
+
+- [x] **Step 13.4: Verify focused lock, lifespan, service, API, producer, and disconnect behavior**
+
+```text
+FOCUSED: Set-Location backend; uv run pytest tests/test_chat_completion_lock.py tests/test_chat_api_lifespan.py tests/test_chat_conversation_service.py tests/test_chat_completion_api.py tests/test_chat_completion_producer.py tests/test_chat_completion_disconnect.py tests/test_chat_completion_resume.py tests/test_chat_sse_adapter.py -q -m "not integration"
+Exit: 0
+Observed: 79 passed, 1 deselected；admission、API、Producer ownership transfer、disconnect、resume 与 SSE 行为均保持。
+
+REAL REDIS: Set-Location backend; uv run pytest tests/test_chat_completion_lock.py -q -m integration
+Exit: 0
+Observed: 1 passed, 6 deselected；同 conversation 互斥、不同 conversation 隔离、释放后重取均通过。
+```
+
+- [x] **Step 13.5: Run full backend/frontend/OpenSpec verification and update evidence**
+
+```text
+BACKEND: Set-Location backend; uv run pytest -q -m "not integration"
+Exit: 0
+Observed: 581 passed, 3 skipped, 6 deselected in 7.64s。
+
+POSTGRES: Set-Location backend; uv run pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_business_understanding_postgres.py -q -m integration
+Exit: 0
+Observed: 5 passed in 2.81s。
+
+FRONTEND: Set-Location frontend; npm test / npm run lint / npm run build
+Exit: 0 / 0 / 0
+Observed: 11/11 passed；ESLint 通过；Next.js 15.5.19 production build 通过。
+
+SPEC: openspec validate add-business-understanding --type change --strict
+Exit: 0
+Observed: Change 'add-business-understanding' is valid。
+```
+
+- [x] **Step 13.6: Commit the simplification after a clean review**
+
+```text
+FINAL REVIEW: 检查生产/测试/OpenSpec/handoff 完整 diff，并搜索 completion_lock_factory 与 partial 残留。
+Observed: Chat 中无残留 factory 链；锁构造发生在 owner 校验或新 conversation ID 分配之后；只有成功 acquire 的锁会进入事务失败释放或 Registry ownership transfer；无新增细粒度锁、重试、fencing 或状态机。
+
+FINAL COMMIT: refactor(chat): simplify completion lock construction
+```
+
+---
+
 ## Final TDD Compliance Gate
 
 以下项目全部有证据后，才可把 change 标记为 implemented：

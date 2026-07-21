@@ -1,13 +1,13 @@
 # Business Understanding 收尾状态
 
-截至 2026-07-21，`feat/business-understanding` 已完成最终审查修复、粗粒度 conversation Redis 分布式锁、Prompt 契约补强、DeerFlow 风格 `Command(goto)` 控制流纠偏和全量复验。
+截至 2026-07-21，`feat/business-understanding` 已完成最终审查修复、粗粒度 conversation Redis 分布式锁、锁构造链路简化、Prompt 契约补强、DeerFlow 风格 `Command(goto)` 控制流纠偏和全量复验。
 
 ## 当前状态
 
 - 分支：`feat/business-understanding`
 - merge-base：`f132c5f5ff7ae9ede9233265377721ddb8b535e7`
 - 远端：本轮收尾提交尚未 push；本地分支领先 `origin/feat/business-understanding`
-- OpenSpec：`add-business-understanding` 为 `ready`，93/93 tasks 完成，strict validation 通过
+- OpenSpec：`add-business-understanding` 为 `ready`，99/99 tasks 完成，strict validation 通过
 - 工作区：最终证据提交后应为干净状态
 - 尚未执行：OpenSpec archive、push、PR 或 merge；这些需要用户选择，不应自动进行
 
@@ -18,6 +18,7 @@
 - 锁在 USER 落库前非阻塞获取；冲突返回 409，Redis 不可用时 fail closed 返回 503，两者都不写 USER、不访问 Graph。
 - 锁 ownership 从请求事务转移给 `CompletionProducerRegistry`，覆盖 checkpoint inspect/resume、Graph、ASSISTANT commit 与 terminal；客户端断连不释放，后台 success/error/cancel/shutdown 的 `finally` 释放。
 - Chat lifespan 共享 Redis client，关闭顺序为 Registry → Redis → PostgreSQL saver → 业务数据库。
+- 锁装配已对齐 Document 的直接方式：lifespan 只暴露共享 Redis client 与 expiry；`ConversationService` 在 owner 校验或新 ID 分配后直接构造具体锁；异步 helper 只处理同步 I/O 与 409/503 错误映射，不再透传 `partial`/factory。
 - Prompt `v1` 明确唯一上下文继承、“按实际版呢”多轮规则、不得臆造，以及 BUSINESS/NON_BUSINESS/CLARIFY 三路合法 JSON 示例。
 - `business_understanding` 通过 typed `Command(update, goto)` 原子提交结构化结果并跳转 BUSINESS/NON_BUSINESS/CLARIFY；clarify resume 同样以 `Command(goto="business_understanding")` 回到重评。Builder 已移除显式条件边和 clarification 静态回边。
 
@@ -29,11 +30,13 @@
 - `4dcc6aa` fix(chat): serialize conversation completions
 - `6ffa206` feat(chat): inject completion redis lock
 - `672e647` fix(chat): clarify business prompt context rules
+- `refactor(chat): simplify completion lock construction`
 
 ## 最终验证证据
 
 - 真实 Redis：1 passed，6 deselected；同会话互斥、不同会话隔离、释放后可重取
-- Command(goto) 聚焦回归：81 passed
+- 锁简化聚焦回归：79 passed，1 deselected
+- Command(goto) 聚焦回归：81 passed（上一轮节点路由纠偏证据）
 - PostgreSQL integration：5 passed
 - 后端非 integration：581 passed，3 skipped，6 deselected
 - 离线确定性评测：3 passed；18 cases；`live_model=false`；五维全部通过

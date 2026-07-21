@@ -106,19 +106,27 @@ class FakeCompletionLock:
         self.releases += 1
 
 
-class FakeCompletionLockFactory:
-    def __init__(self, calls, lock):
-        self.calls = calls
-        self.lock = lock
+@pytest.fixture(autouse=True)
+def build_concrete_completion_lock_from_test_redis_client(monkeypatch):
+    from app.domains.chat.services import conversation
 
-    def __call__(self, *, conversation_id):
-        self.calls.append(f"lock_factory:{conversation_id}")
-        return self.lock
+    def build_lock(*, redis_client, conversation_id, expire_seconds):
+        redis_client.calls.append(f"lock_create:{conversation_id}:{expire_seconds}")
+        return redis_client
+
+    monkeypatch.setattr(
+        conversation,
+        "chat_completion_lock",
+        build_lock,
+    )
 
 
-def available_completion_lock_factory():
+def available_completion_lock_dependencies():
     calls = []
-    return FakeCompletionLockFactory(calls, FakeCompletionLock(calls))
+    return {
+        "redis_client": FakeCompletionLock(calls),
+        "completion_lock_expire_seconds": 120,
+    }
 
 
 @pytest.mark.asyncio
@@ -133,7 +141,8 @@ async def test_accept_user_turn_acquires_conversation_lock_before_user_write():
         session_factory=FakeSessionFactory(session),
         id_generator=FakeIdGenerator(2002),
         title_model=object(),
-        completion_lock_factory=FakeCompletionLockFactory(calls, lock),
+        redis_client=lock,
+        completion_lock_expire_seconds=120,
         title_submitter=FakeTitleSubmitter(session),
     )
 
@@ -143,6 +152,7 @@ async def test_accept_user_turn_acquires_conversation_lock_before_user_write():
         conversation_id=1001,
     )
 
+    assert "lock_create:1001:120" in calls
     assert calls.index("lock_acquire:False") < calls.index("add:Message")
     assert accepted.turn.content == "next"
     assert accepted.lock is lock
@@ -174,7 +184,8 @@ async def test_lock_admission_failure_rolls_back_before_user_write(lock, error_t
         session_factory=FakeSessionFactory(session),
         id_generator=FakeIdGenerator(2002),
         title_model=object(),
-        completion_lock_factory=FakeCompletionLockFactory(calls, lock),
+        redis_client=lock,
+        completion_lock_expire_seconds=120,
         title_submitter=FakeTitleSubmitter(session),
     )
     expected = ConversationBusy if error_type == "busy" else ConversationLockUnavailable
@@ -209,7 +220,8 @@ async def test_foreign_conversation_does_not_observe_completion_lock_state():
         session_factory=FakeSessionFactory(session),
         id_generator=FakeIdGenerator(2002),
         title_model=object(),
-        completion_lock_factory=FakeCompletionLockFactory(calls, lock),
+        redis_client=lock,
+        completion_lock_expire_seconds=120,
         title_submitter=FakeTitleSubmitter(session),
     )
 
@@ -234,7 +246,8 @@ async def test_user_transaction_failure_releases_acquired_completion_lock():
         session_factory=FakeSessionFactory(session),
         id_generator=FakeIdGenerator(1001, 2001),
         title_model=object(),
-        completion_lock_factory=FakeCompletionLockFactory(calls, lock),
+        redis_client=lock,
+        completion_lock_expire_seconds=120,
         title_submitter=FakeTitleSubmitter(session),
     )
 
@@ -257,7 +270,7 @@ async def test_accept_first_user_turn_creates_active_conversation_and_message_at
         session_factory=FakeSessionFactory(session),
         id_generator=FakeIdGenerator(1001, 2001),
         title_model=title_model,
-        completion_lock_factory=available_completion_lock_factory(),
+        **available_completion_lock_dependencies(),
         title_submitter=title_submitter,
         now=lambda: now,
     )
@@ -309,7 +322,7 @@ async def test_accept_user_turn_appends_to_owned_conversation_and_updates_activi
         session_factory=FakeSessionFactory(session),
         id_generator=FakeIdGenerator(2002),
         title_model=object(),
-        completion_lock_factory=available_completion_lock_factory(),
+        **available_completion_lock_dependencies(),
         title_submitter=title_submitter,
         now=lambda: now,
     )
@@ -340,7 +353,7 @@ async def test_blank_content_is_rejected_before_opening_session_or_transaction()
         factory,
         FakeIdGenerator(),
         title_model=object(),
-        completion_lock_factory=available_completion_lock_factory(),
+        **available_completion_lock_dependencies(),
         title_submitter=FakeTitleSubmitter(factory.session),
     )
 
@@ -364,7 +377,7 @@ async def test_missing_and_foreign_conversations_raise_same_not_found(owned_conv
         FakeSessionFactory(session),
         FakeIdGenerator(2001),
         title_model=object(),
-        completion_lock_factory=available_completion_lock_factory(),
+        **available_completion_lock_dependencies(),
         title_submitter=title_submitter,
     )
 
@@ -391,7 +404,7 @@ async def test_first_turn_rolls_back_when_either_write_fails(fail_on_type):
         FakeSessionFactory(session),
         FakeIdGenerator(1001, 2001),
         title_model=object(),
-        completion_lock_factory=available_completion_lock_factory(),
+        **available_completion_lock_dependencies(),
         title_submitter=title_submitter,
     )
 

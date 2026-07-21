@@ -203,6 +203,12 @@ Alternatives considered:
 - Process-local lock: rejected because multiple API workers could still race the same checkpoint.
 - Redis task lease/fencing state machine: deferred because the current requirement is only one active completion per conversation, and the existing lock library already provides owner-token release, expiry, and renewal.
 
+The construction path stays intentionally direct, matching the existing Document lock usage. Lifespan exposes the shared Redis client and the startup-only expiry value as ordinary dependencies. After ownership has been checked and a stable conversation ID is known, `ConversationService` creates the concrete `python-redis-lock` instance and passes that instance to the asynchronous acquire helper. The helper owns only the sync-to-async boundary and error mapping; it does not create locks.
+
+Alternative considered:
+
+- Pass a bound lock factory from lifespan through the API router into the domain service: rejected because Chat has one concrete lock implementation and no runtime selection requirement. The extra `partial`/factory/wrapper chain existed mainly to simplify tests, exposed no meaningful policy boundary, and made the production ownership flow harder to follow.
+
 ## Risks / Trade-offs
 
 - [Prompt may overuse CLARIFY for optional fields] → Include positive “answer without optional ID/time/version” cases and assert focused clarification only for execution-critical information.

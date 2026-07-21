@@ -31,8 +31,6 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
     title_model = object()
     saver = object()
     graph = object()
-    lock = object()
-
     class FakeRedis:
         def close(self):
             calls.append("redis_close")
@@ -85,15 +83,6 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
         calls.append("redis_open")
         return redis_client
 
-    def fake_chat_completion_lock(
-        *, redis_client: object, conversation_id: int, expire_seconds: int
-    ):
-        assert redis_client is not None
-        assert conversation_id == 42
-        assert expire_seconds == 120
-        calls.append("lock_create:42")
-        return lock
-
     monkeypatch.setattr(deps, "initialize_database_deps", fake_initialize_database_deps)
     monkeypatch.setattr(deps, "create_chat_model", fake_create_chat_model)
     monkeypatch.setattr(deps, "postgres_checkpointer", fake_postgres_checkpointer)
@@ -101,12 +90,6 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
         deps,
         "create_redis_client",
         fake_create_redis_client,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        deps,
-        "chat_completion_lock",
-        fake_chat_completion_lock,
         raising=False,
     )
     monkeypatch.setattr(
@@ -138,12 +121,10 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
             graph=graph,
             model=chat_model,
             title_model=title_model,
-            completion_lock_factory=application.state.chat_deps.completion_lock_factory,
+            redis_client=redis_client,
+            completion_lock_expire_seconds=120,
             producer_registry=registry,
         )
-        assert application.state.chat_deps.completion_lock_factory(
-            conversation_id=42
-        ) is lock
 
     assert calls[-4:] == [
         "registry_shutdown",

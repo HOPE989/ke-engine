@@ -61,10 +61,7 @@ async def test_acquire_completion_lock_returns_owned_nonblocking_lock():
 
     lock = FakeLock(acquired=True)
 
-    owned = await acquire_completion_lock(
-        lambda *, conversation_id: lock,
-        conversation_id=42,
-    )
+    owned = await acquire_completion_lock(lock)
 
     assert owned is lock
     assert lock.acquire_calls == [{"blocking": False}]
@@ -80,10 +77,7 @@ async def test_acquire_completion_lock_rejects_busy_conversation():
     lock = FakeLock(acquired=False)
 
     with pytest.raises(ConversationBusy):
-        await acquire_completion_lock(
-            lambda *, conversation_id: lock,
-            conversation_id=42,
-        )
+        await acquire_completion_lock(lock)
 
     assert lock.acquire_calls == [{"blocking": False}]
     assert lock.releases == 0
@@ -99,10 +93,7 @@ async def test_acquire_completion_lock_maps_redis_failure():
     lock = FakeLock(acquire_error=OSError("redis down"))
 
     with pytest.raises(ConversationLockUnavailable):
-        await acquire_completion_lock(
-            lambda *, conversation_id: lock,
-            conversation_id=42,
-        )
+        await acquire_completion_lock(lock)
 
     assert lock.acquire_calls == [{"blocking": False}]
     assert lock.releases == 0
