@@ -1110,7 +1110,7 @@ git commit -m "feat(chat-ui): handle clarification completion"
 - 业务 conversation ID 继续等于 LangGraph `thread_id`。
 - 评测报告分列 route、intent、key entity、clarification、schema validity，不合并为一个掩盖问题的总分。
 
-- [ ] **Step 10.1: RED — 写完整 CLARIFY → resume → BUSINESS 集成测试**
+- [x] **Step 10.1: RED — 写完整 CLARIFY → resume → BUSINESS 集成测试**
 
 测试必须执行两次 `CompletionProducer.run`：第一次输入“查一下我的运单”，断言 ASSISTANT 澄清已落业务表、completed reason 为 interrupt、snapshot.next 为 clarify；第二次先把 “YD2026001” 作为 USER 业务消息提交，再运行 producer，断言 graph 收到 `Command(resume="YD2026001")`、structured model 看到澄清问答历史、最终 BUSINESS boundary 落库、completed reason 为 stop、snapshot 不再 pending。
 
@@ -1118,11 +1118,21 @@ Run: `Set-Location backend; uv run pytest tests/test_business_understanding_post
 
 Expected: 在实现完成前 FAIL；若 PostgreSQL 不可用应明确报告基础设施错误，不把 skip 记作 RED 或 GREEN。
 
-- [ ] **Step 10.2: RED/GREEN — 增加 NON_BUSINESS 与 BUSINESS 集成场景**
+```text
+RED: Set-Location backend; uv run pytest tests/test_business_understanding_postgres.py::test_clarification_persists_resumes_and_reclassifies_on_same_thread -q -m integration
+Exit: 1
+Observed: 首次 CLARIFY、持久化、pending、Command(resume) 与历史重评已走通；第二次 BUSINESS 缺少 boundary content_delta，旧 Producer 保存空回答。
+
+GREEN: 同一命令
+Exit: 0
+Observed: 1 passed；第二次 boundary delta、ASSISTANT commit、completed(stop) 与 snapshot clear 均通过。
+```
+
+- [x] **Step 10.2: RED/GREEN — 增加 NON_BUSINESS 与 BUSINESS 集成场景**
 
 NON_BUSINESS 断言 general model answer 被流式发布并落库；BUSINESS 断言只落 `BUSINESS_BOUNDARY_MESSAGE`，普通 model 调用次数为 0。分别先写测试并看到预期 RED，再使用已实现代码使其 GREEN，不为集成测试增加专用生产分支。
 
-- [ ] **Step 10.3: Verify GREEN — 运行所有 Chat 单元与集成回归**
+- [x] **Step 10.3: Verify GREEN — 运行所有 Chat 单元与集成回归**
 
 ```powershell
 Set-Location backend
@@ -1132,7 +1142,17 @@ uv run pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_cons
 
 Expected: 两个命令 exit 0，无 warning/error；失败时只修复本变更引入的回归，并为每个 bug 先补最小复现测试。
 
-- [ ] **Step 10.4: Verify GREEN — 运行全仓后端与前端回归**
+```text
+GREEN: brief 指定的 14 个 Chat 单元文件
+Exit: 0
+Observed: 113 passed in 2.54s（控制器独立复跑）。
+
+INTEGRATION: uv run pytest tests/test_chat_langgraph_postgres.py tests/test_chat_failure_consistency_postgres.py tests/test_business_understanding_postgres.py -q -m integration
+Exit: 0
+Observed: 5 passed in 2.89s（真实 PostgreSQL checkpointer、业务表与隔离 schema）。
+```
+
+- [x] **Step 10.4: Verify GREEN — 运行全仓后端与前端回归**
 
 ```powershell
 Set-Location backend
@@ -1145,17 +1165,33 @@ npm run build
 
 Expected: 所有命令 exit 0；记录实际测试数量和耗时，不使用“应该通过”。
 
-- [ ] **Step 10.5: 运行离线确定性评测并记录分维度结果**
+```text
+REGRESSION: Set-Location backend; uv run pytest -q -m "not integration"
+Exit: 0
+Observed: 563 passed, 3 skipped, 5 deselected in 6.34s（控制器独立复跑）。
+
+FRONTEND: Set-Location frontend; npm test; npm run lint; npm run build
+Exit: 0 / 0 / 0
+Observed: 11/11 tests passed；lint 无 error；Next.js production build 成功。保留既有 Node ExperimentalWarning/MODULE_TYPELESS_PACKAGE_JSON warning。
+```
+
+- [x] **Step 10.5: 运行离线确定性评测并记录分维度结果**
 
 Run: `Set-Location backend; uv run pytest tests/test_business_understanding_evaluation.py -q -s`
 
 将实际输出写入提示词优化文档；离线 fake/dataset 结果标注为“契约与评测器验证”，不得描述成真实大模型准确率。若随后人工运行 live model，必须单独记录模型名、Prompt 版本、样本版本、日期、各维度指标和失败样例。
 
-- [ ] **Step 10.6: 更新实现文档且保持延期范围明确**
+```text
+EVALUATION: Set-Location backend; uv run pytest tests/test_business_understanding_evaluation.py -q -s
+Exit: 0
+Observed: 3 passed；cases=18, live_model=false；route=18/18, intent=18/18, key_entities=24/24, clarification=18/18, schema_validity=18/18。结果仅为 deterministic oracle contract/evaluator validation。
+```
+
+- [x] **Step 10.6: 更新实现文档且保持延期范围明确**
 
 文档只写已经由测试证明的拓扑、finish reason、持久化顺序和验证命令；继续明确 RAG、SQL、引用、证据校验、细粒度意图不在本 change 内。
 
-- [ ] **Step 10.7: OpenSpec 与格式验证**
+- [x] **Step 10.7: OpenSpec 与格式验证**
 
 ```powershell
 openspec validate add-business-understanding --type change --strict
@@ -1165,7 +1201,17 @@ git status --short
 
 Expected: OpenSpec valid、`git diff --check` exit 0、status 只包含本 change 预期文件。
 
-- [ ] **Step 10.8: Commit**
+```text
+OPENSPEC: openspec validate add-business-understanding --type change --strict
+Exit: 0
+Observed: Change 'add-business-understanding' is valid。
+
+FORMAT: git diff --check 986cdb9..91ba7ff
+Exit: 0
+Observed: 无 whitespace error。
+```
+
+- [x] **Step 10.8: Commit**
 
 ```powershell
 git add backend/tests/test_business_understanding_postgres.py backend/tests/chat_postgres_support.py docs/my-specs openspec/changes/add-business-understanding/tasks.md
@@ -1178,16 +1224,16 @@ git commit -m "test(chat): verify business understanding flow"
 
 以下项目全部有证据后，才可把 change 标记为 implemented：
 
-- [ ] 每个新增生产函数至少有一个先失败后通过的行为测试。
-- [ ] 每个 RED 都因目标能力缺失而失败，不是语法、fixture、依赖或环境错误。
-- [ ] 每个 GREEN 都运行了当前测试和列出的回归测试。
-- [ ] BUSINESS、NON_BUSINESS、CLARIFY 三条路径均通过真实 StateGraph 测试。
-- [ ] CLARIFY 通过真实 checkpointer 证明首次挂起、同 thread resume 和重新识别。
-- [ ] 普通回答与澄清问题均证明 ASSISTANT commit 发生在 completed 之前。
-- [ ] 畸形 structured output 和畸形 interrupt 都走唯一 error 终态且不落部分 ASSISTANT。
-- [ ] 客户端断连不取消已接受的普通回答或澄清持久化。
-- [ ] 公开请求没有 resume 内部字段，公开 SSE 没有 reasoning、分类 JSON 或 Interrupt ID。
-- [ ] 前端把 `stop`、`interrupt` 作为成功终态并拒绝未知值。
-- [ ] 后端非 integration、PostgreSQL integration、前端 test/lint/build 全部有新鲜的 exit 0 输出。
-- [ ] OpenSpec strict validation 和 `git diff --check` 均通过。
-- [ ] 文档中的测评数字来自实际输出，并明确区分 deterministic 与 live-model 结果。
+- [x] 每个新增生产函数至少有一个先失败后通过的行为测试。
+- [x] 每个 RED 都因目标能力缺失而失败，不是语法、fixture、依赖或环境错误。
+- [x] 每个 GREEN 都运行了当前测试和列出的回归测试。
+- [x] BUSINESS、NON_BUSINESS、CLARIFY 三条路径均通过真实 StateGraph 测试。
+- [x] CLARIFY 通过真实 checkpointer 证明首次挂起、同 thread resume 和重新识别。
+- [x] 普通回答与澄清问题均证明 ASSISTANT commit 发生在 completed 之前。
+- [x] 畸形 structured output 和畸形 interrupt 都走唯一 error 终态且不落部分 ASSISTANT。
+- [x] 客户端断连不取消已接受的普通回答或澄清持久化。
+- [x] 公开请求没有 resume 内部字段，公开 SSE 没有 reasoning、分类 JSON 或 Interrupt ID。
+- [x] 前端把 `stop`、`interrupt` 作为成功终态并拒绝未知值。
+- [x] 后端非 integration、PostgreSQL integration、前端 test/lint/build 全部有新鲜的 exit 0 输出。
+- [x] OpenSpec strict validation 和 `git diff --check` 均通过。
+- [x] 文档中的测评数字来自实际输出，并明确区分 deterministic 与 live-model 结果。
