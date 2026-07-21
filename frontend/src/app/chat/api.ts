@@ -84,29 +84,37 @@ export async function streamCompletion(options: {
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const parsed = parseSseFrames(buffer);
-    buffer = parsed.remainder;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const parsed = parseSseFrames(buffer);
+      buffer = parsed.remainder;
 
-    for (const item of parsed.events) {
-      if (item.event === "metadata") {
-        options.onMetadata(String(item.data.conversation_id));
-      } else if (item.event === "content_delta") {
-        options.onDelta(String(item.data.content ?? ""));
-      } else if (item.event === "completed") {
-        if (!isFinishReason(item.data.finish_reason)) {
-          throw new Error("completed 事件包含未知的 finish reason。");
+      for (const item of parsed.events) {
+        if (item.event === "metadata") {
+          options.onMetadata(String(item.data.conversation_id));
+        } else if (item.event === "content_delta") {
+          options.onDelta(String(item.data.content ?? ""));
+        } else if (item.event === "completed") {
+          if (!isFinishReason(item.data.finish_reason)) {
+            throw new Error("completed 事件包含未知的 finish reason。");
+          }
+          try {
+            await reader.cancel();
+          } catch {
+            // completed 已经是成功终态，取消失败不应覆盖该结果。
+          }
+          return item.data.finish_reason;
+        } else if (item.event === "error") {
+          throw new Error(String(item.data.message ?? "模型生成失败"));
         }
-        await reader.cancel();
-        return item.data.finish_reason;
-      } else if (item.event === "error") {
-        throw new Error(String(item.data.message ?? "模型生成失败"));
       }
-    }
 
-    if (done) break;
+      if (done) break;
+    }
+  } finally {
+    reader.releaseLock();
   }
 
   throw new Error("SSE 响应在收到 completed 事件前结束。");

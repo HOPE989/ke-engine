@@ -60,6 +60,28 @@ test("completed interrupt 是成功终态", async () => {
   assert.equal(result, "interrupt");
 });
 
+test("completed 后 cancel 清理失败仍返回成功终态", async () => {
+  const encoder = new TextEncoder();
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'event: completed\ndata: {"assistant_message_id":"3002","finish_reason":"interrupt"}\n\n'
+          )
+        );
+      },
+      cancel() {
+        return Promise.reject(new Error("取消 SSE reader 失败"));
+      }
+    })
+  );
+
+  const result = await completion(response);
+
+  assert.equal(result, "interrupt");
+});
+
 test("保留 metadata 和 content_delta 的流处理", async () => {
   const metadata: string[] = [];
   const deltas: string[] = [];
