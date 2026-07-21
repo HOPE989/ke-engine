@@ -150,5 +150,23 @@
     "expected_intent": "BUSINESS_DATA_QUERY",
     "expected_key_entities": {"document_type": "运单", "document_no": "YD2026009"},
     "expected_clarification_contains": null
+  },
+  {
+    "id": "policy-without-optional-query-entities",
+    "category": "optional_entity_no_clarification",
+    "messages": [{"role": "user", "content": "煤炭销售合同审批制度有哪些要求"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "POLICY_RULE_QA",
+    "expected_key_entities": {},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "unsupported-custom-output-field",
+    "category": "unsupported_schema",
+    "messages": [{"role": "user", "content": "查询运单YD2026010，并附带自定义状态标签"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "BUSINESS_DATA_QUERY",
+    "expected_key_entities": {"document_type": "运单", "document_no": "YD2026010"},
+    "expected_clarification_contains": null
   }
 ]

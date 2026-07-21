@@ -8,7 +8,7 @@ def test_evaluation_dataset_covers_required_boundary_groups():
 
     cases = load_evaluation_cases()
     categories = {case.category for case in cases}
-    assert {
+    required_categories = {
         "public_passenger_negative",
         "freight_document_knowledge",
         "freight_document_lookup",
@@ -18,7 +18,25 @@ def test_evaluation_dataset_covers_required_boundary_groups():
         "focused_clarification",
         "optional_entity_no_clarification",
         "unsupported_schema",
-    } <= categories
+    }
+    assert required_categories <= categories
+    cases_by_category = {
+        category: [case for case in cases if case.category == category]
+        for category in required_categories
+    }
+    assert not {
+        category
+        for category, category_cases in cases_by_category.items()
+        if len(category_cases) < 2
+    }
+    for category, category_cases in cases_by_category.items():
+        assert len({case.id for case in category_cases}) >= 2, category
+        assert len(
+            {
+                tuple((message["role"], message["content"]) for message in case.messages)
+                for case in category_cases
+            }
+        ) >= 2, category
     assert all(
         case.expected_key_entities.keys() <= BusinessEntities.model_fields.keys()
         for case in cases
