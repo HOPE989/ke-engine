@@ -1,0 +1,87 @@
+import ast
+import inspect
+from pathlib import Path
+
+import pytest
+from langchain_core.messages import AIMessage
+
+from app.domains.chat.graph.business_understanding import (
+    BusinessIntent,
+    BusinessRoute,
+    BusinessUnderstandingResult,
+)
+
+
+def make_result(route: BusinessRoute) -> BusinessUnderstandingResult:
+    payload = {
+        "reasoning": "classification completed",
+        "route": route,
+        "intent": None,
+        "clarification_question": None,
+    }
+    if route is BusinessRoute.BUSINESS:
+        payload["intent"] = BusinessIntent.POLICY_RULE_QA
+    elif route is BusinessRoute.CLARIFY:
+        payload["clarification_question"] = "请说明要查询的业务范围。"
+    return BusinessUnderstandingResult.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("route", "expected_node"),
+    [
+        (BusinessRoute.BUSINESS, "business_boundary"),
+        (BusinessRoute.NON_BUSINESS, "llm"),
+        (BusinessRoute.CLARIFY, "clarify"),
+    ],
+)
+def test_route_business_understanding_maps_each_route_to_one_node(
+    route: BusinessRoute, expected_node: str
+):
+    from app.domains.chat.graph.routing import route_business_understanding
+
+    assert route_business_understanding({"business_understanding": make_result(route)}) == expected_node
+
+
+def test_route_business_understanding_requires_classification_result():
+    from app.domains.chat.graph.routing import route_business_understanding
+
+    with pytest.raises(KeyError):
+        route_business_understanding({"messages": []})
+
+
+def test_business_boundary_node_returns_one_deterministic_ai_message():
+    from app.domains.chat.graph.nodes.business_boundary import (
+        BUSINESS_BOUNDARY_MESSAGE,
+        business_boundary_node,
+    )
+
+    assert tuple(inspect.signature(business_boundary_node).parameters) == ("state",)
+    update = business_boundary_node({"messages": []})
+
+    assert list(update) == ["messages"]
+    assert len(update["messages"]) == 1
+    assert isinstance(update["messages"][0], AIMessage)
+    assert update["messages"][0].content == BUSINESS_BOUNDARY_MESSAGE
+
+
+def test_business_boundary_module_has_no_runtime_or_data_access_imports():
+    import app.domains.chat.graph.nodes.business_boundary as boundary
+
+    tree = ast.parse(Path(boundary.__file__).read_text(encoding="utf-8"))
+    imported_modules = {
+        alias.name.lower()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        (node.module or "").lower()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+    }
+
+    forbidden = ("rag", "sqlalchemy", "repository", "settings")
+    assert not any(
+        forbidden_name in module
+        for module in imported_modules
+        for forbidden_name in forbidden
+    )
