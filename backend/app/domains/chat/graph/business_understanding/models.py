@@ -66,4 +66,4 @@ class ClarificationInterruptPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["business_clarification"] = "business_clarification"
-    question: str = Field(min_length=1)
+    question: str = Field(min_length=1, pattern=r"\S")

@@ -86,3 +86,26 @@ def test_business_understanding_result_round_trips_json_checkpoint_data():
     restored = BusinessUnderstandingResult.model_validate(dumped)
 
     assert restored == result
+
+
+def test_clarification_interrupt_payload_has_fixed_kind():
+    from app.domains.chat.graph.business_understanding import ClarificationInterruptPayload
+
+    payload = ClarificationInterruptPayload(question="请说明查询时间范围")
+
+    assert payload.kind == "business_clarification"
+
+
+@pytest.mark.parametrize("question", ["", "   "])
+def test_clarification_interrupt_payload_rejects_blank_question(question):
+    from app.domains.chat.graph.business_understanding import ClarificationInterruptPayload
+
+    with pytest.raises(ValidationError):
+        ClarificationInterruptPayload(question=question)
+
+
+def test_clarification_interrupt_payload_rejects_extra_fields():
+    from app.domains.chat.graph.business_understanding import ClarificationInterruptPayload
+
+    with pytest.raises(ValidationError):
+        ClarificationInterruptPayload(question="请补充信息", related=True)
