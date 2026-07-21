@@ -59,7 +59,7 @@ Observed: <passed test count>
 - `BusinessUnderstandingResult` 字段固定为 `reasoning`, `route`, `intent`, `entities`, `clarification_question`。
 - `ClarificationInterruptPayload` 公开给 Graph clarify node 与 SSE adapter 共用，固定 `kind="business_clarification"` 和非空 `question`。
 
-- [ ] **Step 1.1: RED — 写枚举值和字段集合测试**
+- [x] **Step 1.1: RED — 写枚举值和字段集合测试**
 
 ```python
 def test_business_understanding_contract_has_only_v1_routes_intents_and_fields():
@@ -95,13 +95,19 @@ def test_business_understanding_contract_has_only_v1_routes_intents_and_fields()
     )
 ```
 
-- [ ] **Step 1.2: Verify RED — 证明契约尚不存在**
+- [x] **Step 1.2: Verify RED — 证明契约尚不存在**
 
 Run: `Set-Location backend; uv run pytest tests/test_business_understanding_models.py -q`
 
 Expected: FAIL during collection with `ModuleNotFoundError` for `business_understanding`；若测试直接 PASS，停止并检查是否已有未纳入计划的实现。
 
-- [ ] **Step 1.3: RED — 写 BUSINESS/NON_BUSINESS/CLARIFY 跨字段验证测试**
+```text
+RED: Set-Location backend; uv run pytest tests/test_business_understanding_models.py -q
+Exit: 1
+Observed: 6 failed，均为缺少 business_understanding 包导致的 ModuleNotFoundError；新增 payload 空白校验 RED 为 1 failed, 3 passed, 6 deselected，纯空白 question 未抛 ValidationError。
+```
+
+- [x] **Step 1.3: RED — 写 BUSINESS/NON_BUSINESS/CLARIFY 跨字段验证测试**
 
 ```python
 @pytest.mark.parametrize(
@@ -138,7 +144,7 @@ def test_business_understanding_rejects_unknown_intent_and_extra_legacy_fields()
         BusinessUnderstandingResult.model_validate(base)
 ```
 
-- [ ] **Step 1.4: GREEN — 实现最小 Pydantic 契约**
+- [x] **Step 1.4: GREEN — 实现最小 Pydantic 契约**
 
 ```python
 from enum import StrEnum
@@ -212,17 +218,27 @@ class ClarificationInterruptPayload(BaseModel):
     question: str = Field(min_length=1)
 ```
 
-- [ ] **Step 1.5: Verify GREEN — 运行契约测试与序列化回归**
+- [x] **Step 1.5: Verify GREEN — 运行契约测试与序列化回归**
 
 Run: `Set-Location backend; uv run pytest tests/test_business_understanding_models.py tests/test_chat_contracts.py -q`
 
 Expected: PASS；新增一个 `dumped = result.model_dump(mode="json")`、`restored = BusinessUnderstandingResult.model_validate(dumped)` 的 round-trip 测试，证明 checkpoint-safe 数据可还原。
 
-- [ ] **Step 1.6: REFACTOR — 仅整理导出和命名后保持绿色**
+```text
+GREEN: Set-Location backend; uv run pytest tests/test_business_understanding_models.py tests/test_chat_contracts.py -q
+Exit: 0
+Observed: 24 passed in 0.42s（控制器独立复跑）。
+
+REGRESSION: Set-Location backend; uv run pytest tests/test_business_understanding_models.py tests/test_chat_contracts.py -q; git diff --check fde1154..HEAD
+Exit: 0
+Observed: 24 passed；git diff --check 无输出。
+```
+
+- [x] **Step 1.6: REFACTOR — 仅整理导出和命名后保持绿色**
 
 在 `business_understanding/__init__.py` 显式导出五个契约类型，不导出 Pydantic 内部辅助函数；再次运行 Step 1.5。
 
-- [ ] **Step 1.7: Commit**
+- [x] **Step 1.7: Commit**
 
 ```powershell
 git add backend/app/domains/chat/graph/business_understanding backend/tests/test_business_understanding_models.py
@@ -249,7 +265,7 @@ git commit -m "feat(chat): add business understanding contract"
 - Produces: `build_business_understanding_messages(messages: Sequence[BaseMessage]) -> list[BaseMessage]`。
 - Produces: `EvaluationCase` 和 `score_evaluation_cases(expected, actual)`；评分维度固定为 route、intent、key entities、clarification、schema validity。
 
-- [ ] **Step 2.1: RED — 写 Prompt 内容与历史传递测试**
+- [x] **Step 2.1: RED — 写 Prompt 内容与历史传递测试**
 
 ```python
 def test_business_understanding_prompt_is_versioned_and_contains_all_control_rules():
@@ -280,13 +296,19 @@ def test_prompt_builder_keeps_checkpoint_history_after_single_system_message():
     assert built[1:] == history
 ```
 
-- [ ] **Step 2.2: Verify RED — 证明 Prompt 模块尚不存在**
+- [x] **Step 2.2: Verify RED — 证明 Prompt 模块尚不存在**
 
 Run: `Set-Location backend; uv run pytest tests/test_business_understanding_prompt.py -q`
 
 Expected: FAIL with missing `prompt` module or missing versioned constant。
 
-- [ ] **Step 2.3: GREEN — 增加最小版本化 Prompt 构造器**
+```text
+RED: Set-Location backend; uv run pytest tests/test_business_understanding_prompt.py -q
+Exit: 1
+Observed: 2 failed，缺少 business_understanding.prompt 模块。
+```
+
+- [x] **Step 2.3: GREEN — 增加最小版本化 Prompt 构造器**
 
 `BUSINESS_UNDERSTANDING_SYSTEM_PROMPT` 必须把以下规则直接写入常量，不能把规则留给执行者二次推断：
 
@@ -302,7 +324,7 @@ Expected: FAIL with missing `prompt` module or missing versioned constant。
 
 构造器只添加一个 `SystemMessage`，随后原样附加 checkpoint messages，不截断、不重排、不把历史拼成一个字符串。
 
-- [ ] **Step 2.4: RED — 写评测集覆盖测试**
+- [x] **Step 2.4: RED — 写评测集覆盖测试**
 
 ```python
 def test_evaluation_dataset_covers_required_boundary_groups():
@@ -323,7 +345,7 @@ def test_evaluation_dataset_covers_required_boundary_groups():
                for case in cases)
 ```
 
-- [ ] **Step 2.5: GREEN — 建立离线 JSON 标注集**
+- [x] **Step 2.5: GREEN — 建立离线 JSON 标注集**
 
 每个 case 固定包含 `id`, `category`, `messages`, `expected_route`, `expected_intent`, `expected_key_entities`, `expected_clarification_contains`。至少写入以下代表案例，并为每个分类补足一条独立用例：
 
@@ -337,19 +359,35 @@ def test_evaluation_dataset_covers_required_boundary_groups():
 ]
 ```
 
-- [ ] **Step 2.6: RED/GREEN — 为分维度评分写纯函数测试并实现最小评分器**
+- [x] **Step 2.6: RED/GREEN — 为分维度评分写纯函数测试并实现最小评分器**
 
 先写一个包含 route 正确、intent 错误、两个实体命中一个、澄清正确、schema 有效的测试，断言结果分别为 `1/1`, `0/1`, `1/2`, `1/1`, `1/1`；运行确认因评分器不存在而 RED，再实现只比较显式标注 key entities 的纯函数。
 
 Run RED/GREEN: `Set-Location backend; uv run pytest tests/test_business_understanding_evaluation.py -q`
 
-- [ ] **Step 2.7: Verify GREEN — 运行 Prompt、数据集和契约回归**
+```text
+RED: Set-Location backend; uv run pytest tests/test_business_understanding_evaluation.py -q
+Exit: 1
+Observed: 初次缺少 evaluation 模块；评分器阶段缺少 score_evaluation_cases；覆盖强化阶段准确报告 optional_entity_no_clarification 与 unsupported_schema 各仅一个样例。
+
+GREEN: Set-Location backend; uv run pytest tests/test_business_understanding_evaluation.py -q
+Exit: 0
+Observed: 2 passed；九个 required categories 均至少有两个独立 case，五个评分维度分别断言。
+```
+
+- [x] **Step 2.7: Verify GREEN — 运行 Prompt、数据集和契约回归**
 
 Run: `Set-Location backend; uv run pytest tests/test_business_understanding_prompt.py tests/test_business_understanding_evaluation.py tests/test_business_understanding_models.py -q`
 
 Expected: PASS，且测试不发起网络请求、不读取模型密钥。
 
-- [ ] **Step 2.8: Commit**
+```text
+REGRESSION: Set-Location backend; uv run pytest tests/test_business_understanding_prompt.py tests/test_business_understanding_evaluation.py tests/test_business_understanding_models.py -q
+Exit: 0
+Observed: 14 passed in 0.44s（控制器独立复跑）；新增代码静态只读取本地 JSON fixture，无网络、模型或密钥依赖。
+```
+
+- [x] **Step 2.8: Commit**
 
 ```powershell
 git add backend/app/domains/chat/graph/business_understanding backend/tests/fixtures/business_understanding_cases.json backend/tests/test_business_understanding_prompt.py backend/tests/test_business_understanding_evaluation.py
@@ -375,7 +413,7 @@ git commit -m "feat(chat): add business understanding prompt cases"
 - Produces: `async business_understanding_node(state: ChatState, runtime: Runtime[ChatRuntimeContext]) -> dict[str, BusinessUnderstandingResult]`。
 - `ChatState.business_understanding` 保存最新 `BusinessUnderstandingResult`，model/settings/pool/prompt loader 仍只存在于 runtime/module。
 
-- [ ] **Step 3.1: RED — 写 fake structured model 的成功路径测试**
+- [x] **Step 3.1: RED — 写 fake structured model 的成功路径测试**
 
 ```python
 class FakeStructuredRunnable:
@@ -419,17 +457,23 @@ async def test_business_understanding_node_uses_injected_structured_model_and_hi
     assert update == {"business_understanding": result}
 ```
 
-- [ ] **Step 3.2: Verify RED — 证明节点尚不存在**
+- [x] **Step 3.2: Verify RED — 证明节点尚不存在**
 
 Run: `Set-Location backend; uv run pytest tests/test_business_understanding_node.py -q`
 
 Expected: FAIL with missing node import。
 
-- [ ] **Step 3.3: RED — 写无重试、无部分 state、无基础设施构造测试**
+```text
+RED: Set-Location backend; uv run pytest tests/test_business_understanding_node.py -q
+Exit: 2
+Observed: collection 因缺少 graph.nodes.business_understanding 模块失败；失败来自目标能力缺失。
+```
+
+- [x] **Step 3.3: RED — 写无重试、无部分 state、无基础设施构造测试**
 
 让 fake structured runnable 的唯一一次 `ainvoke` 抛出 `ValidationError` 或 `RuntimeError`；断言异常原样传播且调用次数为 1。导入测试继续 monkeypatch `create_chat_model/get_settings/get_session_factory` 为抛错函数，证明模块导入不会触发它们。
 
-- [ ] **Step 3.4: GREEN — 实现最小 state 字段和节点**
+- [x] **Step 3.4: GREEN — 实现最小 state 字段和节点**
 
 ```python
 async def business_understanding_node(state, runtime):
@@ -444,13 +488,23 @@ async def business_understanding_node(state, runtime):
 
 `ChatState` 只增加类型化 `business_understanding` 字段；不把 structured runnable 缓存到 state，不捕获异常做 route fallback，不设置 retry policy。
 
-- [ ] **Step 3.5: Verify GREEN — 运行节点和原 Graph 单元回归**
+- [x] **Step 3.5: Verify GREEN — 运行节点和原 Graph 单元回归**
 
 Run: `Set-Location backend; uv run pytest tests/test_business_understanding_node.py tests/test_chat_graph.py -q`
 
 Expected: 新节点测试 PASS；旧拓扑断言会在 Task 4 才被替换，因此本任务不得提前改 builder。
 
-- [ ] **Step 3.6: Commit**
+```text
+GREEN: Set-Location backend; uv run pytest tests/test_business_understanding_node.py -q
+Exit: 0
+Observed: 5 passed。
+
+REGRESSION: Set-Location backend; uv run pytest tests/test_business_understanding_node.py tests/test_chat_graph.py -q
+Exit: 0
+Observed: 10 passed in 1.28s（控制器独立复跑）；builder 未修改，旧拓扑仍通过。计划文字中的 Task 4 已按用户裁定解释为 Task 5。
+```
+
+- [x] **Step 3.6: Commit**
 
 ```powershell
 git add backend/app/domains/chat/graph backend/tests/test_business_understanding_node.py
@@ -476,7 +530,7 @@ git commit -m "feat(chat): add business understanding node"
 - Produces: `route_business_understanding(state) -> Literal["llm", "business_boundary", "clarify"]`。
 - Produces: `BUSINESS_BOUNDARY_MESSAGE`，其内容明确表示已识别业务请求但当前阶段尚未连接业务检索。
 
-- [ ] **Step 4.1: RED — 写三种 route 到节点名的纯函数测试**
+- [x] **Step 4.1: RED — 写三种 route 到节点名的纯函数测试**
 
 分别构造 BUSINESS、NON_BUSINESS、CLARIFY 的合法 `BusinessUnderstandingResult` 放入 state，断言 `route_business_understanding` 精确返回 `business_boundary`、`llm`、`clarify`；缺少结果时必须抛出 `KeyError`，不得猜测默认 route。
 
@@ -484,17 +538,23 @@ Run: `Set-Location backend; uv run pytest tests/test_chat_graph_routing.py::test
 
 Expected: FAIL，因为 routing 模块尚不存在。
 
-- [ ] **Step 4.2: RED — 写 BUSINESS 边界节点隔离测试**
+- [x] **Step 4.2: RED — 写 BUSINESS 边界节点隔离测试**
 
 直接调用 `business_boundary_node`，断言只返回一条内容等于 `BUSINESS_BOUNDARY_MESSAGE` 的 AIMessage；函数签名不接收 runtime，因此不可能调用 model。再做 import 扫描，断言模块不导入 RAG、SQLAlchemy、repository 或 settings。
 
-- [ ] **Step 4.3: Verify RED — 同时运行 router 与边界测试**
+- [x] **Step 4.3: Verify RED — 同时运行 router 与边界测试**
 
 Run: `Set-Location backend; uv run pytest tests/test_chat_graph_routing.py -q`
 
 Expected: FAIL only because routing/boundary production symbols are missing。
 
-- [ ] **Step 4.4: GREEN — 实现 router 和边界节点**
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_graph_routing.py -q
+Exit: 1
+Observed: 6 failures，仅因 routing 与 business_boundary 生产模块缺失。
+```
+
+- [x] **Step 4.4: GREEN — 实现 router 和边界节点**
 
 ```python
 def route_business_understanding(state: ChatState) -> str:
@@ -512,13 +572,23 @@ def business_boundary_node(state: ChatState) -> dict[str, list[AIMessage]]:
 
 本任务不改 builder；现有 `START -> llm -> END` 在 Task 5 完成前继续可运行。边界消息定义为模块常量，测试与后续 Graph 共用同一常量，避免复制中文文本。
 
-- [ ] **Step 4.5: Verify GREEN — 运行 primitives 与旧 Graph 回归**
+- [x] **Step 4.5: Verify GREEN — 运行 primitives 与旧 Graph 回归**
 
 Run: `Set-Location backend; uv run pytest tests/test_chat_graph.py tests/test_chat_graph_routing.py -q`
 
 Expected: router/boundary primitives PASS，现有 Graph 仍保持 `START -> llm -> END` 且原 MessagesState reducer 测试 PASS。
 
-- [ ] **Step 4.6: Commit**
+```text
+GREEN: Set-Location backend; uv run pytest tests/test_chat_graph.py tests/test_chat_graph_routing.py -q
+Exit: 0
+Observed: 11 passed in 1.34s（控制器独立复跑）；三路映射、缺失 state、边界消息和旧 Graph 均通过。
+
+REGRESSION: Set-Location backend; uv run pytest -q
+Exit: 1
+Observed: 517 passed, 3 skipped, 2 PostgreSQL integration failures；失败均因本地 127.0.0.1:5432 未启动，留至 Task 10 基础设施门禁。
+```
+
+- [x] **Step 4.6: Commit**
 
 ```powershell
 git add backend/app/domains/chat/graph backend/tests/test_chat_graph_routing.py
@@ -546,7 +616,7 @@ git commit -m "feat(chat): add business route primitives"
 - Interrupt value 必须等于 `ClarificationInterruptPayload.model_dump(mode="json")`。
 - Resume 后返回 `[AIMessage(question), HumanMessage(resume_value)]`，静态边为 `clarify -> business_understanding`。
 
-- [ ] **Step 5.1: RED — 先替换稳定拓扑断言**
+- [x] **Step 5.1: RED — 先替换稳定拓扑断言**
 
 在 `test_chat_graph.py` 中将旧 `START -> llm -> END` 断言改为完整节点/边/无 retry 的断言；条件边可视化分支必须包含 `llm`、`business_boundary`、`clarify`，且四个节点 retry policy 均为 `None`。
 
@@ -554,11 +624,17 @@ Run: `Set-Location backend; uv run pytest tests/test_chat_graph.py::test_chat_gr
 
 Expected: FAIL，因为 builder 仍是旧拓扑。
 
-- [ ] **Step 5.2: RED — 写 NON_BUSINESS 与 BUSINESS 真实 Graph 路径测试**
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_graph.py::test_chat_graph_has_business_understanding_routes_and_no_retry_policy -q
+Exit: 1
+Observed: 旧图仅有 START -> llm -> END，缺少完整 Business Understanding 分支。
+```
+
+- [x] **Step 5.2: RED — 写 NON_BUSINESS 与 BUSINESS 真实 Graph 路径测试**
 
 NON_BUSINESS 使用顺序 fake model：structured 调用返回 NON_BUSINESS，普通调用返回 `AIMessage("通用回答")`，断言两类调用各一次。BUSINESS 的普通 `ainvoke` 若被调用立即抛 `AssertionError`，断言最终消息等于 `BUSINESS_BOUNDARY_MESSAGE`，分类 reasoning 未进入 messages。
 
-- [ ] **Step 5.3: RED — 写首次 CLARIFY 挂起测试**
+- [x] **Step 5.3: RED — 写首次 CLARIFY 挂起测试**
 
 使用 `InMemorySaver` 编译真实 Graph，thread ID 固定为测试值；fake structured model 返回 CLARIFY。调用 `graph.ainvoke({"messages": [HumanMessage(content="查一下我的运单")]}, config, context=runtime_context)` 后读取 `graph.aget_state(config)`，断言：
 
@@ -576,11 +652,11 @@ Run: `Set-Location backend; uv run pytest tests/test_chat_graph_clarification.py
 
 Expected: FAIL because clarify node/edge does not yet suspend。
 
-- [ ] **Step 5.4: RED — 写 resume 后重新识别测试**
+- [x] **Step 5.4: RED — 写 resume 后重新识别测试**
 
 fake structured runnable 按顺序返回 CLARIFY、BUSINESS。首次调用后执行 `graph.ainvoke(Command(resume="YD2026001"), config, context=runtime_context)`；断言第二次 structured call 的历史末尾依次是 `AIMessage("请提供运单号")` 和 `HumanMessage("YD2026001")`，最终走到 BUSINESS boundary。
 
-- [ ] **Step 5.5: GREEN — 实现完整三路 builder 与最小 interrupt/resume 节点**
+- [x] **Step 5.5: GREEN — 实现完整三路 builder 与最小 interrupt/resume 节点**
 
 ```python
 def clarify_node(state: ChatState) -> dict[str, list[BaseMessage]]:
@@ -601,17 +677,39 @@ def clarify_node(state: ChatState) -> dict[str, list[BaseMessage]]:
 
 Builder 注册 `business_understanding`、现有 `llm`、`business_boundary`、`clarify`，添加 `START -> business_understanding`、条件边、两条 END 边和 `clarify -> business_understanding`；不得把 question 在首次 suspend 前写入 Graph messages，避免 resume 时重复。
 
-- [ ] **Step 5.6: Verify GREEN — 运行三路拓扑和恢复测试**
+- [x] **Step 5.6: Verify GREEN — 运行三路拓扑和恢复测试**
 
 Run: `Set-Location backend; uv run pytest tests/test_chat_graph.py tests/test_chat_graph_routing.py tests/test_chat_graph_clarification.py -q`
 
 Expected: 三条 route 全部 PASS；CLARIFY 首次挂起，resume 后同 thread 重评并完成。
 
-- [ ] **Step 5.7: REFACTOR — 消除测试 fake 重复但不增加生产行为**
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_graph_routing.py::test_non_business_graph_calls_structured_and_ordinary_model_once tests/test_chat_graph_routing.py::test_business_graph_ends_at_boundary_without_ordinary_model_call -q
+Exit: 1
+Observed: NON_BUSINESS structured 调用为 0；BUSINESS 错误调用 ordinary model。
+
+RED: Set-Location backend; uv run pytest tests/test_chat_graph_clarification.py::test_clarify_route_suspends_with_typed_payload -q
+Exit: 1
+Observed: snapshot.next 为 ()，尚未在 clarify 挂起。
+
+RED: Set-Location backend; uv run pytest tests/test_chat_graph_clarification.py::test_clarify_resume_adds_question_and_answer_before_reclassification tests/test_chat_graph_clarification.py::test_clarify_resume_rejects_non_text_or_blank_content -q
+Exit: 1
+Observed: resume 后无第二次 structured call，非法 resume 未抛 ValueError。
+
+GREEN: Set-Location backend; uv run pytest tests/test_chat_graph.py tests/test_chat_graph_routing.py tests/test_chat_graph_clarification.py -q
+Exit: 0
+Observed: 17 passed in 1.44s（控制器独立复跑）；三路、首次挂起、同 thread resume/reclassify 和非法 resume 均通过。
+
+REGRESSION: Set-Location backend; uv run pytest -q -m "not integration"
+Exit: 0
+Observed: 523 passed, 3 skipped, 2 deselected in 14.11s（控制器独立复跑）。
+```
+
+- [x] **Step 5.7: REFACTOR — 消除测试 fake 重复但不增加生产行为**
 
 共享的顺序 structured fake 仅放在测试辅助模块或当前测试文件内；禁止为方便测试向生产模型增加 test-only 方法。再次运行 Step 5.6。
 
-- [ ] **Step 5.8: Commit**
+- [x] **Step 5.8: Commit**
 
 ```powershell
 git add backend/app/domains/chat/graph backend/tests/test_chat_graph.py backend/tests/test_chat_graph_routing.py backend/tests/test_chat_graph_clarification.py
@@ -637,7 +735,7 @@ git commit -m "feat(chat): interrupt and resume clarification"
 - Produces: `project_clarification_interrupt(event: dict[str, object]) -> ClarificationInterruptPayload | None`。
 - 非 interrupt event 返回 `None`；包含 `__interrupt__` 但 schema 不受支持时抛 `ValueError`，交由 Producer 现有 error path 处理。
 
-- [ ] **Step 6.1: RED — 写 completed 两种 finish reason 契约测试**
+- [x] **Step 6.1: RED — 写 completed 两种 finish reason 契约测试**
 
 ```python
 def test_completed_payload_accepts_only_stop_or_interrupt():
@@ -652,11 +750,11 @@ Run: `Set-Location backend; uv run pytest tests/test_chat_contracts.py::test_com
 
 Expected: FAIL because current Literal only accepts `stop`。
 
-- [ ] **Step 6.2: GREEN — 最小扩展 CompletedPayload**
+- [x] **Step 6.2: GREEN — 最小扩展 CompletedPayload**
 
 只把 `Literal["stop"]` 改成 `Literal["stop", "interrupt"]` 并保留默认 `stop`；不得新增终态 event 类型。
 
-- [ ] **Step 6.3: RED — 写真实 LangGraph v2 interrupt 事件形状的投影测试**
+- [x] **Step 6.3: RED — 写真实 LangGraph v2 interrupt 事件形状的投影测试**
 
 ```python
 event = {
@@ -675,23 +773,43 @@ assert "internal-id" not in payload.model_dump_json()
 
 另写两个单行为测试：普通 `on_chat_model_stream` 返回 `None`；`__interrupt__` 中的 `kind`、question 或数量不合法时抛 `ValueError`。
 
-- [ ] **Step 6.4: Verify RED — 证明 adapter 尚不识别 interrupt**
+- [x] **Step 6.4: Verify RED — 证明 adapter 尚不识别 interrupt**
 
 Run: `Set-Location backend; uv run pytest tests/test_chat_sse_adapter.py -q`
 
 Expected: FAIL with missing `project_clarification_interrupt`。
 
-- [ ] **Step 6.5: GREEN — 实现严格 interrupt 投影**
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_contracts.py::test_completed_payload_accepts_only_stop_or_interrupt -q
+Exit: 1
+Observed: finish_reason="interrupt" 被旧 Literal["stop"] 拒绝。
+
+RED: Set-Location backend; uv run pytest tests/test_chat_sse_adapter.py -q
+Exit: 1
+Observed: 5 failed, 3 passed；缺少 project_clarification_interrupt，失败来自目标能力缺失。
+```
+
+- [x] **Step 6.5: GREEN — 实现严格 interrupt 投影**
 
 只接受 `event="on_chain_stream"`、`data.chunk.__interrupt__` 为单元素序列、元素具有 `.value`，且 value 能通过 `ClarificationInterruptPayload.model_validate`；不序列化 `.id`、repr、metadata、run_id。
 
-- [ ] **Step 6.6: Verify GREEN — 运行 SSE 编码与契约回归**
+- [x] **Step 6.6: Verify GREEN — 运行 SSE 编码与契约回归**
 
 Run: `Set-Location backend; uv run pytest tests/test_chat_contracts.py tests/test_chat_sse_adapter.py -q`
 
 Expected: 原有 metadata/content_delta/completed/error 帧不变；新增 interrupt 投影 PASS。
 
-- [ ] **Step 6.7: Commit**
+```text
+GREEN: Set-Location backend; uv run pytest tests/test_chat_contracts.py tests/test_chat_sse_adapter.py -q
+Exit: 0
+Observed: 25 passed in 0.41s（控制器独立复跑）；公开 CompletionFinishReason alias、字段复用、合法真实 Interrupt 投影与所有安全拒绝路径通过。
+
+REGRESSION: Set-Location backend; uv run pytest -q -m "not integration"
+Exit: 0
+Observed: 530 passed, 3 skipped, 2 deselected。
+```
+
+- [x] **Step 6.7: Commit**
 
 ```powershell
 git add backend/app/contracts/chat/stream.py backend/app/services/chat_api/streaming.py backend/tests/test_chat_contracts.py backend/tests/test_chat_sse_adapter.py
@@ -715,7 +833,7 @@ git commit -m "feat(chat): expose clarification finish reason"
 - Internal result: `GraphCompletion(content: str, finish_reason: CompletionFinishReason)`，普通回答为 `stop`，澄清问题为 `interrupt`。
 - `_commit_assistant` 继续复用现有业务消息事务，不新增 clarification 专用表或字段。
 
-- [ ] **Step 7.1: RED — 写中断交付和持久化顺序测试**
+- [x] **Step 7.1: RED — 写中断交付和持久化顺序测试**
 
 扩展 FakeGraph，使其 yield Task 6 的 `on_chain_stream/__interrupt__` 事件；断言：
 
@@ -733,27 +851,57 @@ Run: `Set-Location backend; uv run pytest tests/test_chat_completion_producer.py
 
 Expected: FAIL，因为现有 producer 忽略 interrupt 并保存空回答/stop。
 
-- [ ] **Step 7.2: RED — 写畸形/未知中断安全失败测试**
+- [x] **Step 7.2: RED — 写畸形/未知中断安全失败测试**
 
 FakeGraph yield `kind="unknown"` 或空 question；断言事件为 `metadata,error`，没有 ASSISTANT、没有 completed、错误 payload 不含 raw interrupt/id。
 
-- [ ] **Step 7.3: GREEN — 引入单一 GraphCompletion 收集结果**
+- [x] **Step 7.3: GREEN — 引入单一 GraphCompletion 收集结果**
 
 在消费每个 graph event 时先投影文本 delta，再检查 clarification interrupt。普通文本按原顺序发布并累积；受支持 interrupt 将 question 转成一个 `ContentDeltaPayload` 发布并立即形成 `GraphCompletion(question, "interrupt")`；Graph 正常 END 则形成 `GraphCompletion(joined_text, "stop")`。
 
 `run()` 使用返回的 finish reason 构造 `CompletedPayload`；ASSISTANT commit 仍在 completed 之前，任一异常仍只发布一个 error。
 
-- [ ] **Step 7.4: RED/GREEN — 写断连后中断仍持久化测试**
+- [x] **Step 7.4: RED/GREEN — 写断连后中断仍持久化测试**
 
 先让 subscriber 收到 metadata 后 detach，再释放 gated interrupt graph；RED 应显示当前 fake/producer 不支持中断，GREEN 后断言 producer task 完成、澄清问题已保存、registry active_count 回到 0、断连未取消 Graph。
 
-- [ ] **Step 7.5: Verify GREEN — 运行 Producer、断连与失败一致性测试**
+- [x] **Step 7.5: Verify GREEN — 运行 Producer、断连与失败一致性测试**
 
 Run: `Set-Location backend; uv run pytest tests/test_chat_completion_producer.py tests/test_chat_completion_disconnect.py -q`
 
 Expected: 普通 stop、澄清 interrupt、Graph failure、commit failure、browser detach 全部 PASS，且没有重复终态。
 
-- [ ] **Step 7.6: Commit**
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_completion_producer.py::test_clarification_interrupt_persists_before_interrupted_completion -q
+Exit: 1
+Observed: 旧 Producer 只发 metadata, completed，缺少 clarification delta。
+
+RED: Set-Location backend; uv run pytest tests/test_chat_completion_producer.py -q -k unsupported_interrupt
+Exit: 1
+Observed: 未知 kind/空 question 被忽略并错误保存空 ASSISTANT，而非 metadata,error。
+
+RED: Set-Location backend; uv run pytest tests/test_chat_completion_disconnect.py::test_disconnect_after_metadata_still_persists_clarification_interrupt -q
+Exit: 1
+Observed: detach 后后台任务存入空串而非澄清问题。
+
+RED: Set-Location backend; uv run pytest tests/test_chat_completion_producer.py::test_clarification_interrupt_never_streams_classifier_output -q
+Exit: 1
+Observed: classifier JSON/reasoning 作为额外 content_delta 泄漏。
+
+RED: Set-Location backend; uv run pytest tests/test_chat_completion_disconnect.py::test_detach_unblocks_publish_when_channel_queue_is_full -q
+Exit: 1
+Observed: 16 槽队列满后第 17 次 publish 阻塞，detach 未在 0.1s 内唤醒。
+
+GREEN: Set-Location backend; uv run pytest tests/test_chat_completion_producer.py tests/test_chat_completion_disconnect.py tests/test_chat_completion_api.py -q
+Exit: 0
+Observed: 21 passed in 1.93s（控制器独立复跑）；顺序、泄漏隔离、唯一终态、断连与满队列背压均通过。
+
+REGRESSION: Set-Location backend; uv run pytest -q -m "not integration"
+Exit: 0
+Observed: 537 passed, 3 skipped, 2 deselected in 14.70s（控制器独立复跑）。
+```
+
+- [x] **Step 7.6: Commit**
 
 ```powershell
 git add backend/app/domains/chat/services/runtime.py backend/tests/test_chat_completion_producer.py backend/tests/test_chat_completion_disconnect.py
@@ -780,11 +928,11 @@ git commit -m "feat(chat): persist clarification interruptions"
 - 唯一 pending task 必须是 `task.name == "clarify"` 且含一个合法 Business clarification interrupt，随后返回 `Command(resume=content)`。
 - 未知 task、多任务、多 interrupt 或畸形 payload 抛 `ValueError`，不得误启新轮次。
 
-- [ ] **Step 8.1: RED — 写无 checkpoint 的普通输入测试**
+- [x] **Step 8.1: RED — 写无 checkpoint 的普通输入测试**
 
 FakeGraph 的 `aget_state(config)` 返回 `values={}`, `next=()`, `tasks=()`；执行 producer 后断言 `astream_events` 输入仍是现有 HumanMessage dict，thread ID 仍为 conversation ID 字符串。
 
-- [ ] **Step 8.2: RED — 写合法 pending clarification 的 Command 测试**
+- [x] **Step 8.2: RED — 写合法 pending clarification 的 Command 测试**
 
 Fake snapshot 形状必须与 LangGraph 当前 API 对齐：`next=("clarify",)`，一个 task，task.name 为 clarify，task.interrupts 含 Task 6 的合法 Interrupt。断言传给 `astream_events` 的首个参数满足：
 
@@ -798,11 +946,11 @@ Run: `Set-Location backend; uv run pytest tests/test_chat_completion_resume.py -
 
 Expected: FAIL，因为 producer 尚未调用 `aget_state`，总是创建新 HumanMessage 输入。
 
-- [ ] **Step 8.3: RED — 写未知 pending 状态不降级为普通轮次测试**
+- [x] **Step 8.3: RED — 写未知 pending 状态不降级为普通轮次测试**
 
 分别提供未知 task name、两个 pending tasks、空 question 三个 snapshot；断言 producer 发布 metadata 后进入 error，`astream_events` 未调用，原 checkpoint 未被 resume 或覆盖。
 
-- [ ] **Step 8.4: GREEN — 实现严格 snapshot 检测和 Command(resume)**
+- [x] **Step 8.4: GREEN — 实现严格 snapshot 检测和 Command(resume)**
 
 在 `_consume_graph_events` 启动流之前，使用相同 config 调用 `graph.aget_state(config)`。只把 Task 5 创建的 interrupt 识别为 resume；不要接受客户端提供的 runtime identifiers，也不要读取业务消息表来猜 pending 状态。
 
@@ -820,7 +968,7 @@ async def resolve_graph_input(graph, config, content):
     return Command(resume=content)
 ```
 
-- [ ] **Step 8.5: RED — 写 API 所有权与提交顺序测试**
+- [x] **Step 8.5: RED — 写 API 所有权与提交顺序测试**
 
 扩展 `test_chat_completion_api.py`：
 
@@ -829,13 +977,35 @@ async def resolve_graph_input(graph, config, content):
 - 合法 owned turn 的首个 SSE 仍是持久化后的 metadata；
 - request 包含 `checkpoint_id`, `interrupt_id`, `command`, `route`, `intent` 任一字段均返回 422 且无写入。
 
-- [ ] **Step 8.6: Verify GREEN — 运行恢复与 API 回归**
+- [x] **Step 8.6: Verify GREEN — 运行恢复与 API 回归**
 
 Run: `Set-Location backend; uv run pytest tests/test_chat_completion_resume.py tests/test_chat_completion_producer.py tests/test_chat_completion_api.py tests/test_chat_conversation_service.py -q`
 
 Expected: 普通输入与 resume 输入分流正确，所有权隐藏和 commit-before-execute 保持不变。
 
-- [ ] **Step 8.7: Commit**
+```text
+RED: Set-Location backend; uv run pytest tests/test_chat_completion_resume.py -q
+Exit: 1
+Observed: 8 failed；未调用 aget_state，合法 pending 仍传 HumanMessage，非法 pending 误启新轮次。
+
+RED: Set-Location backend; uv run pytest tests/test_chat_completion_resume.py -q -k "next_without_tasks"
+Exit: 1
+Observed: 2 failed；clarify/unknown next + empty tasks 被错误降级为普通轮次。
+
+GREEN: Set-Location backend; uv run pytest tests/test_chat_completion_resume.py -q
+Exit: 0
+Observed: 10 passed；仅 next/tasks 同为空时创建普通输入，唯一合法 clarify pending 返回 Command(resume)。
+
+REGRESSION: Set-Location backend; uv run pytest tests/test_chat_completion_resume.py tests/test_chat_completion_producer.py tests/test_chat_completion_api.py tests/test_chat_conversation_service.py tests/test_chat_completion_disconnect.py -q
+Exit: 0
+Observed: 44 passed in 2.11s（控制器独立复跑）；所有权、commit-before-state、metadata-first、422 extra fields 与断连回归通过。
+
+REGRESSION: Set-Location backend; uv run pytest -q -m "not integration"
+Exit: 0
+Observed: 553 passed, 3 skipped, 2 deselected in 11.62s（控制器独立复跑）。
+```
+
+- [x] **Step 8.7: Commit**
 
 ```powershell
 git add backend/app/domains/chat/services/runtime.py backend/tests/test_chat_completion_resume.py backend/tests/test_chat_completion_producer.py backend/tests/test_chat_completion_api.py
@@ -861,7 +1031,7 @@ git commit -m "feat(chat): resume pending clarification turns"
 - `streamCompletion(options) -> Promise<CompletionFinishReason>`；收到 completed 前流结束视为协议错误。
 - `interrupt` 不抛异常，不要求 checkpoint ID，并允许页面现有 finally 把 `sending` 恢复为 false。
 
-- [ ] **Step 9.1: RED — 写 stop/interrupt 成功终态测试**
+- [x] **Step 9.1: RED — 写 stop/interrupt 成功终态测试**
 
 使用 `ReadableStream` 分别返回：
 
@@ -879,7 +1049,13 @@ Run: `Set-Location frontend; node --experimental-strip-types --test src/app/chat
 
 Expected: FAIL，因为现有函数不解析 completed 且返回 `undefined`。
 
-- [ ] **Step 9.2: GREEN — 增加窄类型和 completed 解析**
+```text
+RED: Set-Location frontend; node --experimental-strip-types --test src/app/chat/api.test.ts
+Exit: 1
+Observed: stop/interrupt 实际返回 undefined；未知 reason 与无 completed EOF 未 reject。
+```
+
+- [x] **Step 9.2: GREEN — 增加窄类型和 completed 解析**
 
 ```typescript
 export type CompletionFinishReason = "stop" | "interrupt";
@@ -891,13 +1067,23 @@ function isFinishReason(value: unknown): value is CompletionFinishReason {
 
 `streamCompletion` 保存并返回唯一 completed reason；收到 completed 后取消/结束 reader 消费，不把 interrupt 当 error。不得向 request body 添加 resume 字段。
 
-- [ ] **Step 9.3: Verify GREEN — 运行前端单测、lint、build**
+- [x] **Step 9.3: Verify GREEN — 运行前端单测、lint、build**
 
 Run: `Set-Location frontend; npm test; npm run lint; npm run build`
 
 Expected: 三个命令全部 exit 0；现有 metadata/content_delta/error 行为不变。
 
-- [ ] **Step 9.4: Commit**
+```text
+RED: node --experimental-strip-types --test src/app/chat/api.test.ts
+Exit: 1
+Observed: 合法 completed 后 underlying cancel rejection 覆盖 interrupt 成功结果。
+
+GREEN: Set-Location frontend; npm test; npm run lint; npm run build
+Exit: 0 / 0 / 0
+Observed: 11/11 tests passed；lint 与 Next.js production build 通过（控制器独立复跑）。既有 ExperimentalWarning 与 MODULE_TYPELESS_PACKAGE_JSON warning 保留为基线噪声。
+```
+
+- [x] **Step 9.4: Commit**
 
 ```powershell
 git add frontend/src/app/chat/types.ts frontend/src/app/chat/api.ts frontend/src/app/chat/api.test.ts frontend/src/app/chat/page.tsx
