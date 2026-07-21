@@ -8,6 +8,7 @@ from app.contracts.chat.http import (
     MessageSummary,
 )
 from app.contracts.chat.stream import (
+    CompletionFinishReason,
     CompletedPayload,
     ContentDeltaPayload,
     ErrorPayload,
@@ -15,6 +16,7 @@ from app.contracts.chat.stream import (
 )
 
 __all__ = [
+    "CompletionFinishReason",
     "CompletedPayload",
     "CompletionRequest",
     "ContentDeltaPayload",

@@ -6,6 +6,8 @@ from pydantic import BaseModel
 
 from app.contracts.chat.http import ResponseId
 
+CompletionFinishReason = Literal["stop", "interrupt"]
+
 
 class MetadataPayload(BaseModel):
     conversation_id: ResponseId
@@ -18,7 +20,7 @@ class ContentDeltaPayload(BaseModel):
 
 class CompletedPayload(BaseModel):
     assistant_message_id: ResponseId
-    finish_reason: Literal["stop", "interrupt"] = "stop"
+    finish_reason: CompletionFinishReason = "stop"
 
 
 class ErrorPayload(BaseModel):
