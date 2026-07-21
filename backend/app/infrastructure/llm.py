@@ -8,17 +8,24 @@ EMBEDDING_MODEL = "text-embedding-v4"
 EMBEDDING_CHUNK_SIZE = 9
 
 
-def create_chat_model(settings: Any, *, model: str) -> ChatOpenAI:
+def create_chat_model(
+    settings: Any,
+    *,
+    model: str,
+    callbacks: list[Any] | None = None,
+) -> ChatOpenAI:
     """按运行配置创建指定模型的 ChatOpenAI client。"""
 
     api_key = _clean_value(getattr(settings, "openai_api_key", None))
     if api_key is None:
         raise RuntimeError("OPENAI_API_KEY is required")
 
-    kwargs: dict[str, str] = {
+    kwargs: dict[str, Any] = {
         "api_key": api_key,
         "model": model,
     }
+    if callbacks:
+        kwargs["callbacks"] = callbacks
     base_url = _clean_value(getattr(settings, "openai_base_url", None))
     if base_url is not None:
         kwargs["base_url"] = base_url

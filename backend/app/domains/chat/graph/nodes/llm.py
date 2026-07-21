@@ -1,6 +1,7 @@
 """首版 Chat Graph 中唯一的模型调用节点。"""
 
 from langchain_core.messages import BaseMessage
+from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.runtime import Runtime
 
 from app.domains.chat.graph.context import ChatRuntimeContext
@@ -17,5 +18,15 @@ async def llm_node(
     ``MessagesState`` reducer 合并并由 LangGraph checkpointer 管理 superstep 状态。
     """
 
-    message = await runtime.context.model.ainvoke(state["messages"])
+    return await invoke_llm(state, model=runtime.context.model)
+
+
+async def invoke_llm(
+    state: ChatState,
+    *,
+    model: BaseChatModel,
+) -> dict[str, list[BaseMessage]]:
+    """使用显式模型生成消息，供 runtime context 与 Studio 共同复用。"""
+
+    message = await model.ainvoke(state["messages"])
     return {"messages": [message]}

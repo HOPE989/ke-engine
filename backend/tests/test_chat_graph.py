@@ -80,6 +80,13 @@ def test_chat_graph_has_business_understanding_routes_and_no_retry_policy():
     assert all(node.retry_policy is None for node in builder.nodes.values())
 
 
+def test_default_graph_keeps_chat_runtime_context_schema():
+    from app.domains.chat.graph.builder import build_chat_graph
+    from app.domains.chat.graph.context import ChatRuntimeContext
+
+    assert build_chat_graph().context_schema is ChatRuntimeContext
+
+
 @pytest.mark.asyncio
 async def test_llm_node_uses_injected_model_and_returns_ai_message_update():
     from app.domains.chat.graph.context import ChatRuntimeContext
@@ -122,4 +129,29 @@ async def test_chat_graph_merges_llm_update_with_messages_state_semantics():
         context=ChatRuntimeContext(model=model),
     )
 
+    assert result["messages"] == [user_message, ai_message]
+
+
+@pytest.mark.asyncio
+async def test_bound_model_graph_runs_without_runtime_context():
+    from app.domains.chat.graph.builder import build_chat_graph
+
+    user_message = HumanMessage(content="hello")
+    ai_message = AIMessage(content="world")
+    classification = BusinessUnderstandingResult.model_validate(
+        {
+            "reasoning": "普通问候",
+            "route": "NON_BUSINESS",
+            "intent": None,
+            "entities": {},
+            "clarification_question": None,
+        }
+    )
+    model = FakeSequentialChatModel([classification], ai_message)
+
+    result = await build_chat_graph(bound_model=model).compile().ainvoke(
+        {"messages": [user_message]}
+    )
+
+    assert result["business_understanding"] == classification
     assert result["messages"] == [user_message, ai_message]

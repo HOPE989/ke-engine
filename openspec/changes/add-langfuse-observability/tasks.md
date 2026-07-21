@@ -16,11 +16,11 @@
 
 ## 3. Thin Studio adapter
 
-- [ ] 3.1 Extract model-explicit cores from the two model-dependent nodes without changing their behavior
-- [ ] 3.2 Add optional bound-model mode to the existing graph builder while preserving the production runtime context mode
-- [ ] 3.3 Allow Chat model construction to receive optional callbacks
-- [ ] 3.4 Add the Studio graph factory and langgraph.json without importing FastAPI business resources
-- [ ] 3.5 Add tests proving bound execution, identical topology and absence of production database, Redis, saver, Registry, SSE and title model setup
+- [x] 3.1 Extract model-explicit cores from the two model-dependent nodes without changing their behavior
+- [x] 3.2 Add optional bound-model mode to the existing graph builder while preserving the production runtime context mode
+- [x] 3.3 Allow Chat model construction to receive optional callbacks
+- [x] 3.4 Add the Studio graph factory and langgraph.json without importing FastAPI business resources
+- [x] 3.5 Add tests proving bound execution, identical topology and absence of production database, Redis, saver, Registry, SSE and title model setup
 
 ## 4. Business-understanding Dataset and scoring
 

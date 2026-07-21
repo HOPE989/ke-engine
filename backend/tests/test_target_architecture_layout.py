@@ -13,6 +13,7 @@ def test_target_architecture_files_exist():
     expected_files = [
         "entrypoints/document_api.py",
         "entrypoints/chat_api.py",
+        "entrypoints/studio_graph.py",
         "entrypoints/document_worker.py",
         "entrypoints/celery_worker.py",
         "services/document_api/app.py",

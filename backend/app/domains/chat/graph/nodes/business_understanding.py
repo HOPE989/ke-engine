@@ -2,6 +2,7 @@
 
 from typing import Literal
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
@@ -27,9 +28,17 @@ async def business_understanding_node(
 ) -> Command[Literal["llm", "business_boundary", "clarify"]]:
     """产出业务理解结果，并把执行权交给结果对应的固定节点。"""
 
-    structured_model = runtime.context.model.with_structured_output(
-        BusinessUnderstandingResult
-    )
+    return await invoke_business_understanding(state, model=runtime.context.model)
+
+
+async def invoke_business_understanding(
+    state: ChatState,
+    *,
+    model: BaseChatModel,
+) -> Command[Literal["llm", "business_boundary", "clarify"]]:
+    """使用显式模型执行业务理解，供 runtime context 与 Studio 共同复用。"""
+
+    structured_model = model.with_structured_output(BusinessUnderstandingResult)
     result = await structured_model.ainvoke(
         build_business_understanding_messages(state["messages"])
     )
