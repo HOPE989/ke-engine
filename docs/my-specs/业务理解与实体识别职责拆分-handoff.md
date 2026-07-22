@@ -444,9 +444,11 @@ validate_query_request
 9. 如何定义旧 checkpoint 的兼容策略，避免模型/Schema 升级破坏正在等待用户回复的 interrupt？
 10. 在真实业务接口尚未确定时，最小且可逆的第一步应该是什么？
 
-## 15. 当前非结论
+## 15. 此前非结论
 
-以下内容目前都不是既定决定：
+> 本节记录本文首次形成时尚未决定的事项。后续讨论已经收敛出新的明确判断；如本节与第 17 节冲突，以第 17 节为准。
+
+首次形成本文时，以下内容均不是既定决定：
 
 - 尚未决定删除 `BusinessEntities`；
 - 尚未决定移除 `CLARIFY` route；
@@ -457,7 +459,7 @@ validate_query_request
 - 尚未修改生产 Prompt、Graph、checkpoint 或 SSE；
 - 尚未选择旧 checkpoint 的迁移方式。
 
-当前较强的阶段性判断只有两点：
+当时较强的阶段性判断只有两点：
 
 1. 用户明确表达多个对象时，不应仅因为出现多个值就自动澄清为单选；
 2. 将所有领域实体长期集中在入口 `BusinessEntities` 中，缺少清晰消费者和能力契约，不适合作为可持续扩展方向。
@@ -488,3 +490,107 @@ validate_query_request
 本地 trace：
 
 - `C:/Users/83649/Downloads/trace-551036cf51d687b5f052cd32ddeed02f.json`
+
+## 17. 后续讨论形成的最终判断
+
+在完成 `add-business-understanding` 和 `add-langfuse-observability`、同步主规格并归档两个 OpenSpec change 后，讨论进一步收敛。当前决定不再选择“把实体识别迁移到独立节点、业务子图或工具参数生成节点”的表达方式，而是直接从 Business Understanding 中删除实体识别职责。
+
+### 17.1 不再维护显式实体识别能力
+
+当前明确决定：
+
+- 删除全局 `BusinessEntities`；
+- 删除 `BusinessUnderstandingResult.entities`；
+- 删除 Business Understanding Prompt 中的实体白名单、实体提取规则和实体 Few-shot；
+- 不增加独立实体识别节点；
+- 不为每个 intent 额外维护所谓“实体识别 Schema”；
+- 不再把 Agent 调用工具时生成参数称为实体识别。
+
+Agent 根据工具参数 Schema 生成调用参数属于正常 Tool Calling。工具或领域服务继续负责参数类型校验、名称规范化、对象存在性、业务约束和数据权限，但这些能力不需要在入口抽象为一套统一实体模型。
+
+Business Understanding 的目标输出收敛为：
+
+~~~python
+class BusinessUnderstandingResult(BaseModel):
+    reasoning: str
+    route: BusinessRoute
+    intent: BusinessIntent | None
+    clarification_question: str | None
+~~~
+
+### 17.2 Business Understanding 的保留职责
+
+入口只负责：
+
+1. 结合完整会话历史理解当前问题；
+2. 判断请求属于 `BUSINESS`、`NON_BUSINESS` 还是需要入口澄清；
+3. 从固定业务意图中选择主要 `intent`；
+4. 在业务范围或意图本身无法确定时生成最小澄清问题。
+
+入口不再负责：
+
+- 提取合同号、站点、时间范围、版本、指标等结构化实体；
+- 判断具体工具有哪些必填参数；
+- 因缺少运单号、合同号、时间或站点而提前澄清；
+- 决定多值条件应单次查询还是 fan-out 执行。
+
+例如“查一下我的运单”可以直接识别为 `BUSINESS + BUSINESS_DATA_QUERY`。缺少运单号是否影响执行，应由后续 Agent 在选定工具后判断，而不是由入口返回 `CLARIFY`。
+
+### 17.3 intent 用于装配 Business Knowledge Agent
+
+后续 Business Knowledge Agent 根据入口 `intent` 选择主要 Agent Profile，并注入不同的 Prompt、Skills 和 Tools：
+
+~~~text
+Business Understanding
+  ↓ route + intent
+Agent Profile Resolver
+  ↓ 注入 Prompt + Skills + Tools
+Business Knowledge Agent
+  ↓ Tool Calling / request_human_input / Evidence Validation
+Grounded Business Answer
+~~~
+
+intent 决定主要能力配置，但不同 Profile 可以共享工具。最终可用工具还必须与当前业务系统来源、用户角色和数据权限取交集，不能只依赖模型自行遵守权限描述。
+
+### 17.4 澄清职责分层
+
+`CLARIFY` 暂时保留在入口协议中，但语义收窄为“业务范围或 intent 无法确定”。
+
+后续 Agent 已经确定具体能力或工具后，如果缺少执行必需参数，应通过 `request_human_input` 在 Agent 执行上下文中触发 interrupt/resume。参数补充不再返回 Business Understanding 重新分类。
+
+### 17.5 评测体系同步精简
+
+Business Understanding 评测删除：
+
+- Dataset 中的 `key_entities`；
+- `key_entity_recall` scorer；
+- 实体字段集合、实体序列化和实体提取 Prompt 测试。
+
+入口只保留四类评测：
+
+- `route_accuracy`；
+- `intent_accuracy`；
+- `clarification_accuracy`；
+- `schema_validity`。
+
+工具选择、工具参数、多值参数、参数澄清和证据充分性在 Business Knowledge Agent 接入后建立独立评测，不再与入口 Dataset 混合。双站点样例在入口只验证 `BUSINESS + BUSINESS_DATA_QUERY`，不再评测站点实体值。
+
+### 17.6 变更范围与兼容策略
+
+删除实体识别先作为一个独立且较小的 OpenSpec change 实施，不与 Business Knowledge Agent 建设绑定。建议 change 名称为：
+
+~~~text
+remove-business-entity-extraction
+~~~
+
+该 change 只修改 Business Understanding 的模型、Prompt、Dataset、scorer、测试和对应主规格；当前 `BUSINESS -> business_boundary` 拓扑可以继续保留。Business Knowledge Agent、intent Profile、Skills、Tools 和 Evidence Validation 以后通过独立 change 接入。
+
+当前明确不考虑旧数据或旧 checkpoint 兼容：
+
+- 不保留 legacy `BusinessEntities` 类型；
+- 不设计双写、State 版本或旧节点兼容周期；
+- 可以直接删除旧 Schema 和相关序列化测试；
+- 部署或开发切换前允许清理现有 LangGraph checkpoint；
+- 旧会话不保证恢复。
+
+这是一项有意的 breaking state/schema change，应在新 OpenSpec proposal 中明确记录，但不需要为旧数据设计迁移方案。
