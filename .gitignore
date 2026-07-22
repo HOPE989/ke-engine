@@ -35,4 +35,8 @@ Thumbs.db
 
 # Runtime state
 backend/.runtime/
+backend/.langgraph_api/
 backend/celerybeat-schedule*
+
+# Local Codex skills
+.codex/skills/langfuse/
