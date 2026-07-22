@@ -35,6 +35,22 @@ def test_business_understanding_contract_has_only_v1_routes_intents_and_fields()
     )
 
 
+def test_business_entity_fields_have_model_facing_descriptions():
+    from app.domains.chat.graph.business_understanding import BusinessEntities
+
+    descriptions = {
+        name: field.description
+        for name, field in BusinessEntities.model_fields.items()
+    }
+
+    assert all(descriptions.values())
+    assert "车站" in descriptions["departure_station"]
+    assert "时间" in descriptions["time_range"]
+    assert "指标" in descriptions["metric_name"]
+    assert "运单" in descriptions["document_type"]
+    assert "异常" in descriptions["exception_description"]
+
+
 @pytest.mark.parametrize(
     "payload",
     [

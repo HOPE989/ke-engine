@@ -11,7 +11,9 @@
   `uv run uvicorn app.entrypoints.chat_api:app --reload`
 - 启动本地 Agent Server，并从终端给出的地址打开 Studio：
   `uv run --extra dev langgraph dev`
-- 同步 18 条 Dataset case 并串行运行真实模型 Experiment：
+- 显式 upsert 本地 Dataset case（不运行模型）：
+  `uv run python -m app.evaluation.upsert_business_understanding_dataset`
+- 读取 Langfuse 当前 Dataset 并串行运行真实模型 Experiment（不写 Dataset）：
   `uv run python -m app.evaluation.business_understanding_langfuse`
 
 Chat API 和 Studio 的 Langfuse 接入是 fail-open：配置缺失或追踪失败不会改变业务结果。

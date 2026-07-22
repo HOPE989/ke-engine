@@ -111,14 +111,24 @@ def test_deterministic_contract_evaluator_summary_reports_all_five_dimensions():
             totals[dimension][0] += hits
             totals[dimension][1] += count
 
-    assert len(cases) == 18
+    assert len(cases) == 26
+    assert {
+        "dispatch-regulation",
+        "coal-quality-penalty",
+        "turnaround-definition",
+        "implicit-loading-count",
+        "coal-stock-market",
+        "freight-order-lookup",
+        "ambiguous-station-followup",
+        "other-business-drafting",
+    } <= {case.id for case in cases}
     assert totals == {
-        "route": [18, 18],
-        "intent": [18, 18],
-        "key_entities": [24, 24],
-        "clarification": [18, 18],
-        "schema_validity": [18, 18],
+        "route": [26, 26],
+        "intent": [26, 26],
+        "key_entities": [40, 40],
+        "clarification": [26, 26],
+        "schema_validity": [26, 26],
     }
-    print("deterministic_contract_evaluator_validation cases=18 live_model=false")
+    print("deterministic_contract_evaluator_validation cases=26 live_model=false")
     for dimension, (hits, count) in totals.items():
         print(f"{dimension}={hits}/{count}")

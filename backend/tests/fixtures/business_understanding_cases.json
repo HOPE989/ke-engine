@@ -23,7 +23,7 @@
     "messages": [{"role": "user", "content": "查一下运单YD2026001现在到哪了"}],
     "expected_route": "BUSINESS",
     "expected_intent": "BUSINESS_DATA_QUERY",
-    "expected_key_entities": {"document_type": "运单", "document_no": "YD2026001"},
+    "expected_key_entities": {"document_type": "运单", "document_no": "YD2026001", "metric_name": "到站状态"},
     "expected_clarification_contains": null
   },
   {
@@ -32,7 +32,7 @@
     "messages": [{"role": "user", "content": "查一下我的运单"}],
     "expected_route": "CLARIFY",
     "expected_intent": "BUSINESS_DATA_QUERY",
-    "expected_key_entities": {"document_type": "运单"},
+    "expected_key_entities": {"document_type": "运单", "metric_name": "运单状态"},
     "expected_clarification_contains": "运单号"
   },
   {
@@ -72,7 +72,7 @@
     "messages": [{"role": "user", "content": "查询货票HP2026008的状态"}],
     "expected_route": "BUSINESS",
     "expected_intent": "BUSINESS_DATA_QUERY",
-    "expected_key_entities": {"document_type": "货票", "document_no": "HP2026008"},
+    "expected_key_entities": {"document_type": "货票", "document_no": "HP2026008", "metric_name": "货票状态"},
     "expected_clarification_contains": null
   },
   {
@@ -167,6 +167,82 @@
     "expected_route": "BUSINESS",
     "expected_intent": "BUSINESS_DATA_QUERY",
     "expected_key_entities": {"document_type": "运单", "document_no": "YD2026010"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "dispatch-regulation",
+    "category": "document_policy_regression",
+    "messages": [{"role": "user", "content": "《调度规程》对超限货物列车编组有什么要求"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "POLICY_RULE_QA",
+    "expected_key_entities": {"metric_name": "编组计划"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "coal-quality-penalty",
+    "category": "document_coal_sales_regression",
+    "messages": [{"role": "user", "content": "这批煤的热值不达标，合同里怎么扣罚"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "COAL_SALES_QA",
+    "expected_key_entities": {"metric_name": "热值扣罚", "exception_description": "煤炭热值不达标"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "turnaround-definition",
+    "category": "document_professional_regression",
+    "messages": [{"role": "user", "content": "重车周转时间是什么意思"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "PROFESSIONAL_KNOWLEDGE_QA",
+    "expected_key_entities": {"metric_name": "重车周转时间"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "implicit-loading-count",
+    "category": "document_implicit_data_query",
+    "messages": [{"role": "user", "content": "今天神东站装了几列"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "BUSINESS_DATA_QUERY",
+    "expected_key_entities": {"departure_station": "神东站", "time_range": "今天", "metric_name": "装车列数"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "coal-stock-market",
+    "category": "document_non_business_regression",
+    "messages": [{"role": "user", "content": "煤炭板块股票现在能买吗"}],
+    "expected_route": "NON_BUSINESS",
+    "expected_intent": null,
+    "expected_key_entities": {},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "freight-order-lookup",
+    "category": "document_freight_order_regression",
+    "messages": [{"role": "user", "content": "查询货单HD2026012的状态"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "BUSINESS_DATA_QUERY",
+    "expected_key_entities": {"document_type": "货单", "document_no": "HD2026012", "metric_name": "货单状态"},
+    "expected_clarification_contains": null
+  },
+  {
+    "id": "ambiguous-station-followup",
+    "category": "document_ambiguous_history_regression",
+    "messages": [
+      {"role": "user", "content": "查神木站和榆林站本月模拟装车计划"},
+      {"role": "assistant", "content": "开发阶段暂不执行业务查询"},
+      {"role": "user", "content": "按实际版呢"}
+    ],
+    "expected_route": "CLARIFY",
+    "expected_intent": "BUSINESS_DATA_QUERY",
+    "expected_key_entities": {"time_range": "本月", "data_version": "实际版", "metric_name": "装车计划"},
+    "expected_clarification_contains": "神木站还是榆林站"
+  },
+  {
+    "id": "other-business-drafting",
+    "category": "document_other_business_regression",
+    "messages": [{"role": "user", "content": "帮我起草一份煤炭运输业务周会通知"}],
+    "expected_route": "BUSINESS",
+    "expected_intent": "OTHER_BUSINESS",
+    "expected_key_entities": {},
     "expected_clarification_contains": null
   }
 ]

@@ -1,4 +1,4 @@
-"""业务理解 fixture 与 Langfuse Dataset Experiment 之间的薄适配层。"""
+"""业务理解与 Langfuse Dataset Experiment 之间的薄适配层。"""
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -20,7 +20,6 @@ from app.domains.chat.graph.business_understanding import (
 )
 from app.domains.chat.graph.business_understanding.evaluation import (
     EvaluationCase,
-    load_evaluation_cases,
     score_evaluation_cases,
 )
 from app.domains.chat.graph.business_understanding.prompt import (
@@ -66,7 +65,6 @@ def dataset_item_payload(case: EvaluationCase) -> dict[str, Any]:
         "metadata": {
             "case_id": case.id,
             "category": case.category,
-            "prompt_version": BUSINESS_UNDERSTANDING_PROMPT_VERSION,
         },
     }
 
@@ -148,10 +146,9 @@ def sync_dataset(client: Any, cases: Sequence[EvaluationCase]) -> Any:
     except NotFoundError:
         client.create_dataset(
             name=DATASET_NAME,
-            description="18 labeled business-understanding regression cases",
+            description="26 labeled business-understanding regression cases",
             metadata={
                 "source": "ke-engine",
-                "prompt_version": BUSINESS_UNDERSTANDING_PROMPT_VERSION,
             },
         )
     for case in cases:
@@ -177,7 +174,7 @@ def run_experiment(
     try:
         if not client.auth_check():
             raise RuntimeError("Langfuse authentication failed")
-        dataset = sync_dataset(client, load_evaluation_cases())
+        dataset = client.get_dataset(DATASET_NAME)
         model = create_chat_model(
             settings,
             model=settings.openai_model,
@@ -187,7 +184,7 @@ def run_experiment(
             name="business-understanding-live-model",
             run_name=_default_run_name(),
             description=(
-                "Production business-understanding node against 18 labeled cases"
+                "Production business-understanding node against 26 labeled cases"
             ),
             task=partial(run_business_understanding_case, model=model),
             evaluators=[langfuse_evaluator],
@@ -228,8 +225,8 @@ def _evaluation_case_from_langfuse(
 ) -> EvaluationCase:
     intent = expected_output.get("intent")
     return EvaluationCase(
-        id=str(metadata["case_id"]),
-        category=str(metadata["category"]),
+        id=str(metadata.get("case_id") or "langfuse-dataset-item"),
+        category=str(metadata.get("category") or "uncategorized"),
         messages=[dict(message) for message in input["messages"]],
         expected_route=BusinessRoute(expected_output["route"]),
         expected_intent=BusinessIntent(intent) if intent is not None else None,

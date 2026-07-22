@@ -53,16 +53,15 @@ def test_dataset_mapping_is_stable_and_preserves_all_case_fields():
     assert first["metadata"] == {
         "case_id": case.id,
         "category": case.category,
-        "prompt_version": BUSINESS_UNDERSTANDING_PROMPT_VERSION,
     }
 
 
-def test_all_eighteen_cases_have_unique_project_level_item_ids():
+def test_all_cases_have_unique_project_level_item_ids():
     from app.evaluation.business_understanding_langfuse import dataset_item_id
 
     ids = [dataset_item_id(case) for case in load_evaluation_cases()]
 
-    assert len(ids) == len(set(ids)) == 18
+    assert len(ids) == len(set(ids)) == 26
 
 
 def test_langfuse_evaluator_returns_five_numeric_scores_from_existing_scorer():
@@ -78,7 +77,7 @@ def test_langfuse_evaluator_returns_five_numeric_scores_from_existing_scorer():
         input=payload["input"],
         output=_oracle_output(case),
         expected_output=payload["expected_output"],
-        metadata=payload["metadata"],
+        metadata={},
     )
 
     assert {evaluation.name for evaluation in evaluations} == {
@@ -130,7 +129,7 @@ class FakeExperimentResult:
     dataset_run_url = "http://langfuse.local/project/datasets/run-1"
 
     def format(self):
-        return "18 items evaluated"
+        return "26 items evaluated"
 
 
 class FakeDataset:
@@ -160,9 +159,11 @@ class FakeLangfuseClient:
         self.dataset = FakeDataset(result=result, experiment_error=experiment_error)
         self.created_datasets = []
         self.created_items = []
+        self.get_dataset_calls = []
         self.shutdown_calls = 0
 
     def get_dataset(self, name):
+        self.get_dataset_calls.append(name)
         assert name == "ke-engine/business-understanding-v1"
         if not self.dataset_exists:
             raise NotFoundError({"message": "not found"})
@@ -189,7 +190,7 @@ def _experiment_settings():
     )
 
 
-def test_sync_dataset_creates_then_upserts_all_eighteen_items():
+def test_sync_dataset_creates_then_upserts_all_items():
     from app.evaluation.business_understanding_langfuse import (
         DATASET_NAME,
         sync_dataset,
@@ -201,9 +202,9 @@ def test_sync_dataset_creates_then_upserts_all_eighteen_items():
 
     assert dataset is client.dataset
     assert client.created_datasets[0]["name"] == DATASET_NAME
-    assert len(client.created_items) == 18
+    assert len(client.created_items) == 26
     assert all(item["dataset_name"] == DATASET_NAME for item in client.created_items)
-    assert len({item["id"] for item in client.created_items}) == 18
+    assert len({item["id"] for item in client.created_items}) == 26
 
 
 def test_sync_dataset_reuses_existing_dataset_and_still_upserts_items():
@@ -214,7 +215,7 @@ def test_sync_dataset_reuses_existing_dataset_and_still_upserts_items():
     sync_dataset(client, load_evaluation_cases())
 
     assert client.created_datasets == []
-    assert len(client.created_items) == 18
+    assert len(client.created_items) == 26
 
 
 def test_run_experiment_is_serial_traced_and_prints_dataset_run_url(
@@ -241,6 +242,8 @@ def test_run_experiment_is_serial_traced_and_prints_dataset_run_url(
     result = module.run_experiment(settings, resources=resources)
 
     assert result is client.dataset.result
+    assert client.get_dataset_calls == [module.DATASET_NAME]
+    assert client.created_items == []
     assert model_calls == [
         {"settings": settings, "model": "gpt-test", "callbacks": [handler]}
     ]
@@ -249,15 +252,30 @@ def test_run_experiment_is_serial_traced_and_prints_dataset_run_url(
     assert call["evaluators"] == [module.langfuse_evaluator]
     assert call["metadata"] == {
         "model": "gpt-test",
-        "prompt_version": "v1",
+        "prompt_version": "v2",
         "app_version": "0.1.0",
         "live_model": "true",
     }
     assert call["task"].keywords == {"model": model_instance}
     output = capsys.readouterr().out
-    assert "18 items evaluated" in output
+    assert "26 items evaluated" in output
     assert FakeExperimentResult.dataset_run_url in output
     assert client.shutdown_calls == 1
+
+
+def test_explicit_upsert_command_writes_cases_without_running_experiment(capsys):
+    from app.evaluation.upsert_business_understanding_dataset import upsert_dataset
+
+    client = FakeLangfuseClient()
+    resources = SimpleNamespace(client=client, handler=object())
+
+    dataset = upsert_dataset(_experiment_settings(), resources=resources)
+
+    assert dataset is client.dataset
+    assert len(client.created_items) == 26
+    assert client.dataset.experiment_calls == []
+    assert client.shutdown_calls == 1
+    assert "Upserted 26 items" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
