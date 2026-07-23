@@ -192,12 +192,31 @@ The system SHALL provide deterministic default tests and a separate opt-in path 
 
 - **WHEN** the repository Query Rewrite cases are inspected
 - **THEN** they SHALL cover context resolution, conversational noise, terminology normalization, already-standalone input, and preservation of entity, time, numeric, negation, comparison, and ownership constraints
+- **AND** they SHALL provide a human reference query and case-specific semantic review guidance without requiring exact wording
+
+#### Scenario: Code evaluators remain objective
+
+- **WHEN** an offline or Langfuse code evaluator scores a Query Rewrite result
+- **THEN** it MAY validate non-blank structured output, status values, and fallback consistency
+- **AND** it MUST NOT represent semantic quality with keyword inclusion, token overlap, regular expressions, edit distance, or reference-query exact match
+
+#### Scenario: Semantic quality uses human or model judgment
+
+- **WHEN** an experiment evaluates semantic equivalence, context resolution, constraint preservation, retrieval readiness, or unsupported invention
+- **THEN** those dimensions SHALL be scored by a human reviewer or an LLM-as-a-Judge using an explicit rubric
+- **AND** the evaluation SHALL retain a short reason that can be inspected with the score
+
+#### Scenario: LLM Judge is calibrated before gating
+
+- **WHEN** LLM-as-a-Judge scores are considered for an automated quality gate
+- **THEN** the Judge SHALL first be compared with human annotations on representative Query Rewrite outputs
+- **AND** uncalibrated Judge scores MUST NOT gate CI, releases, or automatic Prompt selection
 
 #### Scenario: Live evaluation runs the production node
 
 - **WHEN** a developer explicitly runs the live-model evaluation command with valid model configuration
 - **THEN** it SHALL invoke the production Query Rewrite node against the repository cases
-- **AND** it SHALL report each original query, resulting standalone query, Rewrite status, and deterministic constraint-retention checks
+- **AND** it SHALL report each original query, resulting standalone query, Rewrite status, objective contract checks, and any separately produced human or LLM Judge scores
 
 #### Scenario: Live evaluation is not a default gate
 

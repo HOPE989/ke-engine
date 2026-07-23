@@ -22,6 +22,9 @@
 - domain 模块导入不得创建模型客户端、读取 settings 或初始化 Langfuse。
 - Langfuse 是可选观测能力，不得成为业务依赖；调用方提供的 `RunnableConfig` 必须继续传给结构化模型调用。
 - 默认 pytest 必须完全离线；真实模型评测只能通过显式命令运行。
+- Langfuse code evaluator 只允许检查非空结构、状态枚举和 fallback 一致性等客观契约；禁止用关键词包含、token overlap、正则、编辑距离或参考答案 exact match 代表 Query Rewrite 语义质量。
+- Query Rewrite 语义质量只由人工标注或经过人工样本校准的 LLM-as-a-Judge 评分；Judge 必须看到完整输入、实际输出、人工参考查询和 case-specific rubric，并输出分项分数与简短理由。
+- 未与人工标签完成校准的 LLM Judge 分数只用于实验分析，不得作为 CI、发布或 Prompt 自动选择门禁。
 - 每轮 Verify GREEN 先运行当前测试文件，再运行本计划指定的 RAG Query Rewrite 回归集；Refactor 后必须再次保持绿色。
 - 每次 Verify RED/Verify GREEN 都在当前步骤下追加命令、退出码和关键输出，不得只勾选复选框。
 
@@ -32,7 +35,7 @@
 | `backend/app/domains/rag/query_rewrite/models.py` | 输入、输出、状态枚举、失败码和 state update 契约 |
 | `backend/app/domains/rag/query_rewrite/prompt.py` | 版本化 Prompt 与输入 JSON 消息构造 |
 | `backend/app/domains/rag/query_rewrite/service.py` | 单次结构化模型调用和显式 fallback |
-| `backend/app/domains/rag/query_rewrite/evaluation.py` | 本地评测 case 与确定性 scorer |
+| `backend/app/domains/rag/query_rewrite/evaluation.py` | 本地评测 case 与客观输出契约 scorer |
 | `backend/app/domains/rag/graph/state.py` | 可序列化的最小 Graph state |
 | `backend/app/domains/rag/graph/context.py` | 不进入 state 的 model runtime dependency |
 | `backend/app/domains/rag/graph/nodes/query_rewrite.py` | state/runtime 到领域服务的 node adapter |
@@ -1561,21 +1564,23 @@ git commit -m "feat(rag): expose query rewrite graph in studio"
 
 ## Task 7: Deterministic Evaluation Cases and Scorer
 
-**Deliverable:** 一组覆盖全部硬约束的本地 cases，以及不要求逐字匹配标准答案的确定性 scorer。
+**Deliverable:** 一组按高风险错误类型组织的本地 cases，以及只检查结构和状态、不替代语义判断的客观契约 scorer。
 
 **Files:**
 
-- Create: `backend/tests/fixtures/query_rewrite_cases.json`
+- Verify: `backend/tests/fixtures/query_rewrite_cases.json`
 - Create: `backend/app/domains/rag/query_rewrite/evaluation.py`
 - Create: `backend/tests/test_rag_query_rewrite_evaluation.py`
 
 **Interfaces:**
 
-- Produces: `EvaluationCase` with request data, `required_literals`, `forbidden_literals`。
-- Produces: `EvaluationScore(required_literals, forbidden_literals, schema_validity, status_validity)` and `.passed`。
-- Produces: `load_evaluation_cases()` and `score_evaluation_case(expected, actual)`。
+- Consumes: 已评审的 28 条 fixture cases，不在实现阶段重新生成或缩减。
+- Produces: `EvaluationCase` with request data, `expected_standalone_query`, `expected_preserved_terms`, `expected_required_term_groups`, `expected_excluded_terms`。
+- Produces: `ContractEvaluationScore(schema_validity, status_validity)` and `.passed`，只验证机器可判定的输出契约。
+- Semantic quality fields are consumed only as context for human review or an LLM-as-a-Judge evaluator; code MUST NOT turn them into substring, token-overlap, regex, edit-distance, or exact-match scores。
+- Produces: `load_evaluation_cases()` and `score_query_rewrite_contract(expected, actual)`。
 
-- [ ] **Step 7.1: RED — 写 fixture 覆盖和 scorer 独立维度测试**
+- [ ] **Step 7.1: RED — 写 fixture 覆盖和契约 scorer 边界测试**
 
 Create `backend/tests/test_rag_query_rewrite_evaluation.py`:
 
@@ -1587,29 +1592,31 @@ def test_query_rewrite_cases_cover_all_v1_semantic_groups():
 
     cases = load_evaluation_cases()
 
-    assert len(cases) == 12
+    assert len(cases) == 28
     assert {case.category for case in cases} == {
-        "context_resolution",
-        "conversational_noise",
-        "terminology_normalization",
-        "already_standalone",
-        "entity_preservation",
-        "time_preservation",
+        "multi_turn_ellipsis",
+        "current_query_precedence",
+        "time_range_preservation",
         "numeric_range_preservation",
         "negation_preservation",
         "comparison_preservation",
         "ownership_preservation",
-        "current_value_precedence",
-        "unsupported_fact",
+        "identifier_integrity",
+        "no_invention",
+        "conversational_noise",
+        "terminology_normalization",
+        "standalone_stability",
+        "single_query_boundary",
     }
-    assert all(case.required_literals for case in cases)
+    assert all(case.expected_preserved_terms for case in cases)
+    assert all(case.expected_standalone_query.strip() for case in cases)
     assert len({case.id for case in cases}) == len(cases)
 
 
-def test_query_rewrite_scorer_reports_each_dimension_independently():
+def test_contract_scorer_does_not_convert_semantic_annotations_into_keyword_scores():
     from app.domains.rag.query_rewrite.evaluation import (
         EvaluationCase,
-        score_evaluation_case,
+        score_query_rewrite_contract,
     )
 
     expected = EvaluationCase(
@@ -1618,8 +1625,12 @@ def test_query_rewrite_scorer_reports_each_dimension_independently():
         original_query="查询未到达曹妃甸港的列车",
         conversation_context=[],
         business_context=None,
-        required_literals=["未到达", "曹妃甸港", "列车"],
-        forbidden_literals=["已到达", "神木站"],
+        expected_standalone_query="查询尚未到达曹妃甸港的列车",
+        expected_preserved_terms=["曹妃甸港", "列车"],
+        expected_required_term_groups=[
+            ["未到达", "尚未到达", "尚未抵达"]
+        ],
+        expected_excluded_terms=["已到达曹妃甸港", "神木站"],
     )
     actual = {
         "standalone_query": "查询未到达曹妃甸港的车辆",
@@ -1628,19 +1639,21 @@ def test_query_rewrite_scorer_reports_each_dimension_independently():
         "warnings": [],
     }
 
-    score = score_evaluation_case(expected, actual)
+    score = score_query_rewrite_contract(expected, actual)
 
-    assert score.required_literals == (2, 3)
-    assert score.forbidden_literals == (2, 2)
     assert score.schema_validity == (1, 1)
     assert score.status_validity == (1, 1)
-    assert score.passed is False
+    assert score.passed is True
+    assert set(score.__dataclass_fields__) == {
+        "schema_validity",
+        "status_validity",
+    }
 
 
 def test_query_rewrite_scorer_accepts_observable_original_query_fallback():
     from app.domains.rag.query_rewrite.evaluation import (
         EvaluationCase,
-        score_evaluation_case,
+        score_query_rewrite_contract,
     )
 
     expected = EvaluationCase(
@@ -1649,11 +1662,13 @@ def test_query_rewrite_scorer_accepts_observable_original_query_fallback():
         original_query="查询运单 YD2026001",
         conversation_context=[],
         business_context=None,
-        required_literals=["运单", "YD2026001"],
-        forbidden_literals=[],
+        expected_standalone_query="查询运单 YD2026001",
+        expected_preserved_terms=["运单", "YD2026001"],
+        expected_required_term_groups=[],
+        expected_excluded_terms=[],
     )
 
-    score = score_evaluation_case(
+    score = score_query_rewrite_contract(
         expected,
         {
             "standalone_query": expected.original_query,
@@ -1675,138 +1690,28 @@ Set-Location backend
 uv run pytest tests/test_rag_query_rewrite_evaluation.py -q
 ```
 
-Expected: FAIL with missing `query_rewrite.evaluation` or fixture file。
+Expected: FAIL with missing `query_rewrite.evaluation`；fixture 已作为评审后的设计输入存在。
 
-- [ ] **Step 7.3: GREEN — 添加 12 个完整 fixture cases**
+- [ ] **Step 7.3: Verify Dataset Baseline — 校验已评审的 28 条实验 cases**
 
-Create `backend/tests/fixtures/query_rewrite_cases.json`:
+`backend/tests/fixtures/query_rewrite_cases.json` 是实现前先行评审的实验数据基线，
+不得在 GREEN 阶段用更小的测试子集覆盖。它按高风险错误类型分配样例数量，并为
+每条 case 同时提供人工参考查询、必须原样保留项、同义表达组和禁止出现项。
 
-```json
-[
-  {
-    "id": "context-actual-version",
-    "category": "context_resolution",
-    "original_query": "按实际版呢",
-    "conversation_context": [
-      {"role": "user", "content": "查询神木站本月模拟版装车计划"},
-      {"role": "assistant", "content": "你想继续查看哪个版本？"}
-    ],
-    "business_context": {
-      "intent": "BUSINESS_DATA_QUERY",
-      "entities": {"departure_station": "神木站", "metric_name": "装车计划"}
-    },
-    "required_literals": ["神木站", "本月", "实际版", "装车计划"],
-    "forbidden_literals": ["模拟版"]
-  },
-  {
-    "id": "remove-politeness",
-    "category": "conversational_noise",
-    "original_query": "你好，麻烦帮我查一下运单 YD2026001 现在到哪里了，谢谢",
-    "conversation_context": [],
-    "business_context": null,
-    "required_literals": ["运单", "YD2026001"],
-    "forbidden_literals": ["你好", "麻烦帮我", "谢谢"]
-  },
-  {
-    "id": "normalize-freight-waybill",
-    "category": "terminology_normalization",
-    "original_query": "查货运单 YD2026002 的状态",
-    "conversation_context": [],
-    "business_context": null,
-    "required_literals": ["运单", "YD2026002", "状态"],
-    "forbidden_literals": ["货运单"]
-  },
-  {
-    "id": "stable-standalone",
-    "category": "already_standalone",
-    "original_query": "查询2026年7月神木站实际版装车数量",
-    "conversation_context": [],
-    "business_context": null,
-    "required_literals": ["2026年7月", "神木站", "实际版", "装车数量"],
-    "forbidden_literals": []
-  },
-  {
-    "id": "preserve-contract",
-    "category": "entity_preservation",
-    "original_query": "查询合同 HT-2026-071 的履约状态",
-    "conversation_context": [],
-    "business_context": null,
-    "required_literals": ["合同", "HT-2026-071", "履约状态"],
-    "forbidden_literals": []
-  },
-  {
-    "id": "preserve-date-range",
-    "category": "time_preservation",
-    "original_query": "查询2026年7月1日至7月15日榆林站运量",
-    "conversation_context": [],
-    "business_context": null,
-    "required_literals": ["2026年", "7月1日", "7月15日", "榆林站", "运量"],
-    "forbidden_literals": []
-  },
-  {
-    "id": "preserve-calorific-range",
-    "category": "numeric_range_preservation",
-    "original_query": "筛选发热量在5500至6000千卡之间的煤炭合同",
-    "conversation_context": [],
-    "business_context": null,
-    "required_literals": ["5500", "6000", "千卡", "煤炭合同"],
-    "forbidden_literals": []
-  },
-  {
-    "id": "preserve-not-arrived",
-    "category": "negation_preservation",
-    "original_query": "查询未到达曹妃甸港的列车",
-    "conversation_context": [],
-    "business_context": null,
-    "required_literals": ["未到达", "曹妃甸港", "列车"],
-    "forbidden_literals": ["已到达"]
-  },
-  {
-    "id": "preserve-station-comparison",
-    "category": "comparison_preservation",
-    "original_query": "比较神木站和榆林站本月装车数量",
-    "conversation_context": [],
-    "business_context": null,
-    "required_literals": ["比较", "神木站", "榆林站", "本月", "装车数量"],
-    "forbidden_literals": []
-  },
-  {
-    "id": "preserve-customer-ownership",
-    "category": "ownership_preservation",
-    "original_query": "查询客户华能集团名下合同的结算状态",
-    "conversation_context": [],
-    "business_context": null,
-    "required_literals": ["客户", "华能集团", "名下合同", "结算状态"],
-    "forbidden_literals": []
-  },
-  {
-    "id": "current-simulation-wins",
-    "category": "current_value_precedence",
-    "original_query": "改查模拟版",
-    "conversation_context": [
-      {"role": "user", "content": "查询榆林站昨日实际版装车数量"},
-      {"role": "assistant", "content": "正在查询实际版数据"}
-    ],
-    "business_context": {
-      "intent": "BUSINESS_DATA_QUERY",
-      "entities": {"data_version": "实际版"}
-    },
-    "required_literals": ["榆林站", "昨日", "模拟版", "装车数量"],
-    "forbidden_literals": ["实际版"]
-  },
-  {
-    "id": "do-not-invent-station",
-    "category": "unsupported_fact",
-    "original_query": "查询运单 YD2026003 当前状态",
-    "conversation_context": [],
-    "business_context": null,
-    "required_literals": ["运单", "YD2026003", "当前状态"],
-    "forbidden_literals": ["神木站", "榆林站", "曹妃甸港"]
-  }
-]
+Run:
+
+```powershell
+Set-Location backend
+$cases = Get-Content -Raw tests/fixtures/query_rewrite_cases.json | ConvertFrom-Json
+if (@($cases).Count -ne 28) { throw "expected 28 Query Rewrite cases" }
+if (@($cases.id | Sort-Object -Unique).Count -ne 28) { throw "duplicate case id" }
+$cases | Group-Object category | Sort-Object Name | Select-Object Name, Count
 ```
 
-- [ ] **Step 7.4: GREEN — 实现 fixture loader 和四维确定性 scorer**
+Expected: 28 个唯一 case、13 个风险类别；`multi_turn_ellipsis=4`、
+`current_query_precedence=3`、`conversational_noise=1`，其余类别各 2 条。
+
+- [ ] **Step 7.4: GREEN — 实现 fixture loader 和两维契约 scorer**
 
 Create `backend/app/domains/rag/query_rewrite/evaluation.py`:
 
@@ -1836,14 +1741,14 @@ class EvaluationCase:
     original_query: str
     conversation_context: list[dict[str, str]]
     business_context: dict[str, Any] | None
-    required_literals: list[str]
-    forbidden_literals: list[str]
+    expected_standalone_query: str
+    expected_preserved_terms: list[str]
+    expected_required_term_groups: list[list[str]]
+    expected_excluded_terms: list[str]
 
 
 @dataclass(frozen=True)
-class EvaluationScore:
-    required_literals: tuple[int, int]
-    forbidden_literals: tuple[int, int]
+class ContractEvaluationScore:
     schema_validity: tuple[int, int]
     status_validity: tuple[int, int]
 
@@ -1852,8 +1757,6 @@ class EvaluationScore:
         return all(
             hits == total
             for hits, total in (
-                self.required_literals,
-                self.forbidden_literals,
                 self.schema_validity,
                 self.status_validity,
             )
@@ -1871,18 +1774,12 @@ def load_evaluation_cases() -> list[EvaluationCase]:
     return [EvaluationCase(**case) for case in raw_cases]
 
 
-def score_evaluation_case(
+def score_query_rewrite_contract(
     expected: EvaluationCase,
     actual: Mapping[str, Any],
-) -> EvaluationScore:
+) -> ContractEvaluationScore:
     standalone_query = actual.get("standalone_query")
     query = standalone_query if isinstance(standalone_query, str) else ""
-    required_hits = sum(
-        literal in query for literal in expected.required_literals
-    )
-    forbidden_hits = sum(
-        literal not in query for literal in expected.forbidden_literals
-    )
 
     try:
         QueryRewriteResult(standalone_query=query)
@@ -1909,15 +1806,7 @@ def score_evaluation_case(
     else:
         status_valid = False
 
-    return EvaluationScore(
-        required_literals=(
-            required_hits,
-            len(expected.required_literals),
-        ),
-        forbidden_literals=(
-            forbidden_hits,
-            len(expected.forbidden_literals),
-        ),
+    return ContractEvaluationScore(
         schema_validity=(int(schema_valid), 1),
         status_validity=(int(status_valid), 1),
     )
@@ -1932,17 +1821,17 @@ Set-Location backend
 uv run pytest tests/test_rag_query_rewrite_evaluation.py tests/test_rag_query_rewrite_models.py tests/test_rag_query_rewrite_prompt.py -q
 ```
 
-Expected: PASS，fixture 数量为 12，四个 scorer 维度独立报告。
+Expected: PASS，fixture 数量为 28；代码 scorer 只报告 schema 和状态一致性，不给语义质量打分。
 
 - [ ] **Step 7.6: REFACTOR — 检查 scorer 不依赖标准句逐字匹配**
 
 Run:
 
 ```powershell
-rg -n "expected_query|reference_answer|exact_match|BLEU|ROUGE" app/domains/rag/query_rewrite/evaluation.py tests/fixtures/query_rewrite_cases.json
+rg -n "expected_preserved_terms|expected_required_term_groups|expected_excluded_terms|expected_standalone_query.*==|in query|exact_match|BLEU|ROUGE|Levenshtein" app/domains/rag/query_rewrite/evaluation.py
 ```
 
-Expected: no matches。
+Expected: no matches；reference 和 case-specific annotations 只进入人工复核或 LLM Judge 上下文，不参与代码匹配评分。
 
 - [ ] **Step 7.7: Commit**
 
@@ -1953,9 +1842,9 @@ git commit -m "test(rag): add query rewrite evaluation cases"
 
 ---
 
-## Task 8: Explicit Live-Model Evaluation Command
+## Task 8: Explicit Live-Model Experiment and Semantic Evaluation Boundary
 
-**Deliverable:** 一个默认测试不会执行、串行运行生产 Graph、可选接入 Langfuse callback，并以退出码区分运行失败和质量检查失败的命令。
+**Deliverable:** 一个默认测试不会执行、串行运行生产 Graph、可选接入 Langfuse callback，并且只对客观输出契约给出代码结论的实验命令；语义质量由人工或单独的 LLM-as-a-Judge evaluator 评分。
 
 **Files:**
 
@@ -1964,9 +1853,10 @@ git commit -m "test(rag): add query rewrite evaluation cases"
 
 **Interfaces:**
 
-- Consumes: `build_query_rewrite_graph`, `load_evaluation_cases`, `score_evaluation_case`。
+- Consumes: `build_query_rewrite_graph`, `load_evaluation_cases`, `score_query_rewrite_contract`。
 - Produces: `run_live_evaluation(settings, *, resources=None) -> bool`。
-- Produces: `main() -> int`；`0` 全部通过，`1` 配置/供应商/运行失败，`2` 至少一个确定性质量检查失败。
+- Produces: `main() -> int`；`0` 实验执行及输出契约正常，`1` 配置/供应商/运行失败，`2` 至少一个输出契约无效。
+- Semantic scores: `semantic_fidelity`, `context_resolution`, `constraint_preservation`, `retrieval_readiness`, `non_invention`, `single_query_compliance`，只能来自人工或 LLM Judge，且不得由本命令用字符串匹配计算。
 - Command: `Set-Location backend; uv run python -m app.evaluation.rag_query_rewrite`。
 
 - [ ] **Step 8.1: RED — 写生产 Graph 执行、输出和退出码测试**
@@ -1998,7 +1888,7 @@ async def test_live_evaluation_runs_all_cases_through_production_graph(
     cases = load_evaluation_cases()
     results = [
         QueryRewriteResult(
-            standalone_query=" ".join(case.required_literals)
+            standalone_query=case.expected_standalone_query
         )
         for case in cases
     ]
@@ -2058,10 +1948,10 @@ def test_live_evaluation_main_uses_distinct_failure_exit_codes(
 
     monkeypatch.setattr(module, "create_settings", lambda: object())
 
-    async def quality_failed(settings):
+    async def contract_failed(settings):
         return False
 
-    monkeypatch.setattr(module, "run_live_evaluation", quality_failed)
+    monkeypatch.setattr(module, "run_live_evaluation", contract_failed)
     assert module.main() == 2
 
     async def execution_failed(settings):
@@ -2101,7 +1991,7 @@ from app.core.config import (
 from app.domains.rag.graph import build_query_rewrite_graph
 from app.domains.rag.query_rewrite.evaluation import (
     load_evaluation_cases,
-    score_evaluation_case,
+    score_query_rewrite_contract,
 )
 from app.domains.rag.query_rewrite.prompt import (
     QUERY_REWRITE_PROMPT_VERSION,
@@ -2149,7 +2039,7 @@ async def run_live_evaluation(
             )
         )
 
-        all_passed = True
+        all_contracts_valid = True
         for case in load_evaluation_cases():
             state: dict[str, Any] = {
                 "original_query": case.original_query,
@@ -2166,8 +2056,8 @@ async def run_live_evaluation(
                     }
                 },
             )
-            score = score_evaluation_case(case, result)
-            all_passed = all_passed and score.passed
+            score = score_query_rewrite_contract(case, result)
+            all_contracts_valid = all_contracts_valid and score.passed
             print(
                 json.dumps(
                     {
@@ -2176,18 +2066,17 @@ async def run_live_evaluation(
                         "original_query": case.original_query,
                         "standalone_query": result["standalone_query"],
                         "rewrite_status": result["rewrite_status"],
-                        "checks": {
-                            "required_literals": score.required_literals,
-                            "forbidden_literals": score.forbidden_literals,
+                        "contract_checks": {
                             "schema_validity": score.schema_validity,
                             "status_validity": score.status_validity,
                         },
-                        "passed": score.passed,
+                        "contract_valid": score.passed,
+                        "semantic_evaluation": "human_or_llm_judge",
                     },
                     ensure_ascii=False,
                 )
             )
-        return all_passed
+        return all_contracts_valid
     finally:
         if active_resources is not None:
             await shutdown_langfuse(active_resources)
@@ -2217,17 +2106,44 @@ uv run pytest tests/test_rag_query_rewrite_live_evaluation.py tests/test_rag_que
 
 Expected: PASS；测试只使用模型边界 test double，不访问模型供应商或 Langfuse。
 
-- [ ] **Step 8.5: REFACTOR — 证明真实评测没有进入默认测试入口**
+- [ ] **Step 8.5: Define Langfuse semantic judge boundary**
+
+Langfuse Dataset item 的 `input` 只包含 Query Rewrite 实际输入；`expected_output`
+包含人工参考的 `expected_standalone_query` 和 case-specific annotations。生产
+Rewrite task 不得读取 `expected_output`。LLM Judge evaluator 才能同时读取
+`input`、实际 `output` 和 `expected_output`，并按以下 rubric 做语义判断：
+
+```text
+semantic_fidelity:
+  当前信息需求与原始问题是否等价，不因压缩或规范化改变请求。
+context_resolution:
+  是否正确继承可唯一确定的上下文，并以当前问题的显式值覆盖冲突历史。
+constraint_preservation:
+  是否保留实体、标识符、时间、数值范围、否定、比较、归属和版本等检索约束。
+retrieval_readiness:
+  是否形成一条可独立理解、简洁且适合后续 Router/Retriever 使用的查询。
+non_invention:
+  是否避免加入输入和上下文均未提供的事实或过滤条件。
+single_query_compliance:
+  是否只改写为一条查询，且没有回答问题、拆解步骤、SQL 或 Cypher。
+```
+
+Judge 每个维度返回 `1..5` 分和简短理由。至少先抽取一组实验输出由人工使用同一
+rubric 标注，再比较 Judge 与人工结果；完成校准前只展示分数和分歧，不设置 CI
+阈值或自动选择 Prompt。
+
+- [ ] **Step 8.6: REFACTOR — 证明真实评测没有进入默认测试入口或代码语义匹配**
 
 Run:
 
 ```powershell
 rg -n "rag_query_rewrite|run_live_evaluation" pyproject.toml ..\\Makefile
+rg -n "expected_preserved_terms|expected_required_term_groups|expected_excluded_terms|exact_match|Levenshtein|BLEU|ROUGE" app/evaluation/rag_query_rewrite.py
 ```
 
-Expected: no matches；真实评测只能由显式 `python -m` 命令启动。
+Expected: no matches；真实评测只能由显式 `python -m` 命令启动，语义分数不能由代码字符串匹配产生。
 
-- [ ] **Step 8.6: Commit**
+- [ ] **Step 8.7: Commit**
 
 ```powershell
 git add backend/app/evaluation/rag_query_rewrite.py backend/tests/test_rag_query_rewrite_live_evaluation.py
@@ -2306,7 +2222,7 @@ Set-Location backend
 uv run python -m app.evaluation.rag_query_rewrite
 ```
 
-Expected: 输出一行模型/Prompt 元数据和 12 行 case JSON；全部确定性检查通过时 exit 0，质量检查失败时 exit 2，配置或供应商失败时 exit 1。记录实际模型、Prompt 版本、退出码和失败 case，不把未运行记为成功。
+Expected: 输出一行模型/Prompt 元数据和 28 行 case JSON；输出契约全部有效时 exit 0，契约无效时 exit 2，配置或供应商失败时 exit 1。语义质量只查看人工或 LLM Judge 分数与理由，不把契约通过或未运行 Judge 记为语义评测成功。
 
 - [ ] **Step 9.6: 启动 Studio 并手工验证两个输入**
 

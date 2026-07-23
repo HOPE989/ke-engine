@@ -668,10 +668,90 @@ Rewrite 失败
 - know-engine 的 `QueryTransformer` 没有空输出校验或原查询回退，模型异常会向上抛出；
 - DeerFlow 1.x 没有与当前链路等价的 standalone Query Rewrite；其独立 `Prompt Enhancer` 会在异常时返回原提示，而 Planner 对 JSON 做修复和格式校验。这些属于 DeerFlow 自身的交互与规划容错，不作为当前 Query Rewrite 的设计依据。
 
-### 11.9 需要继续讨论的问题
+### 11.9 已确认的 Query Rewrite 评测策略
+
+Query Rewrite 是生成式任务，可能存在多种同样正确的表达。因此第一版不使用以下
+规则判断语义质量：
+
+- 与参考改写逐字相等；
+- 固定关键词包含关系；
+- Token overlap、正则、编辑距离；
+- BLEU、ROUGE 等面向表面文本相似度的指标。
+
+代码评测只负责客观、确定性的输出契约：
+
+- `standalone_query` 是符合协议的非空字符串；
+- `rewrite_status` 与失败码一致；
+- 降级时结果等于 `original_query`，并包含约定 warning；
+- 一次请求只产生一条查询。
+
+语义质量由人工评审或 LLM-as-a-Judge 负责，评价维度暂定为：
+
+- `semantic_fidelity`：与原始信息需求语义等价；
+- `context_resolution`：正确补全可唯一确定的上下文，并以当前问题覆盖冲突历史；
+- `constraint_preservation`：保留实体、标识符、时间、数值范围、否定、比较、归属和版本等约束；
+- `retrieval_readiness`：查询独立、简洁，适合 Router 和 Retriever；
+- `non_invention`：不引入输入中不存在的事实或过滤条件；
+- `single_query_compliance`：只输出一条查询，不回答问题，也不生成 SQL、Cypher 或执行计划。
+
+实验数据已先在本地以
+`backend/tests/fixtures/query_rewrite_cases.json` 起草。当前共 28 条、13 个
+易错或典型类别。每条 case 包含真实输入、人工参考改写以及 case-specific
+annotations。参考答案和 annotations 是人工复核或 Judge 的上下文，不进入生产
+Rewrite task，也不作为代码关键词匹配规则。
+
+当前尚未配置 LLM-as-a-Judge，不阻塞 Query Rewrite 开发。Langfuse 分阶段使用：
+
+```text
+阶段 1：Dataset Experiment
+  本地 fixture 同步为 Langfuse Dataset
+  → 运行真实 Query Rewrite
+  → 生成可比较的 Dataset Run
+
+阶段 2：人工基线
+  Experiment Compare / Annotation Queue
+  → PASS / PARTIAL / FAIL
+  → 错误类型 + 评论 + 可选人工修订结果
+
+阶段 3：Judge 校准
+  配置 LLM Connection 和自定义 Judge
+  → Judge 只读取 input、实际 output、expected_output
+  → 与人工标签比较一致性并分析分歧
+
+阶段 4：自动化
+  Judge 经校准后，才考虑用于 Prompt 选择、回归门禁或生产监测
+```
+
+人工评审第一版使用一个总质量标签即可：
+
+- `PASS`：可直接用于检索；
+- `PARTIAL`：基本可用，但存在轻微约束损失、冗余或表达问题；
+- `FAIL`：语义漂移、错误继承上下文、丢失关键约束、凭空补充或不满足单查询边界。
+
+同时记录可多选的错误类型：
+
+- `context_resolution_error`
+- `constraint_loss`
+- `semantic_drift`
+- `unsupported_invention`
+- `not_standalone`
+- `over_rewrite`
+
+待配置 Judge 后，初始 Judge 也先输出 `PASS / PARTIAL / FAIL` 和简短理由，不直接
+设置 CI 阈值。Judge 必须先在一组由人工按同一 rubric 标注的代表性输出上校准；
+生产 Rewrite task 绝不能读取 Dataset 的 `expected_output`。可行时，Judge 模型
+与被测 Rewrite 模型使用不同模型，以降低同源偏差。
+
+Langfuse Hosted Dataset 作为正式实验载体：通过 SDK 对 Hosted Dataset 运行
+Experiment 时会生成可在 UI 比较的 Dataset Run；只在本地列表上运行则只产生
+traces 和 scores，不形成 Dataset Run。开发阶段优先使用 Experiment，生产阶段
+再把已校准 evaluator 挂到目标 observation。
+
+### 11.10 需要继续讨论的问题
 
 1. 哪些字段和中间结果进入 Langfuse，哪些内容需要脱敏？
-2. 如何建立 Query Rewrite 的离线评测集和质量指标？
+2. 人工基线由谁评审，以及首轮抽取多少条真实模型输出？
+3. Judge 的模型、Prompt、标签一致性阈值和正式启用条件是什么？
 
 ## 12. 其他未决问题
 
@@ -813,3 +893,32 @@ RAG Service
 - Web Search；
 - 长任务和人工中断恢复；
 - 立即实现代码。
+
+## 14. 本轮交接检查点
+
+当前开发状态：
+
+- 分支：`feat/rag-query-rewrite`
+- OpenSpec change：`add-rag-query-rewrite`
+- OpenSpec 规划产物：proposal、design、delta spec、tasks 均已完成并通过 strict validation；
+- 实现任务：尚未开始，当前为 0/68；
+- 已提交基线：`dc0491f docs(rag): define query rewrite design and TDD plan`
+
+当前工作区还有一组属于本 change、尚未提交的评测设计改动：
+
+- 本设计草稿的 Query Rewrite 评测策略；
+- `design.md`、delta spec、`tasks.md` 中的语义评测边界；
+- `backend/tests/fixtures/query_rewrite_cases.json` 的 28 条实验 dataset 草稿。
+
+接手者不要把 dataset 中的参考查询或 annotations 改造成确定性关键词 scorer。
+它们只服务于人工评审和未来经校准的 LLM Judge。代码 scorer 只检查输出协议、
+状态和 fallback 一致性。
+
+建议下一步：
+
+1. 先评审并提交上述尚未提交的文档与 dataset 改动；
+2. 退出探索阶段，使用 `openspec-apply-change` 按 `tasks.md` 的 TDD 顺序实现；
+3. 完成 Query Rewrite node 后先运行 28 条真实模型 Experiment；
+4. 当前没有 LLM-as-a-Judge 配置，因此先建立人工 `PASS / PARTIAL / FAIL` 基线，
+   不设置语义质量 CI gate；
+5. Query Rewrite 验证稳定后，再继续讨论 Query Router 的多选协议和降级规则。
