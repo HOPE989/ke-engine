@@ -59,12 +59,12 @@ Observed: <passed test count>
 
 **Deliverable:** 拒绝空白值、额外字段和重复当前问题，并能 JSON 序列化的阶段契约与 Graph state。
 
-- [ ] 1.1 RED：新增 `test_rag_query_rewrite_models.py`，覆盖有序上下文、业务上下文、空白字段、额外字段、当前问题重复和 JSON 序列化。
-- [ ] 1.2 Verify RED：运行该测试，确认因 `graph.query_rewrite` 契约尚不存在而失败。
-- [ ] 1.3 GREEN：实现 `graph/query_rewrite/models.py`、包导出及 `graph/state.py`。
-- [ ] 1.4 Verify GREEN：运行模型测试。
-- [ ] 1.5 REFACTOR：确认模型/state 不依赖 Chat、settings、model、Langfuse、Redis 或数据库。
-- [ ] 1.6 Commit：`feat(rag): add query rewrite graph contracts`。
+- [x] 1.1 RED：新增 `test_rag_query_rewrite_models.py`，覆盖有序上下文、业务上下文、空白字段、额外字段、当前问题重复和 JSON 序列化。
+- [x] 1.2 Verify RED：`uv run pytest tests/test_rag_query_rewrite_models.py -q`，Exit 1，9 个失败均为阶段契约或 state 尚不存在。
+- [x] 1.3 GREEN：实现 `graph/query_rewrite/models.py`、包导出及 `graph/state.py`。
+- [x] 1.4 Verify GREEN：`uv run pytest tests/test_rag_query_rewrite_models.py -q`，Exit 0，9 passed。
+- [x] 1.5 REFACTOR：依赖扫描无命中；本地未安装 Ruff，最终验证时再次检查工具可用性。
+- [x] 1.6 Commit：`feat(rag): add query rewrite graph contracts`。
 
 ## Task 2: Versioned Constrained Retrieval Prompt
 
