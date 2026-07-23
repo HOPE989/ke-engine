@@ -1,10 +1,10 @@
-# RAG Query Rewrite Graph TDD Implementation Plan
+# RAG Graph Query Rewrite Stage TDD Implementation Plan
 
 **Goal:** 在不实现 Router、Retriever、EvidencePackage、MCP API 或独立 Query Rewrite service 的前提下，为 RAG domain 增加可独立测试和运行的一对一 Query Rewrite LangGraph 阶段。
 
-**Architecture:** Query Rewrite 是完整 RAG Graph 的第一个阶段。阶段专属契约、Prompt 与评测辅助代码位于 `graph/query_rewrite/`，执行逻辑位于 `graph/nodes/query_rewrite.py`。调用方提供纯请求数据，model 通过 runtime 注入；失败时单次降级为原始问题。未来完整 RAG 管线形成后，再在 `domains/rag/services/` 提供管线级 service。
+**Architecture:** Query Rewrite 是完整 RAG Graph 的第一个阶段。阶段专属契约、Prompt 与评测辅助代码位于 `graph/query_rewrite/`，执行逻辑位于 `graph/nodes/query_rewrite.py`。顶层始终使用管线级 `RagState`、`build_rag_graph` 和 `rag` Studio 入口，当前一节点拓扑只是完整管线的首个增量，不是 Query Rewrite 子图。未来完整 RAG 管线形成后，再在 `domains/rag/services/` 提供管线级 service。
 
-**Test style:** 参考 Chat `business_understanding` 的测试方式，直接测试阶段模型、Prompt、可调用 node 函数、runtime wrapper 和最小 Graph；只参考其组织方式，不强制逐项对齐。
+**Test style:** 参考 Chat `business_understanding` 的测试方式，直接测试阶段模型、Prompt、可调用 node 函数、runtime wrapper 和 RAG Graph 当前拓扑；只参考其组织方式，不强制逐项对齐。
 
 ## Global Constraints
 
@@ -27,15 +27,16 @@
 | `backend/app/domains/rag/graph/query_rewrite/models.py` | 阶段输入、输出、状态枚举、失败码和 update 契约 |
 | `backend/app/domains/rag/graph/query_rewrite/prompt.py` | 版本化 Prompt 与输入消息构造 |
 | `backend/app/domains/rag/graph/query_rewrite/evaluation.py` | 本地评测 case 与客观输出契约 scorer |
-| `backend/app/domains/rag/graph/state.py` | 可序列化的最小 Graph state |
+| `backend/app/domains/rag/graph/state.py` | 随管线阶段增量扩展的 `RagState` |
 | `backend/app/domains/rag/graph/context.py` | 不进入 state 的 model runtime dependency |
 | `backend/app/domains/rag/graph/nodes/query_rewrite.py` | 单次模型调用、fallback、state/runtime 适配 |
-| `backend/app/domains/rag/graph/builder.py` | `START -> query_rewrite -> END` 拓扑 |
-| `backend/app/entrypoints/rag_query_rewrite_studio.py` | 独立 LangGraph Studio 装配入口 |
+| `backend/app/domains/rag/graph/builder.py` | 完整 RAG Graph builder；当前拓扑为 `START -> query_rewrite -> END` |
+| `backend/app/entrypoints/rag_studio.py` | 管线级 RAG LangGraph Studio 装配入口 |
 | `backend/app/evaluation/rag_query_rewrite.py` | 显式真实模型评测命令 |
 | `backend/tests/rag_query_rewrite_test_support.py` | 仅替代模型边界的完整 test doubles |
 | `backend/tests/fixtures/query_rewrite_cases.json` | 约束保留和上下文改写样例 |
-| `backend/tests/test_rag_query_rewrite_*.py` | 契约、Prompt、node、Graph、Studio 和评测测试 |
+| `backend/tests/test_rag_query_rewrite_*.py` | Query Rewrite 阶段契约、Prompt、node 和评测测试 |
+| `backend/tests/test_rag_graph.py`、`test_rag_studio.py` | 顶层 RAG Graph 与 Studio 测试 |
 
 ## Evidence Template
 
@@ -99,27 +100,38 @@ Observed: <passed test count>
 - [x] 4.5 REFACTOR：runtime 资源访问与会话/checkpoint 标识扫描无命中，import purity 和编译检查通过。
 - [x] 4.6 Commit：`feat(rag): add runtime-injected query rewrite node`。
 
-## Task 5: Independently Runnable Minimal LangGraph
+## Task 5: RAG Graph Initial Topology
 
-**Deliverable:** 无 checkpointer 的 `START -> query_rewrite -> END` 最小 Graph。
+**Deliverable:** 管线级 `RagState` 和 `build_rag_graph`，当前拓扑为无 checkpointer 的 `START -> query_rewrite -> END`。
 
-- [x] 5.1 RED：新增 `test_rag_query_rewrite_graph.py`，覆盖拓扑、成功输出、fallback 输出、config 透传、连续调用隔离和 JSON 序列化。
+- [x] 5.1 RED：新增 `test_rag_graph.py`，覆盖拓扑、成功输出、fallback 输出、config 透传、连续调用隔离和 JSON 序列化。
 - [x] 5.2 Verify RED：Graph 测试 Exit 1，4 个失败均为 builder/公开导出尚不存在。
-- [x] 5.3 GREEN：实现 `graph/builder.py` 与 `graph/__init__.py`，支持 runtime model 和显式绑定 model。
+- [x] 5.3 GREEN：实现管线级 `RagState`、`build_rag_graph` 与公开导出，支持 runtime model 和显式绑定 model。
 - [x] 5.4 Verify GREEN：Graph、node、Prompt 与模型测试 Exit 0，25 passed。
 - [x] 5.5 REFACTOR：隐藏分支、retry/checkpointer/内部 compile 扫描无命中，编译与 diff 检查通过。
 - [x] 5.6 Commit：`feat(rag): add minimal query rewrite graph`。
 
-## Task 6: LangGraph Studio Development Entry
+## Task 6: RAG LangGraph Studio Development Entry
 
-**Deliverable:** 复用生产 Graph/node 的开发期 Studio 入口。
+**Deliverable:** 复用生产 RAG Graph/node 的管线级开发期 Studio 入口。
 
-- [x] 6.1 RED：新增 `test_rag_query_rewrite_studio.py`，覆盖模型装配、可选 Langfuse callback、无 Langfuse 仍可运行及 `langgraph.json` 注册。
+- [x] 6.1 RED：新增 `test_rag_studio.py`，覆盖模型装配、可选 Langfuse callback、无 Langfuse 仍可运行及 `langgraph.json` 注册。
 - [x] 6.2 Verify RED：Studio 测试 Exit 1，3 个失败分别证明入口与注册尚不存在。
-- [x] 6.3 GREEN：实现 `app/entrypoints/rag_query_rewrite_studio.py` 并更新 `backend/langgraph.json`。
-- [x] 6.4 Verify GREEN：Studio 与全部 Query Rewrite Graph 测试 Exit 0，32 passed。
+- [x] 6.3 GREEN：实现 `app/entrypoints/rag_studio.py`，以 `rag` 注册并更新 `backend/langgraph.json`。
+- [x] 6.4 Verify GREEN：Studio 与全部 RAG Graph/Query Rewrite 阶段测试 Exit 0，32 passed。
 - [x] 6.5 REFACTOR：Chat API、数据库、Redis、checkpoint 和 RAG service 引用扫描无命中，编译检查通过。
 - [x] 6.6 Commit：`feat(rag): add query rewrite studio graph`。
+
+## Task 6A: Pipeline-wide Top-level Graph Correction
+
+**Deliverable:** 顶层命名和入口明确代表完整 RAG 管线；Query Rewrite 保持普通阶段而非子图。
+
+- [x] 6A.1 RED：将测试改为要求 `RagState`、`build_rag_graph`、`test_rag_graph.py` 和 `rag` Studio 注册。
+- [x] 6A.2 Verify RED：相关测试 Exit 1，8 个失败证明顶层仍被 Query Rewrite 命名锁定。
+- [x] 6A.3 GREEN：重命名顶层 state/builder/Studio 及测试，node 直接读写共享 `RagState`。
+- [x] 6A.4 Verify GREEN：Query Rewrite 阶段、RAG Graph 和 Studio 测试 Exit 0，32 passed。
+- [x] 6A.5 REFACTOR：确认无 Query Rewrite 顶层 Graph/Studio/state 标识残留，也未引入子图。
+- [x] 6A.6 Commit：`refactor(rag): make graph root pipeline-wide`。
 
 ## Task 7: Objective Evaluation Contracts and Curated Cases
 

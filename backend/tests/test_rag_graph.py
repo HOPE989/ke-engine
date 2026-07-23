@@ -22,14 +22,41 @@ class RecordingGraphCallback(BaseCallbackHandler):
         self.chain_outputs.append(outputs)
 
 
-def test_query_rewrite_graph_has_one_node_no_retry_and_no_checkpointer():
+def test_rag_state_contains_serializable_rewrite_slice_and_can_expand():
+    from app.domains.rag.graph.state import RagState
+
+    current_rewrite_fields = {
+        "original_query",
+        "conversation_context",
+        "business_context",
+        "standalone_query",
+        "rewrite_status",
+        "rewrite_failure_code",
+        "warnings",
+    }
+    assert current_rewrite_fields <= set(RagState.__annotations__)
+
+    state: RagState = {
+        "original_query": "查询运单 YD2026001",
+        "conversation_context": [],
+        "business_context": None,
+        "standalone_query": "查询运单 YD2026001",
+        "rewrite_status": "rewritten",
+        "rewrite_failure_code": None,
+        "warnings": [],
+    }
+
+    assert json.loads(json.dumps(state, ensure_ascii=False))["warnings"] == []
+
+
+def test_rag_graph_starts_with_rewrite_node_no_retry_or_checkpointer():
     from app.domains.rag.graph import (
         QUERY_REWRITE_NODE,
         RagRuntimeContext,
-        build_query_rewrite_graph,
+        build_rag_graph,
     )
 
-    builder = build_query_rewrite_graph()
+    builder = build_rag_graph()
     compiled = builder.compile()
 
     assert QUERY_REWRITE_NODE == "query_rewrite"
@@ -44,8 +71,8 @@ def test_query_rewrite_graph_has_one_node_no_retry_and_no_checkpointer():
 
 
 @pytest.mark.asyncio
-async def test_bound_graph_keeps_requests_isolated_and_serializable():
-    from app.domains.rag.graph import build_query_rewrite_graph
+async def test_bound_rag_graph_keeps_requests_isolated_and_serializable():
+    from app.domains.rag.graph import build_rag_graph
     from app.domains.rag.graph.query_rewrite import QueryRewriteResult
 
     runnable = RecordingStructuredRunnable(
@@ -54,7 +81,7 @@ async def test_bound_graph_keeps_requests_isolated_and_serializable():
             QueryRewriteResult(standalone_query="查询第二份合同"),
         ]
     )
-    graph = build_query_rewrite_graph(
+    graph = build_rag_graph(
         bound_model=RecordingStructuredModel(runnable)
     ).compile()
 
@@ -69,16 +96,16 @@ async def test_bound_graph_keeps_requests_isolated_and_serializable():
 
 
 @pytest.mark.asyncio
-async def test_runtime_graph_uses_context_model_and_returns_fallback_state():
+async def test_runtime_rag_graph_uses_model_and_returns_fallback_state():
     from app.domains.rag.graph import (
         RagRuntimeContext,
-        build_query_rewrite_graph,
+        build_rag_graph,
     )
 
     runnable = RecordingStructuredRunnable(error=RuntimeError("unavailable"))
     model = RecordingStructuredModel(runnable)
 
-    result = await build_query_rewrite_graph().compile().ainvoke(
+    result = await build_rag_graph().compile().ainvoke(
         {"original_query": "查询本月运量"},
         context=RagRuntimeContext(model=model),
     )
@@ -91,15 +118,15 @@ async def test_runtime_graph_uses_context_model_and_returns_fallback_state():
 
 
 @pytest.mark.asyncio
-async def test_bound_graph_passes_metadata_and_callbacks_to_model_call():
-    from app.domains.rag.graph import build_query_rewrite_graph
+async def test_bound_rag_graph_passes_metadata_and_callbacks_to_model_call():
+    from app.domains.rag.graph import build_rag_graph
     from app.domains.rag.graph.query_rewrite import QueryRewriteResult
 
     runnable = RecordingStructuredRunnable(
         [QueryRewriteResult(standalone_query="查询本月运量")]
     )
     handler = RecordingGraphCallback()
-    graph = build_query_rewrite_graph(
+    graph = build_rag_graph(
         bound_model=RecordingStructuredModel(runnable)
     ).compile()
 

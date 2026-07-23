@@ -120,9 +120,9 @@ def test_langgraph_json_exports_thin_chat_and_rag_studio_graphs():
         "dependencies": ["."],
         "graphs": {
             "chat": "./app/entrypoints/studio_graph.py:create_studio_graph",
-            "rag_query_rewrite": (
-                "./app/entrypoints/rag_query_rewrite_studio.py:"
-                "create_rag_query_rewrite_studio_graph"
+            "rag": (
+                "./app/entrypoints/rag_studio.py:"
+                "create_rag_studio_graph"
             ),
         },
         "env": ".env",

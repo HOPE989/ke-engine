@@ -1,4 +1,4 @@
-"""声明最小 Query Rewrite Graph 拓扑。"""
+"""声明完整 RAG 管线当前已实现的拓扑。"""
 
 from functools import partial
 
@@ -10,17 +10,17 @@ from app.domains.rag.graph.nodes.query_rewrite import (
     invoke_query_rewrite,
     query_rewrite_node,
 )
-from app.domains.rag.graph.state import RagQueryRewriteState
+from app.domains.rag.graph.state import RagState
 
 
 QUERY_REWRITE_NODE = "query_rewrite"
 
 
-def build_query_rewrite_graph(
+def build_rag_graph(
     *,
     bound_model: BaseChatModel | None = None,
 ) -> StateGraph:
-    """构建可由 runtime 注入或显式绑定模型的单节点 Graph。"""
+    """构建 RAG Graph；后续阶段继续向同一拓扑追加节点。"""
 
     context_schema = RagRuntimeContext if bound_model is None else None
     node = (
@@ -29,7 +29,7 @@ def build_query_rewrite_graph(
         else partial(invoke_query_rewrite, model=bound_model)
     )
     graph = StateGraph(
-        RagQueryRewriteState,
+        RagState,
         context_schema=context_schema,
     )
     graph.add_node(QUERY_REWRITE_NODE, node)

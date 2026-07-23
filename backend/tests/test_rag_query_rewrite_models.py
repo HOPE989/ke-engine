@@ -1,5 +1,3 @@
-import json
-
 import pytest
 from pydantic import ValidationError
 
@@ -75,28 +73,3 @@ def test_query_rewrite_contract_exposes_only_v1_status_and_failure_codes():
         "model_invocation_failed",
         "invalid_output",
     }
-
-
-def test_rag_query_rewrite_state_contains_only_json_serializable_data():
-    from app.domains.rag.graph.state import RagQueryRewriteState
-
-    assert set(RagQueryRewriteState.__annotations__) == {
-        "original_query",
-        "conversation_context",
-        "business_context",
-        "standalone_query",
-        "rewrite_status",
-        "rewrite_failure_code",
-        "warnings",
-    }
-    state: RagQueryRewriteState = {
-        "original_query": "查询运单 YD2026001",
-        "conversation_context": [],
-        "business_context": None,
-        "standalone_query": "查询运单 YD2026001",
-        "rewrite_status": "rewritten",
-        "rewrite_failure_code": None,
-        "warnings": [],
-    }
-
-    assert json.loads(json.dumps(state, ensure_ascii=False))["warnings"] == []

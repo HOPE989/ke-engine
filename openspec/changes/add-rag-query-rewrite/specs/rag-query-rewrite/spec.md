@@ -129,19 +129,20 @@ The system SHALL preserve retrieval availability by using `original_query` as `s
 - **THEN** only `original_query` SHALL continue as `standalone_query`
 - **AND** the system MUST NOT execute both the original and a partial rewritten value
 
-### Requirement: Query Rewrite is an independently runnable LangGraph slice
+### Requirement: Query Rewrite is the first stage of the RAG Graph
 
-The system SHALL provide a request-scoped Graph with topology `START -> query_rewrite -> END`.
+The system SHALL add Query Rewrite to the request-scoped, pipeline-level RAG Graph, whose current topology is `START -> query_rewrite -> END`.
 
-#### Scenario: Minimal topology is compiled
+#### Scenario: Initial RAG topology is compiled
 
-- **WHEN** the Query Rewrite Graph builder is inspected or tested
+- **WHEN** the RAG Graph builder is inspected or tested for this increment
 - **THEN** it SHALL contain exactly one business node named `query_rewrite`
 - **AND** it SHALL connect `START` to `query_rewrite` and `query_rewrite` to `END`
+- **AND** its top-level state and builder SHALL represent the RAG pipeline rather than a Query Rewrite subgraph
 
 #### Scenario: Graph is request scoped
 
-- **WHEN** the minimal Graph is compiled
+- **WHEN** the RAG Graph is compiled
 - **THEN** it SHALL compile without a checkpointer
 - **AND** it MUST NOT create conversation memory or cross-request state
 
@@ -153,7 +154,7 @@ The system SHALL provide a request-scoped Graph with topology `START -> query_re
 
 #### Scenario: Graph state remains serializable
 
-- **WHEN** Query Rewrite state is inspected
+- **WHEN** the RAG Graph state after Query Rewrite is inspected
 - **THEN** it SHALL contain only request data, result data, status, warnings, and bounded diagnostic values
 - **AND** it MUST NOT contain a model client, Langfuse client, callback handler, settings object, database connection, or external service client
 
@@ -163,7 +164,7 @@ The system SHALL preserve caller-provided LangChain callbacks through the Graph 
 
 #### Scenario: Callback is supplied
 
-- **WHEN** a caller invokes the Query Rewrite Graph with a Langfuse `CallbackHandler`
+- **WHEN** a caller invokes the RAG Graph with a Langfuse `CallbackHandler`
 - **THEN** the Graph and Query Rewrite model call SHALL be observable beneath that callback
 - **AND** the observation SHALL include the original input, actual `standalone_query`, Rewrite status, and fallback warning when present
 

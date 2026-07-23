@@ -1,10 +1,10 @@
 from types import SimpleNamespace
 
 
-def test_rag_query_rewrite_studio_binds_model_callback_and_compiles(
+def test_rag_studio_binds_model_callback_and_compiles(
     monkeypatch,
 ):
-    from app.entrypoints import rag_query_rewrite_studio as studio
+    from app.entrypoints import rag_studio as studio
 
     settings = SimpleNamespace(openai_model="gpt-test")
     handler = object()
@@ -42,11 +42,11 @@ def test_rag_query_rewrite_studio_binds_model_callback_and_compiles(
     monkeypatch.setattr(studio, "create_chat_model", fake_create_chat_model)
     monkeypatch.setattr(
         studio,
-        "build_query_rewrite_graph",
+        "build_rag_graph",
         lambda **kwargs: calls.append(("builder", kwargs)) or FakeBuilder(),
     )
 
-    assert studio.create_rag_query_rewrite_studio_graph() is compiled
+    assert studio.create_rag_studio_graph() is compiled
     assert calls == [
         ("validate", settings),
         ("langfuse", settings),
@@ -63,8 +63,8 @@ def test_rag_query_rewrite_studio_binds_model_callback_and_compiles(
     ]
 
 
-def test_rag_query_rewrite_studio_runs_without_langfuse(monkeypatch):
-    from app.entrypoints import rag_query_rewrite_studio as studio
+def test_rag_studio_runs_without_langfuse(monkeypatch):
+    from app.entrypoints import rag_studio as studio
 
     settings = SimpleNamespace(openai_model="gpt-test")
     callbacks_seen = []
@@ -89,10 +89,10 @@ def test_rag_query_rewrite_studio_runs_without_langfuse(monkeypatch):
     )
     monkeypatch.setattr(
         studio,
-        "build_query_rewrite_graph",
+        "build_rag_graph",
         lambda **kwargs: SimpleNamespace(compile=lambda: object()),
     )
 
-    studio.create_rag_query_rewrite_studio_graph()
+    studio.create_rag_studio_graph()
 
     assert callbacks_seen == [None]

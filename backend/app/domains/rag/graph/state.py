@@ -1,4 +1,4 @@
-"""一次 Query Rewrite Graph 运行的可序列化状态。"""
+"""完整 RAG 管线在单次请求内共享的可序列化状态。"""
 
 from typing import NotRequired, Required, TypedDict
 
@@ -8,7 +8,9 @@ from app.domains.rag.graph.query_rewrite import (
 )
 
 
-class RagQueryRewriteState(TypedDict, total=False):
+class RagState(TypedDict, total=False):
+    """按已落地阶段增量扩展；当前只声明 Query Rewrite 所需字段。"""
+
     original_query: Required[str]
     conversation_context: NotRequired[list[dict[str, str]]]
     business_context: NotRequired[dict[str, object] | None]

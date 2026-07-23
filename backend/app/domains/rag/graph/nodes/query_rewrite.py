@@ -17,11 +17,11 @@ from app.domains.rag.graph.query_rewrite import (
 from app.domains.rag.graph.query_rewrite.prompt import (
     build_query_rewrite_messages,
 )
-from app.domains.rag.graph.state import RagQueryRewriteState
+from app.domains.rag.graph.state import RagState
 
 
 async def query_rewrite_node(
-    state: RagQueryRewriteState,
+    state: RagState,
     config: RunnableConfig,
     runtime: Runtime[RagRuntimeContext],
 ) -> QueryRewriteUpdate:
@@ -35,7 +35,7 @@ async def query_rewrite_node(
 
 
 async def invoke_query_rewrite(
-    state: RagQueryRewriteState,
+    state: RagState,
     *,
     model: BaseChatModel,
     config: RunnableConfig | None = None,
