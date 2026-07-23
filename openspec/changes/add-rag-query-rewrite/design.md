@@ -108,7 +108,9 @@ Query Rewrite 不直接依赖 Langfuse SDK，也不在 domain 内创建 trace。
 
 仓库维护一组按高风险错误类型组织的数据驱动 Query Rewrite cases，重点覆盖多轮约束继承、当前输入覆盖历史、时间与数值范围、否定、比较、归属、标识符完整性和禁止臆造，并以少量口语去噪和已独立问题作为基线。每条样例同时保存人工参考的 `expected_standalone_query` 和 case-specific annotations；这些字段用于人工复核或作为 LLM Judge 的 rubric 上下文，不直接转换成关键词命中、token overlap、正则、编辑距离或参考答案 exact-match 分数。
 
-代码 evaluator 只验证输出非空且一次请求只有一条查询。真实模型评测由显式命令执行，调用生产 node/Graph 并逐条记录原问题和实际改写结果；语义等价、上下文补全、约束保留、检索适用性和禁止臆造由人工或 LLM-as-a-Judge 评估。Judge 使用统一 rubric 输出分项分数与简短理由，并先与一组人工标注结果校准；校准完成前，Judge 分数不作为 CI、发布或 Prompt 自动选择门禁。
+代码 evaluator 只验证输出非空且一次请求只有一条查询。真实模型评测由显式命令执行：将本地事实源中的 28 条样例以稳定 item ID 幂等同步到 `ke-engine/rag-query-rewrite-v1` Langfuse Dataset，再调用生产 RAG Graph 串行创建 Dataset Run。每个 item 保存原问题、上下文、人工参考查询和 case-specific 语义评审注释；Experiment 输出实际改写结果，并只写入 `output_contract` 客观分数。
+
+语义等价、上下文补全、约束保留、检索适用性和禁止臆造由人工或 LLM-as-a-Judge 评估。Judge 使用统一 rubric 输出分项分数与简短理由，并先与一组人工标注结果校准；校准完成前，Judge 分数不作为 CI、发布或 Prompt 自动选择门禁。显式评测命令缺少模型或 Langfuse 配置、同步失败或无法创建 Dataset Run 时返回非零；默认 pytest 不调用网络。
 
 ## Risks / Trade-offs
 

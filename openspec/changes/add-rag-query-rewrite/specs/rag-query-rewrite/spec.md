@@ -87,7 +87,6 @@ The system SHALL invoke the assembly-injected Chat model with a versioned Prompt
 
 - **WHEN** the model returns a valid non-blank `standalone_query`
 - **THEN** the node SHALL store that value as the query supplied to the next future RAG stage
-- **AND** it SHALL record the Rewrite status as successful
 
 #### Scenario: Prompt separates current query from context
 
@@ -193,6 +192,12 @@ The system SHALL provide deterministic default tests and a separate opt-in path 
 - **THEN** they SHALL cover context resolution, conversational noise, terminology normalization, already-standalone input, and preservation of entity, time, numeric, negation, comparison, and ownership constraints
 - **AND** they SHALL provide a human reference query and case-specific semantic review guidance without requiring exact wording
 
+#### Scenario: Repository cases synchronize to a Langfuse Dataset
+
+- **WHEN** the explicit Query Rewrite evaluation command runs
+- **THEN** it SHALL idempotently upsert all 28 repository cases to the `ke-engine/rag-query-rewrite-v1` Dataset using stable item identifiers
+- **AND** the repository fixture SHALL remain the source of truth
+
 #### Scenario: Code evaluators remain objective
 
 - **WHEN** an offline or Langfuse code evaluator scores a Query Rewrite result
@@ -211,11 +216,12 @@ The system SHALL provide deterministic default tests and a separate opt-in path 
 - **THEN** the Judge SHALL first be compared with human annotations on representative Query Rewrite outputs
 - **AND** uncalibrated Judge scores MUST NOT gate CI, releases, or automatic Prompt selection
 
-#### Scenario: Live evaluation runs the production node
+#### Scenario: Live evaluation runs the production Graph
 
 - **WHEN** a developer explicitly runs the live-model evaluation command with valid model configuration
-- **THEN** it SHALL invoke the production Query Rewrite node against the repository cases
-- **AND** it SHALL report each original query, resulting standalone query, objective contract checks, and any separately produced human or LLM Judge scores
+- **THEN** it SHALL invoke the production RAG Graph against the synchronized Dataset
+- **AND** it SHALL create a Langfuse Dataset Run containing each original query, resulting standalone query, objective contract check, and human review context
+- **AND** it SHALL report the Dataset Run URL
 
 #### Scenario: Live evaluation is not a default gate
 

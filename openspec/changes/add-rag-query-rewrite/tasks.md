@@ -31,7 +31,7 @@
 | `backend/app/domains/rag/graph/nodes/query_rewrite.py` | 单次模型调用、fallback 和 state 适配 |
 | `backend/app/domains/rag/graph/builder.py` | 完整 RAG Graph builder；当前拓扑为 `START -> query_rewrite -> END` |
 | `backend/app/entrypoints/rag_studio.py` | 管线级 RAG LangGraph Studio 装配入口 |
-| `backend/app/evaluation/rag_query_rewrite.py` | 显式真实模型评测命令 |
+| `backend/app/evaluation/rag_query_rewrite.py` | Dataset 同步与显式真实模型 Langfuse Experiment |
 | `backend/tests/rag_query_rewrite_test_support.py` | 仅替代模型边界的完整 test doubles |
 | `backend/tests/fixtures/query_rewrite_cases.json` | 约束保留和上下文改写样例 |
 | `backend/tests/test_rag_query_rewrite_*.py` | Query Rewrite 阶段契约、Prompt、node 和评测测试 |
@@ -154,16 +154,16 @@ Observed: <passed test count>
 - [x] 7.5 REFACTOR：scorer 只接收实际输出并以 `QueryRewriteResult` 校验单字段非空契约，不访问人工参考字段。
 - [x] 7.6 Commit：`test(rag): add query rewrite evaluation cases`。
 
-## Task 8: Explicit Live-model Evaluation
+## Task 8: Explicit Langfuse Dataset Experiment
 
-**Deliverable:** 默认跳过、显式开启才调用真实模型，并逐条走生产 node/Graph 的评测入口。
+**Deliverable:** 显式命令幂等同步 28 条 Langfuse Dataset items，并逐条走生产 RAG Graph 创建真实模型 Dataset Run。
 
-- [ ] 8.1 RED：新增 `test_rag_query_rewrite_live_evaluation.py`，覆盖默认 skip 和显式启用约束。
-- [ ] 8.2 Verify RED：确认显式评测入口尚不存在。
-- [ ] 8.3 GREEN：实现 `app/evaluation/rag_query_rewrite.py`，加载 settings/model/callback，逐条调用生产 Graph 并输出 JSONL。
-- [ ] 8.4 Verify GREEN：运行默认离线测试，确认无网络调用。
-- [ ] 8.5 REFACTOR：确认不复制 Rewrite 逻辑，不自动执行 Judge，不把未校准分数设为门禁。
-- [ ] 8.6 Commit：`feat(rag): add explicit query rewrite evaluation`。
+- [x] 8.1 RED：新增 `test_rag_query_rewrite_langfuse.py`，覆盖稳定 Dataset 映射、幂等同步、客观 evaluator、生产 Graph task、串行 Experiment 和显式失败。
+- [x] 8.2 Verify RED：`uv run pytest tests/test_rag_query_rewrite_langfuse.py -q`，Exit 1，7 个失败均为显式评测入口尚不存在。
+- [x] 8.3 GREEN：实现 `app/evaluation/rag_query_rewrite.py`，加载 settings/model/callback，同步 Dataset 并逐条调用生产 RAG Graph。
+- [x] 8.4 Verify GREEN：Langfuse 适配、evaluation、模型、node 与 Graph 回归集 Exit 0，32 passed；测试全部使用 fake client/model。
+- [x] 8.5 REFACTOR：确认不复制 Rewrite 逻辑，不自动执行 Judge，只写入客观 `output_contract` 分数。
+- [x] 8.6 Commit：`feat(rag): add query rewrite dataset experiment`。
 
 ## Task 9: Full Verification and Documentation
 
