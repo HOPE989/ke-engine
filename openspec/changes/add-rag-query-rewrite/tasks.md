@@ -81,12 +81,12 @@ Observed: <passed test count>
 
 **Deliverable:** `invoke_query_rewrite(...)` 直接完成输入校验、一次结构化模型调用、config 透传和显式 fallback。
 
-- [ ] 3.1 RED：新增 test support 与 `test_rag_query_rewrite_node.py`，覆盖成功、schema 绑定、config 透传、模型失败、无效输出、无重试、取消传播和输入错误时不调用模型。
-- [ ] 3.2 Verify RED：确认因 node invocation 尚不存在而失败。
-- [ ] 3.3 GREEN：在 `graph/nodes/query_rewrite.py` 实现 `invoke_query_rewrite(...)`；fallback warning 常量放在阶段契约或 node 中。
-- [ ] 3.4 Verify GREEN：运行 node、Prompt 与模型测试。
-- [ ] 3.5 REFACTOR：扫描并确认无 retry、并发双查询和供应商异常文本入 state。
-- [ ] 3.6 Commit：`feat(rag): add single-call query rewrite node`。
+- [x] 3.1 RED：新增 test support 与 `test_rag_query_rewrite_node.py`，覆盖成功、schema 绑定、config 透传、模型失败、无效输出、无重试、取消传播和输入错误时不调用模型。
+- [x] 3.2 Verify RED：`uv run pytest tests/test_rag_query_rewrite_node.py -q`，Exit 1，6 个失败均为 node invocation 尚不存在。
+- [x] 3.3 GREEN：在 `graph/nodes/query_rewrite.py` 实现 `invoke_query_rewrite(...)`；fallback warning 常量位于阶段契约。
+- [x] 3.4 Verify GREEN：node、Prompt 与模型测试 Exit 0，18 passed。
+- [x] 3.5 REFACTOR：重试、并发双查询、异常字符串和多查询标识扫描无命中，编译检查通过。
+- [x] 3.6 Commit：`feat(rag): add single-call query rewrite node`。
 
 ## Task 4: Runtime-injected Node Wrapper
 

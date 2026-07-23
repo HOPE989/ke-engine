@@ -1,6 +1,7 @@
 """Query Rewrite Graph 阶段契约。"""
 
 from app.domains.rag.graph.query_rewrite.models import (
+    QUERY_REWRITE_FALLBACK_WARNING,
     BusinessContext,
     ConversationContextMessage,
     QueryRewriteFailureCode,
@@ -11,6 +12,7 @@ from app.domains.rag.graph.query_rewrite.models import (
 )
 
 __all__ = [
+    "QUERY_REWRITE_FALLBACK_WARNING",
     "BusinessContext",
     "ConversationContextMessage",
     "QueryRewriteFailureCode",

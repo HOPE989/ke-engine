@@ -4,6 +4,9 @@ from typing import Literal, Self, TypedDict
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+QUERY_REWRITE_FALLBACK_WARNING = "query_rewrite_fallback"
+
+
 class ConversationContextMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
