@@ -103,12 +103,12 @@ Observed: <passed test count>
 
 **Deliverable:** 无 checkpointer 的 `START -> query_rewrite -> END` 最小 Graph。
 
-- [ ] 5.1 RED：新增 `test_rag_query_rewrite_graph.py`，覆盖拓扑、成功输出、fallback 输出、config 透传、连续调用隔离和 JSON 序列化。
-- [ ] 5.2 Verify RED：确认因 Graph builder 尚不存在而失败。
-- [ ] 5.3 GREEN：实现 `graph/builder.py` 与 `graph/__init__.py`，支持 runtime model 和显式绑定 model。
-- [ ] 5.4 Verify GREEN：运行 Graph、node、Prompt 与模型测试。
-- [ ] 5.5 REFACTOR：确认只有一个业务节点且未配置 checkpointer。
-- [ ] 5.6 Commit：`feat(rag): add minimal query rewrite graph`。
+- [x] 5.1 RED：新增 `test_rag_query_rewrite_graph.py`，覆盖拓扑、成功输出、fallback 输出、config 透传、连续调用隔离和 JSON 序列化。
+- [x] 5.2 Verify RED：Graph 测试 Exit 1，4 个失败均为 builder/公开导出尚不存在。
+- [x] 5.3 GREEN：实现 `graph/builder.py` 与 `graph/__init__.py`，支持 runtime model 和显式绑定 model。
+- [x] 5.4 Verify GREEN：Graph、node、Prompt 与模型测试 Exit 0，25 passed。
+- [x] 5.5 REFACTOR：隐藏分支、retry/checkpointer/内部 compile 扫描无命中，编译与 diff 检查通过。
+- [x] 5.6 Commit：`feat(rag): add minimal query rewrite graph`。
 
 ## Task 6: LangGraph Studio Development Entry
 
