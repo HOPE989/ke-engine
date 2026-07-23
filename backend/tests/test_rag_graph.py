@@ -31,23 +31,20 @@ def test_rag_state_contains_serializable_rewrite_slice_and_can_expand():
         "conversation_context",
         "business_context",
         "standalone_query",
-        "rewrite_status",
-        "rewrite_failure_code",
-        "warnings",
     }
     assert current_rewrite_fields <= set(RagState.__annotations__)
+    assert "rewrite_status" not in RagState.__annotations__
+    assert "rewrite_failure_code" not in RagState.__annotations__
+    assert "warnings" not in RagState.__annotations__
 
     state: RagState = {
         "original_query": "查询运单 YD2026001",
         "conversation_context": [],
         "business_context": None,
         "standalone_query": "查询运单 YD2026001",
-        "rewrite_status": "rewritten",
-        "rewrite_failure_code": None,
-        "warnings": [],
     }
 
-    assert json.loads(json.dumps(state, ensure_ascii=False))["warnings"] == []
+    assert json.loads(json.dumps(state, ensure_ascii=False)) == state
 
 
 def test_rag_graph_starts_with_rewrite_node_no_retry_or_checkpointer():
@@ -102,7 +99,7 @@ async def test_assembled_rag_graph_keeps_requests_isolated_and_serializable():
     assert second["standalone_query"] == "查询第二份合同"
     assert first["original_query"] == "第一份呢"
     assert second["original_query"] == "第二份呢"
-    assert json.loads(json.dumps(second, ensure_ascii=False))["warnings"] == []
+    assert "warnings" not in second
 
 
 @pytest.mark.asyncio
@@ -117,9 +114,8 @@ async def test_assembled_rag_graph_returns_fallback_state():
     )
 
     assert result["standalone_query"] == "查询本月运量"
-    assert result["rewrite_status"] == "fallback"
-    assert result["rewrite_failure_code"] == "model_invocation_failed"
-    assert result["warnings"] == ["query_rewrite_fallback"]
+    assert "rewrite_failure_code" not in result
+    assert "warnings" not in result
     assert len(runnable.calls) == 1
 
 
@@ -155,6 +151,5 @@ async def test_assembled_rag_graph_passes_config_to_model_call():
     assert any(
         isinstance(value, dict)
         and value.get("standalone_query") == "查询本月运量"
-        and value.get("rewrite_status") == "rewritten"
         for value in handler.chain_outputs
     )

@@ -5,11 +5,8 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import ValidationError
 
 from app.domains.rag.graph.query_rewrite import (
-    QUERY_REWRITE_FALLBACK_WARNING,
-    QueryRewriteFailureCode,
     QueryRewriteInput,
     QueryRewriteResult,
-    QueryRewriteStatus,
     QueryRewriteUpdate,
 )
 from app.domains.rag.graph.query_rewrite.prompt import (
@@ -33,55 +30,24 @@ async def query_rewrite_node(
             "business_context": state.get("business_context"),
         }
     )
-    existing_warnings = list(state.get("warnings", []))
-
     try:
         structured_model = model.with_structured_output(QueryRewriteResult)
         raw_result = await structured_model.ainvoke(
             build_query_rewrite_messages(request),
             config=config,
         )
-    except ValidationError:
-        return _fallback(
-            request.original_query,
-            existing_warnings,
-            QueryRewriteFailureCode.INVALID_OUTPUT,
-        )
     except Exception:
-        return _fallback(
-            request.original_query,
-            existing_warnings,
-            QueryRewriteFailureCode.MODEL_INVOCATION_FAILED,
-        )
+        return _fallback(request.original_query)
 
     try:
         result = QueryRewriteResult.model_validate(raw_result)
     except ValidationError:
-        return _fallback(
-            request.original_query,
-            existing_warnings,
-            QueryRewriteFailureCode.INVALID_OUTPUT,
-        )
+        return _fallback(request.original_query)
 
-    return {
-        "standalone_query": result.standalone_query,
-        "rewrite_status": QueryRewriteStatus.REWRITTEN,
-        "rewrite_failure_code": None,
-        "warnings": existing_warnings,
-    }
+    return {"standalone_query": result.standalone_query}
 
 
 def _fallback(
     original_query: str,
-    existing_warnings: list[str],
-    failure_code: QueryRewriteFailureCode,
 ) -> QueryRewriteUpdate:
-    return {
-        "standalone_query": original_query,
-        "rewrite_status": QueryRewriteStatus.FALLBACK,
-        "rewrite_failure_code": failure_code,
-        "warnings": [
-            *existing_warnings,
-            QUERY_REWRITE_FALLBACK_WARNING,
-        ],
-    }
+    return {"standalone_query": original_query}

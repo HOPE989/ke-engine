@@ -15,10 +15,7 @@ from rag_query_rewrite_test_support import (
 @pytest.mark.asyncio
 async def test_query_rewrite_node_returns_one_result_and_passes_config():
     from app.domains.rag.graph.nodes.query_rewrite import query_rewrite_node
-    from app.domains.rag.graph.query_rewrite import (
-        QueryRewriteResult,
-        QueryRewriteStatus,
-    )
+    from app.domains.rag.graph.query_rewrite import QueryRewriteResult
 
     result = QueryRewriteResult(
         standalone_query="查询神木站本月实际版装车计划"
@@ -41,43 +38,32 @@ async def test_query_rewrite_node_returns_one_result_and_passes_config():
     assert runnable.calls[0][1] is config
     assert update == {
         "standalone_query": "查询神木站本月实际版装车计划",
-        "rewrite_status": QueryRewriteStatus.REWRITTEN,
-        "rewrite_failure_code": None,
-        "warnings": [],
     }
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("runnable", "binding_error", "expected_code"),
+    ("runnable", "binding_error"),
     [
         (
             RecordingStructuredRunnable(error=RuntimeError("provider failed")),
             None,
-            "model_invocation_failed",
         ),
         (
             RecordingStructuredRunnable([{"standalone_query": "   "}]),
             None,
-            "invalid_output",
         ),
         (
             RecordingStructuredRunnable(),
             RuntimeError("structured output unavailable"),
-            "model_invocation_failed",
         ),
     ],
 )
 async def test_query_rewrite_node_falls_back_once_without_provider_error(
     runnable,
     binding_error,
-    expected_code,
 ):
     from app.domains.rag.graph.nodes.query_rewrite import query_rewrite_node
-    from app.domains.rag.graph.query_rewrite import (
-        QUERY_REWRITE_FALLBACK_WARNING,
-    )
-
     model = RecordingStructuredModel(runnable, binding_error=binding_error)
 
     update = await query_rewrite_node(
@@ -87,9 +73,6 @@ async def test_query_rewrite_node_falls_back_once_without_provider_error(
 
     assert update == {
         "standalone_query": "查询运单 YD2026001",
-        "rewrite_status": "fallback",
-        "rewrite_failure_code": expected_code,
-        "warnings": [QUERY_REWRITE_FALLBACK_WARNING],
     }
     assert len(model.schemas) == 1
     assert len(runnable.calls) <= 1
@@ -132,41 +115,6 @@ async def test_query_rewrite_node_rejects_invalid_input_before_model_call():
 
     assert model.schemas == []
     assert runnable.calls == []
-
-
-@pytest.mark.asyncio
-async def test_query_rewrite_node_preserves_existing_warnings():
-    from app.domains.rag.graph.nodes.query_rewrite import query_rewrite_node
-    from app.domains.rag.graph.query_rewrite import QueryRewriteResult
-
-    runnable = RecordingStructuredRunnable(
-        [QueryRewriteResult(standalone_query="查询神木站实际版装车计划")]
-    )
-    model = RecordingStructuredModel(runnable)
-    config: RunnableConfig = {"metadata": {"request_id": "request-1"}}
-
-    update = await query_rewrite_node(
-        {
-            "original_query": "按实际版呢",
-            "conversation_context": [
-                {
-                    "role": "user",
-                    "content": "查询神木站模拟版装车计划",
-                }
-            ],
-            "business_context": {
-                "intent": "BUSINESS_DATA_QUERY",
-                "entities": {"departure_station": "神木站"},
-            },
-            "warnings": ["upstream_warning"],
-        },
-        model=model,
-        config=config,
-    )
-
-    assert update["standalone_query"] == "查询神木站实际版装车计划"
-    assert update["warnings"] == ["upstream_warning"]
-    assert runnable.calls[0][1] is config
 
 
 def test_query_rewrite_node_is_exported_from_nodes_package():

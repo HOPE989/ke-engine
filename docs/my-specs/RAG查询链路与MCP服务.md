@@ -188,7 +188,6 @@ CallbackHandler
 - 各路候选数量；
 - Fusion 去重数量；
 - 最终证据数量；
-- warnings 和降级原因。
 
 分布式 Trace 的当前倾向是：
 
@@ -425,7 +424,6 @@ EvidencePackage
 ├── citations
 ├── applied_filters
 ├── retrieval_diagnostics
-├── warnings
 └── trace_id
 ```
 
@@ -656,12 +654,7 @@ Rewrite 失败
   → 继续 Router 和召回
 ```
 
-模型调用异常、超时、空输出或输出不满足协议时，不中断整个 RAG 请求，而是使用用户原始问题继续检索。该降级不得静默发生：
-
-- Graph State 记录 Rewrite 状态和失败原因；
-- Langfuse 记录异常、降级标记以及最终实际用于 Router 的查询；
-- `EvidencePackage.warnings` 表达本次请求跳过了 Query Rewrite；
-- 不重试 Rewrite，避免进一步增加前置延迟。
+模型调用异常、超时、空输出或输出不满足协议时，不中断整个 RAG 请求，而是使用用户原始问题继续检索。当前阶段只保证回退行为，不在 Graph State 或 EvidencePackage 中增加 Rewrite 状态、失败码或 warning；不重试 Rewrite，避免进一步增加前置延迟。
 
 对照实现中：
 
@@ -681,8 +674,6 @@ Query Rewrite 是生成式任务，可能存在多种同样正确的表达。因
 代码评测只负责客观、确定性的输出契约：
 
 - `standalone_query` 是符合协议的非空字符串；
-- `rewrite_status` 与失败码一致；
-- 降级时结果等于 `original_query`，并包含约定 warning；
 - 一次请求只产生一条查询。
 
 语义质量由人工评审或 LLM-as-a-Judge 负责，评价维度暂定为：

@@ -59,17 +59,13 @@ def test_query_rewrite_result_rejects_blank_query(standalone_query):
         QueryRewriteResult(standalone_query=standalone_query)
 
 
-def test_query_rewrite_contract_exposes_only_v1_status_and_failure_codes():
-    from app.domains.rag.graph.query_rewrite import (
-        QueryRewriteFailureCode,
-        QueryRewriteStatus,
-    )
+def test_query_rewrite_update_contains_only_standalone_query():
+    import app.domains.rag.graph.query_rewrite as query_rewrite
+    from app.domains.rag.graph.query_rewrite import QueryRewriteUpdate
 
-    assert {item.value for item in QueryRewriteStatus} == {
-        "rewritten",
-        "fallback",
-    }
-    assert {item.value for item in QueryRewriteFailureCode} == {
-        "model_invocation_failed",
-        "invalid_output",
-    }
+    assert not hasattr(query_rewrite, "QueryRewriteStatus")
+    assert not hasattr(query_rewrite, "QueryRewriteFailureCode")
+    assert set(QueryRewriteUpdate.__annotations__) == {"standalone_query"}
+    assert "rewrite_status" not in QueryRewriteUpdate.__annotations__
+    assert "rewrite_failure_code" not in QueryRewriteUpdate.__annotations__
+    assert "warnings" not in QueryRewriteUpdate.__annotations__

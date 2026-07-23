@@ -2,11 +2,6 @@
 
 from typing import NotRequired, Required, TypedDict
 
-from app.domains.rag.graph.query_rewrite import (
-    QueryRewriteFailureCode,
-    QueryRewriteStatus,
-)
-
 
 class RagState(TypedDict, total=False):
     """按已落地阶段增量扩展；当前只声明 Query Rewrite 所需字段。"""
@@ -15,6 +10,3 @@ class RagState(TypedDict, total=False):
     conversation_context: NotRequired[list[dict[str, str]]]
     business_context: NotRequired[dict[str, object] | None]
     standalone_query: NotRequired[str]
-    rewrite_status: NotRequired[QueryRewriteStatus]
-    rewrite_failure_code: NotRequired[QueryRewriteFailureCode | None]
-    warnings: NotRequired[list[str]]

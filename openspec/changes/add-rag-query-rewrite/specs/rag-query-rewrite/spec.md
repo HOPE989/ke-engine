@@ -109,14 +109,12 @@ The system SHALL preserve retrieval availability by using `original_query` as `s
 
 - **WHEN** the model invocation raises an ordinary exception
 - **THEN** the node SHALL set `standalone_query` to `original_query`
-- **AND** it SHALL record a degraded Rewrite status and a bounded failure code
 - **AND** it MUST NOT retry the model call
 
 #### Scenario: Structured output is invalid
 
 - **WHEN** the model response is empty, blank, malformed, or fails `QueryRewriteResult` validation
 - **THEN** the node SHALL set `standalone_query` to `original_query`
-- **AND** it SHALL record the same observable degradation semantics as an invocation failure
 
 #### Scenario: Cancellation is not converted into fallback
 
@@ -156,7 +154,7 @@ The system SHALL add Query Rewrite to the request-scoped, pipeline-level RAG Gra
 #### Scenario: Graph state remains serializable
 
 - **WHEN** the RAG Graph state after Query Rewrite is inspected
-- **THEN** it SHALL contain only request data, result data, status, warnings, and bounded diagnostic values
+- **THEN** it SHALL contain only request data and the resulting `standalone_query`
 - **AND** it MUST NOT contain a model client, Langfuse client, callback handler, settings object, database connection, or external service client
 
 ### Requirement: Query Rewrite supports callback-based observability
@@ -167,18 +165,17 @@ The system SHALL preserve caller-provided LangChain callbacks through the Graph 
 
 - **WHEN** a caller invokes the RAG Graph with a Langfuse `CallbackHandler`
 - **THEN** the Graph and Query Rewrite model call SHALL be observable beneath that callback
-- **AND** the observation SHALL include the original input, actual `standalone_query`, Rewrite status, and fallback warning when present
+- **AND** the observation SHALL include the original input and actual `standalone_query`
 
 #### Scenario: Callback is absent
 
 - **WHEN** a caller invokes the Graph without Langfuse resources
 - **THEN** Query Rewrite behavior and output SHALL remain unchanged
 
-#### Scenario: Fallback is observable
+#### Scenario: Fallback adds no diagnostic state
 
 - **WHEN** Rewrite degrades to `original_query`
-- **THEN** Graph state SHALL include a warning suitable for a future `EvidencePackage.warnings`
-- **AND** diagnostic text MUST NOT expose credentials or raw provider secrets
+- **THEN** Graph state MUST NOT add a Rewrite status, failure code, warning, or provider diagnostic text
 
 ### Requirement: Query Rewrite has offline tests and an explicit live-model evaluation path
 
@@ -199,7 +196,7 @@ The system SHALL provide deterministic default tests and a separate opt-in path 
 #### Scenario: Code evaluators remain objective
 
 - **WHEN** an offline or Langfuse code evaluator scores a Query Rewrite result
-- **THEN** it MAY validate non-blank structured output, status values, and fallback consistency
+- **THEN** it MAY validate non-blank structured output and single-query compliance
 - **AND** it MUST NOT represent semantic quality with keyword inclusion, token overlap, regular expressions, edit distance, or reference-query exact match
 
 #### Scenario: Semantic quality uses human or model judgment
@@ -218,7 +215,7 @@ The system SHALL provide deterministic default tests and a separate opt-in path 
 
 - **WHEN** a developer explicitly runs the live-model evaluation command with valid model configuration
 - **THEN** it SHALL invoke the production Query Rewrite node against the repository cases
-- **AND** it SHALL report each original query, resulting standalone query, Rewrite status, objective contract checks, and any separately produced human or LLM Judge scores
+- **AND** it SHALL report each original query, resulting standalone query, objective contract checks, and any separately produced human or LLM Judge scores
 
 #### Scenario: Live evaluation is not a default gate
 

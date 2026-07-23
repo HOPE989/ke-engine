@@ -13,7 +13,7 @@
 - 不新增 `query_rewrite/service.py`，也不暴露 Query Rewrite 单节点 service。
 - 不实现多查询、问题拆解、Router、Retriever、SQL、Cypher、Rerank、EvidencePackage、MCP API、重试或 checkpoint。
 - Query Rewrite 不接收 `conversation_id`，不访问 Chat persistence、Redis、数据库、checkpoint 或调用方记忆。
-- state 只包含可序列化请求数据、结果、状态、有限失败码和非敏感 warning。
+- state 只包含可序列化请求数据和当前实际使用的 `standalone_query`。
 - domain 模块导入不得创建模型客户端、读取 settings 或初始化 Langfuse。
 - `RunnableConfig` 必须原样传给结构化模型调用；Langfuse 只由调用方以 callback 注入。
 - 默认 pytest 完全离线；真实模型评测只能通过显式命令运行。
@@ -24,7 +24,7 @@
 
 | Path | Responsibility |
 |---|---|
-| `backend/app/domains/rag/graph/query_rewrite/models.py` | 阶段输入、输出、状态枚举、失败码和 update 契约 |
+| `backend/app/domains/rag/graph/query_rewrite/models.py` | 阶段输入、结构化模型输出和单字段 update 契约 |
 | `backend/app/domains/rag/graph/query_rewrite/prompt.py` | 版本化 Prompt 与输入消息构造 |
 | `backend/app/domains/rag/graph/query_rewrite/evaluation.py` | 本地评测 case 与客观输出契约 scorer |
 | `backend/app/domains/rag/graph/state.py` | 随管线阶段增量扩展的 `RagState` |
@@ -83,14 +83,14 @@ Observed: <passed test count>
 
 - [x] 3.1 RED：新增 test support 与 `test_rag_query_rewrite_node.py`，覆盖成功、schema 绑定、config 透传、模型失败、无效输出、无重试、取消传播和输入错误时不调用模型。
 - [x] 3.2 Verify RED：`uv run pytest tests/test_rag_query_rewrite_node.py -q`，Exit 1，6 个失败均为 node invocation 尚不存在。
-- [x] 3.3 GREEN：在 `graph/nodes/query_rewrite.py` 实现 `query_rewrite_node(...)`；fallback warning 常量位于阶段契约。
+- [x] 3.3 GREEN：在 `graph/nodes/query_rewrite.py` 实现 `query_rewrite_node(...)`，失败时只返回原始查询。
 - [x] 3.4 Verify GREEN：node、Prompt 与模型测试 Exit 0，18 passed。
 - [x] 3.5 REFACTOR：重试、并发双查询、异常字符串和多查询标识扫描无命中，编译检查通过。
 - [x] 3.6 Commit：`feat(rag): add single-call query rewrite node`。
 
 ## Task 4: Assembly-time Model Binding
 
-**Deliverable:** Graph builder 在装配期把 model 绑定到 node；node 保留已有 warnings，模块导入保持纯净，不定义仅用于模型注入的 runtime context。
+**Deliverable:** Graph builder 在装配期把 model 绑定到 node；模块导入保持纯净，不定义仅用于模型注入的 runtime context。
 
 - [x] 4.1 RED：测试要求 `query_rewrite_node(model=...)`、`build_rag_graph(model=...)`，并断言不存在 `RagRuntimeContext`。
 - [x] 4.2 Verify RED：node、Graph、Studio 测试 Exit 1，13 个失败锁定旧 runtime wrapper、双模式 builder 和 context 文件。
@@ -131,6 +131,17 @@ Observed: <passed test count>
 - [x] 6A.4 Verify GREEN：Query Rewrite 阶段、RAG Graph 和 Studio 测试 Exit 0，32 passed。
 - [x] 6A.5 REFACTOR：确认无 Query Rewrite 顶层 Graph/Studio/state 标识残留，也未引入子图。
 - [x] 6A.6 Commit：`refactor(rag): make graph root pipeline-wide`。
+
+## Task 6B: Minimal Query Rewrite State
+
+**Deliverable:** Query Rewrite 成功或失败都只更新一个 `standalone_query`，不维护状态、失败码或 warnings。
+
+- [x] 6B.1 RED：测试先禁止 `warnings`，Exit 1，8 个失败证明 warning 契约仍存在。
+- [x] 6B.2 RED：进一步禁止 status 和 failure code，Exit 1，7 个失败证明诊断字段仍存在。
+- [x] 6B.3 GREEN：删除相关枚举、常量、state channels 和 node 输出字段。
+- [x] 6B.4 Verify GREEN：Query Rewrite、RAG Graph 和 Studio 相关测试 Exit 0，32 passed。
+- [x] 6B.5 REFACTOR：确认 fallback 仍只调用模型一次、取消不被吞掉、输出只包含 `standalone_query`。
+- [x] 6B.6 Commit：`refactor(rag): minimize query rewrite state`。
 
 ## Task 7: Objective Evaluation Contracts and Curated Cases
 

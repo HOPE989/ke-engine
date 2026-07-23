@@ -1,10 +1,6 @@
-from enum import StrEnum
 from typing import Literal, Self, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-
-QUERY_REWRITE_FALLBACK_WARNING = "query_rewrite_fallback"
 
 
 class ConversationContextMessage(BaseModel):
@@ -50,18 +46,5 @@ class QueryRewriteResult(BaseModel):
     standalone_query: str = Field(min_length=1, pattern=r"\S")
 
 
-class QueryRewriteStatus(StrEnum):
-    REWRITTEN = "rewritten"
-    FALLBACK = "fallback"
-
-
-class QueryRewriteFailureCode(StrEnum):
-    MODEL_INVOCATION_FAILED = "model_invocation_failed"
-    INVALID_OUTPUT = "invalid_output"
-
-
 class QueryRewriteUpdate(TypedDict):
     standalone_query: str
-    rewrite_status: QueryRewriteStatus
-    rewrite_failure_code: QueryRewriteFailureCode | None
-    warnings: list[str]
