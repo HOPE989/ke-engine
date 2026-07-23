@@ -147,12 +147,12 @@ Observed: <passed test count>
 
 **Deliverable:** 只评分客观输出契约的 evaluator，以及覆盖高风险语义错误的固定样例。
 
-- [ ] 7.1 RED：新增 `test_rag_query_rewrite_evaluation.py`，验证 28 条样例结构、分类覆盖、人工参考字段、case-specific rubric 与客观 scorer。
-- [ ] 7.2 Verify RED：确认 evaluation 模块尚不存在。
-- [ ] 7.3 GREEN：实现 `graph/query_rewrite/evaluation.py` 并复用现有 fixture。
-- [ ] 7.4 Verify GREEN：运行 evaluation 测试与 Graph 回归集。
-- [ ] 7.5 REFACTOR：确认 scorer 不访问人工参考字段，不使用关键词命中、正则、exact match、BLEU、ROUGE 或编辑距离评价语义。
-- [ ] 7.6 Commit：`test(rag): add query rewrite evaluation cases`。
+- [x] 7.1 RED：新增 `test_rag_query_rewrite_evaluation.py`，验证 28 条样例结构、分类覆盖、人工参考字段、case-specific rubric 与客观 scorer。
+- [x] 7.2 Verify RED：`uv run pytest tests/test_rag_query_rewrite_evaluation.py -q`，Exit 1，3 个失败均为 evaluation 模块尚不存在。
+- [x] 7.3 GREEN：实现 `graph/query_rewrite/evaluation.py` 并复用现有 fixture。
+- [x] 7.4 Verify GREEN：evaluation、模型、node 与 Graph 回归集 Exit 0，25 passed。
+- [x] 7.5 REFACTOR：scorer 只接收实际输出并以 `QueryRewriteResult` 校验单字段非空契约，不访问人工参考字段。
+- [x] 7.6 Commit：`test(rag): add query rewrite evaluation cases`。
 
 ## Task 8: Explicit Live-model Evaluation
 
