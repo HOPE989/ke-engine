@@ -1,7 +1,10 @@
 import asyncio
+import importlib
+import sys
 
 import pytest
 from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
 from pydantic import ValidationError
 
 from rag_query_rewrite_test_support import (
@@ -130,3 +133,74 @@ async def test_invoke_query_rewrite_rejects_invalid_input_before_model_call():
 
     assert model.schemas == []
     assert runnable.calls == []
+
+
+@pytest.mark.asyncio
+async def test_query_rewrite_node_uses_runtime_model_and_preserves_warnings():
+    from app.domains.rag.graph.context import RagRuntimeContext
+    from app.domains.rag.graph.nodes.query_rewrite import query_rewrite_node
+    from app.domains.rag.graph.query_rewrite import QueryRewriteResult
+
+    runnable = RecordingStructuredRunnable(
+        [QueryRewriteResult(standalone_query="查询神木站实际版装车计划")]
+    )
+    model = RecordingStructuredModel(runnable)
+    config: RunnableConfig = {"metadata": {"request_id": "request-1"}}
+
+    update = await query_rewrite_node(
+        {
+            "original_query": "按实际版呢",
+            "conversation_context": [
+                {
+                    "role": "user",
+                    "content": "查询神木站模拟版装车计划",
+                }
+            ],
+            "business_context": {
+                "intent": "BUSINESS_DATA_QUERY",
+                "entities": {"departure_station": "神木站"},
+            },
+            "warnings": ["upstream_warning"],
+        },
+        config,
+        Runtime(context=RagRuntimeContext(model=model)),
+    )
+
+    assert update["standalone_query"] == "查询神木站实际版装车计划"
+    assert update["warnings"] == ["upstream_warning"]
+    assert runnable.calls[0][1] is config
+
+
+def test_query_rewrite_node_is_exported_from_nodes_package():
+    from app.domains.rag.graph.nodes import (
+        invoke_query_rewrite,
+        query_rewrite_node,
+    )
+
+    assert callable(invoke_query_rewrite)
+    assert callable(query_rewrite_node)
+
+
+def test_importing_query_rewrite_node_does_not_initialize_runtime_resources(
+    monkeypatch,
+):
+    from app.core import config
+    from app.infrastructure import llm
+
+    def explode(*args, **kwargs):
+        raise AssertionError("domain import must not initialize resources")
+
+    monkeypatch.setattr(config, "get_settings", explode)
+    monkeypatch.setattr(llm, "create_chat_model", explode)
+    for module_name in [
+        "app.domains.rag.graph.nodes.query_rewrite",
+        "app.domains.rag.graph.nodes",
+        "app.domains.rag.graph.context",
+    ]:
+        sys.modules.pop(module_name, None)
+
+    imported = importlib.import_module(
+        "app.domains.rag.graph.nodes.query_rewrite"
+    )
+
+    assert callable(imported.query_rewrite_node)

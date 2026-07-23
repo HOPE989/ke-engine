@@ -92,12 +92,12 @@ Observed: <passed test count>
 
 **Deliverable:** 从 runtime context 取得 model、保留已有 warnings，并且导入纯净的 LangGraph node wrapper。
 
-- [ ] 4.1 RED：在 node 测试中增加 runtime 注入、state 映射、warning 合并和 import purity 用例。
-- [ ] 4.2 Verify RED：确认因 runtime context/wrapper 尚不存在而失败。
-- [ ] 4.3 GREEN：实现 `graph/context.py`、`query_rewrite_node(...)` 与 `graph/nodes/__init__.py`。
-- [ ] 4.4 Verify GREEN：运行全部 node 测试。
-- [ ] 4.5 REFACTOR：确认 runtime 依赖不进入 state，模块导入不读取 settings 或创建 model。
-- [ ] 4.6 Commit：`feat(rag): add runtime-injected query rewrite node`。
+- [x] 4.1 RED：在 node 测试中增加 runtime 注入、state 映射、warning 合并和 import purity 用例。
+- [x] 4.2 Verify RED：node 测试 Exit 1，新增 3 个失败分别证明 runtime context、包导出和 wrapper 尚不存在。
+- [x] 4.3 GREEN：实现 `graph/context.py`、`query_rewrite_node(...)` 与 `graph/nodes/__init__.py`。
+- [x] 4.4 Verify GREEN：全部 node、Prompt 与模型测试 Exit 0，21 passed。
+- [x] 4.5 REFACTOR：runtime 资源访问与会话/checkpoint 标识扫描无命中，import purity 和编译检查通过。
+- [x] 4.6 Commit：`feat(rag): add runtime-injected query rewrite node`。
 
 ## Task 5: Independently Runnable Minimal LangGraph
 
