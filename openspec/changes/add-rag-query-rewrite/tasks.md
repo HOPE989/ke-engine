@@ -70,12 +70,12 @@ Observed: <passed test count>
 
 **Deliverable:** 结构稳定、版本化且只要求一个结构化查询的 Prompt。
 
-- [ ] 2.1 RED：新增 `test_rag_query_rewrite_prompt.py`，覆盖消息分区、JSON 输入、当前问题优先、硬约束保留和禁止越界产物。
-- [ ] 2.2 Verify RED：确认因 Prompt builder 尚不存在而失败。
-- [ ] 2.3 GREEN：实现 `graph/query_rewrite/prompt.py`。
-- [ ] 2.4 Verify GREEN：运行 Prompt 与模型契约测试。
-- [ ] 2.5 REFACTOR：确认 Prompt 不要求 route、retrieval plan、多查询、子问题、答案、SQL 或 Cypher。
-- [ ] 2.6 Commit：`feat(rag): add versioned query rewrite prompt`。
+- [x] 2.1 RED：新增 `test_rag_query_rewrite_prompt.py`，覆盖消息分区、JSON 输入、当前问题优先、硬约束保留和禁止越界产物。
+- [x] 2.2 Verify RED：`uv run pytest tests/test_rag_query_rewrite_prompt.py -q`，Exit 1，3 个失败均为 Prompt 模块尚不存在。
+- [x] 2.3 GREEN：实现 `graph/query_rewrite/prompt.py`。
+- [x] 2.4 Verify GREEN：Prompt 与模型契约测试 Exit 0，12 passed。
+- [x] 2.5 REFACTOR：越界产物标识扫描无命中，编译检查通过。
+- [x] 2.6 Commit：`feat(rag): add versioned query rewrite prompt`。
 
 ## Task 3: Single-call Query Rewrite Node Invocation
 
