@@ -713,6 +713,25 @@ Rewrite task，也不作为代码关键词匹配规则。
   Judge 经校准后，才考虑用于 Prompt 选择、回归门禁或生产监测
 ```
 
+显式实验命令为：
+
+```powershell
+cd backend
+uv run python -m app.evaluation.rag_query_rewrite
+```
+
+该命令会把本地 28 条 fixture 以稳定 item ID 幂等同步到
+`ke-engine/rag-query-rewrite-v1`，再使用当前配置模型串行执行生产 RAG Graph，
+创建 Langfuse Dataset Run。当前只生成 `output_contract` 客观分数。
+
+2026-07-24 使用 `deepseek-v4-pro` 完成首轮真实实验，Run name 为
+`rag-query-rewrite-20260723-164948`。28 条输出的 `output_contract` 均通过，
+但人工回读发现 28 条实际输出都只有一个汉字，例如“查”“神”“榆”。Langfuse
+中的原始 generation 同样是单字 JSON 值，证明问题发生在模型生成而非结果解析。
+因此本轮不能视为语义质量通过；它说明“非空单字段”只适合作为结构契约，后续
+Prompt 版本必须明确要求完整表达信息需求并禁止截断，再通过新的 Dataset Run
+比较质量。
+
 人工评审第一版使用一个总质量标签即可：
 
 - `PASS`：可直接用于检索；

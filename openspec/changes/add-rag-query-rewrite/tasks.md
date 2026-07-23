@@ -164,14 +164,15 @@ Observed: <passed test count>
 - [x] 8.4 Verify GREEN：Langfuse 适配、evaluation、模型、node 与 Graph 回归集 Exit 0，32 passed；测试全部使用 fake client/model。
 - [x] 8.5 REFACTOR：确认不复制 Rewrite 逻辑，不自动执行 Judge，只写入客观 `output_contract` 分数。
 - [x] 8.6 Commit：`feat(rag): add query rewrite dataset experiment`。
+- [x] 8.7 Live Verify：`uv run python -m app.evaluation.rag_query_rewrite`，Exit 0；同步 28 条 Dataset items 并创建 Run `rag-query-rewrite-20260723-164948`。客观契约分数为 1.000，但人工回读确认 28 条模型原始输出均为单字，语义质量未通过。
 
 ## Task 9: Full Verification and Documentation
 
 **Deliverable:** OpenSpec、测试、静态检查与开发文档一致。
 
-- [ ] 9.1 运行全部 Query Rewrite 测试。
-- [ ] 9.2 运行受影响的 Chat/Graph 回归测试。
-- [ ] 9.3 运行 Ruff、Pyright（如仓库配置）和 OpenSpec strict validation。
-- [ ] 9.4 检查 diff：无 `service.py`、无 MCP/Router/Retriever 越界、无敏感异常入 state。
-- [ ] 9.5 更新 `docs/my-specs/RAG查询链路与MCP服务.md` 中确有必要同步的实现状态，不改写已确认的架构原则。
-- [ ] 9.6 Commit：`docs(rag): document query rewrite graph slice`。
+- [x] 9.1 完整非集成套件包含全部 Query Rewrite 测试，Exit 0，654 passed、3 skipped、6 deselected。
+- [x] 9.2 同一非集成套件覆盖受影响的 Chat/Graph 回归测试。
+- [x] 9.3 编译检查与 OpenSpec strict validation 通过；当前项目环境未安装 Ruff、Pyright，命令均明确返回 `program not found`。
+- [x] 9.4 范围扫描无 `service.py`、MCP/Router/Retriever 实现、重试、checkpointer 或敏感异常 state；唯一 Retriever 命中为 Prompt 中的禁止规则。
+- [x] 9.5 更新 `docs/my-specs/RAG查询链路与MCP服务.md`，补充显式命令、Dataset 名称和首轮真实实验结论，不改写已确认架构原则。
+- [x] 9.6 Commit：`docs(rag): document query rewrite experiment`。
