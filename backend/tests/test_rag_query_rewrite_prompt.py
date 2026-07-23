@@ -9,10 +9,13 @@ def test_query_rewrite_prompt_is_versioned_and_contains_all_control_rules():
         QUERY_REWRITE_SYSTEM_PROMPT,
     )
 
-    assert QUERY_REWRITE_PROMPT_VERSION == "v1"
+    assert QUERY_REWRITE_PROMPT_VERSION == "v2"
     for token in [
         "当前问题优先",
         "只生成一条",
+        "独立完整",
+        "逐一执行",
+        "不得只输出单个汉字",
         "不得回答",
         "不得拆分",
         "不得生成 SQL",
@@ -28,6 +31,10 @@ def test_query_rewrite_prompt_is_versioned_and_contains_all_control_rules():
         "不得臆造",
         "货运单",
         "运单",
+        "按实际版呢",
+        "查询神木站本月实际版装车计划",
+        "不是华能集团，是大唐集团",
+        "查询客户大唐集团本季度煤炭合同结算金额",
     ]:
         assert token in QUERY_REWRITE_SYSTEM_PROMPT
 

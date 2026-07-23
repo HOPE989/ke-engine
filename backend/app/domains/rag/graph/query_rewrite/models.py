@@ -43,7 +43,14 @@ class QueryRewriteInput(BaseModel):
 class QueryRewriteResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    standalone_query: str = Field(min_length=1, pattern=r"\S")
+    standalone_query: str = Field(
+        min_length=2,
+        pattern=r"\S",
+        description=(
+            "一条语义完整、脱离上下文也能理解的检索查询；"
+            "不得是单个汉字、标点或被截断的查询片段"
+        ),
+    )
 
 
 class QueryRewriteUpdate(TypedDict):

@@ -732,6 +732,19 @@ uv run python -m app.evaluation.rag_query_rewrite
 Prompt 版本必须明确要求完整表达信息需求并禁止截断，再通过新的 Dataset Run
 比较质量。
 
+Prompt v2 参考 know-engine `KnowEngineQueryTransformer` 的问题改写方式，引入
+“逐一执行改写步骤、最后形成独立完整查询”的明确要求和业务域 few-shot 示例。
+同时，模型结构化输出从默认 `json_schema` 改为 `json_mode`，结果仍由
+`QueryRewriteResult` 做 Pydantic 校验；单个汉字或标点不再是合法结果。真实探针
+显示 `json_schema` 仍返回单字，`function_calling` 在当前 thinking mode 下返回
+400，而 `json_mode` 能返回完整查询。
+
+第二轮真实实验 Run name 为 `rag-query-rewrite-20260723-170605`。28 条结果均为
+完整查询，`output_contract = 1.000`。人工按上下文补全、当前值优先和硬约束保留
+逐条回读后，27 条可直接用于检索，1 条为 `PARTIAL`，0 条为 `FAIL`。唯一
+`PARTIAL` 是客户纠正场景：结果保留“大唐集团、本季度、煤炭合同、结算金额”，
+但省略了“客户”角色；该问题应作为后续 Prompt/Judge 优化样例保留。
+
 人工评审第一版使用一个总质量标签即可：
 
 - `PASS`：可直接用于检索；

@@ -221,7 +221,7 @@ def test_run_experiment_syncs_dataset_and_runs_serial_production_graph(
     assert call["task"].keywords == {"graph": compiled_graph}
     assert call["metadata"] == {
         "model": "deepseek-test",
-        "prompt_version": "v1",
+        "prompt_version": "v2",
         "app_version": "0.1.0",
         "live_model": "true",
         "semantic_scoring": "not_automated",

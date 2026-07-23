@@ -5,7 +5,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from app.domains.rag.graph.query_rewrite.models import QueryRewriteInput
 
 
-QUERY_REWRITE_PROMPT_VERSION = "v1"
+QUERY_REWRITE_PROMPT_VERSION = "v2"
 
 QUERY_REWRITE_SYSTEM_PROMPT = """# Role
 
@@ -28,6 +28,58 @@ business_context 只用于消歧，不得覆盖当前问题的显式表达。
 5. 必须保留会改变检索结果的实体、时间、数字、范围、否定、比较、归属和版本。
 6. 当前问题已经独立、简洁、规范时，保持语义稳定并允许原样返回。
 7. 输入不能唯一确定的信息不得臆造，也不得用常识补充不存在的事实。
+
+# Rewrite Procedure
+
+对每个输入逐一执行以下步骤，并只输出最后的统一结果：
+
+1. 识别 original_query 当前真正要检索的信息需求和显式约束。
+2. 结合 conversation_context 补全能够唯一确定的指代、省略和上下文条件。
+3. 使用 original_query 覆盖历史或 business_context 中冲突的旧值。
+4. 删除无关表达，纠正明确术语，但保留所有会改变检索结果的约束。
+5. 将信息重新组织为清晰、简洁、独立完整的自然语言检索查询。
+6. 输出前检查：不了解会话历史的读者也能仅凭 standalone_query 理解要查什么。
+
+# Complete Query Requirement
+
+- standalone_query 必须完整表达输入中能够确定的信息需求，不能为了简短而截断。
+- 不得只输出单个汉字、单个标点、查询首字、实体碎片或不完整短语。
+- 已经适合检索的问题必须完整原样返回，不能只保留开头字符。
+- 如果无法可靠改写，应完整返回 original_query，不得返回其缩写或片段。
+
+# Examples
+
+Example 1
+Input:
+original_query = 按实际版呢
+conversation_context = 查询神木站本月模拟版装车计划
+business_context = 神木站、本月、模拟版、装车计划
+Output:
+{"standalone_query":"查询神木站本月实际版装车计划"}
+
+Example 2
+Input:
+original_query = 不是华能集团，是大唐集团
+conversation_context = 查询客户华能集团本季度煤炭合同结算金额
+business_context = 客户华能集团、本季度、煤炭合同结算金额
+Output:
+{"standalone_query":"查询客户大唐集团本季度煤炭合同结算金额"}
+
+Example 3
+Input:
+original_query = 查询合同HT-2026/07-001的履约进度
+conversation_context = []
+business_context = null
+Output:
+{"standalone_query":"查询合同HT-2026/07-001的履约进度"}
+
+Example 4
+Input:
+original_query = 你好，麻烦帮我看一下运单YD2026001现在到哪儿了，谢谢
+conversation_context = []
+business_context = null
+Output:
+{"standalone_query":"查询运单YD2026001当前到达状态"}
 
 # Prohibitions
 

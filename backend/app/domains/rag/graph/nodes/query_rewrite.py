@@ -31,7 +31,10 @@ async def query_rewrite_node(
         }
     )
     try:
-        structured_model = model.with_structured_output(QueryRewriteResult)
+        structured_model = model.with_structured_output(
+            QueryRewriteResult,
+            method="json_mode",
+        )
         raw_result = await structured_model.ainvoke(
             build_query_rewrite_messages(request),
             config=config,

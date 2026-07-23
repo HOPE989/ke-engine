@@ -176,3 +176,16 @@ Observed: <passed test count>
 - [x] 9.4 范围扫描无 `service.py`、MCP/Router/Retriever 实现、重试、checkpointer 或敏感异常 state；唯一 Retriever 命中为 Prompt 中的禁止规则。
 - [x] 9.5 更新 `docs/my-specs/RAG查询链路与MCP服务.md`，补充显式命令、Dataset 名称和首轮真实实验结论，不改写已确认架构原则。
 - [x] 9.6 Commit：`docs(rag): document query rewrite experiment`。
+
+## Task 10: Know-engine-inspired Complete Query Fix
+
+**Deliverable:** 参考 know-engine 的完整查询步骤与 few-shot，修复真实模型在默认 JSON Schema 下只生成单字的问题。
+
+- [x] 10.1 Reference：完整阅读 `KnowEngineQueryTransformer.java` 及其 418 行测试，复用“逐一改写、独立完整、直接输出、few-shot”原则，不复制汽车领域和 service/transformer 结构。
+- [x] 10.2 RED：Prompt、模型、node 和 evaluator 测试 Exit 1，5 个失败复现 Prompt v1 与单字仍被当作合法输出。
+- [x] 10.3 GREEN：Prompt 升级为 v2，增加业务域改写步骤与 4 组示例；`QueryRewriteResult` 拒绝单字，单字沿用原查询 fallback。
+- [x] 10.4 RED/GREEN：新增 node 结构化输出模式测试，先因未指定模式 Exit 1；生产 node 显式使用 `method="json_mode"` 后通过。
+- [x] 10.5 Live Probe：`json_schema` 仍生成单字；`function_calling` 因 thinking mode 的 required tool choice 返回 400；`json_mode` 正确生成完整多轮查询。
+- [x] 10.6 Verify GREEN：Query Rewrite、RAG Graph、Studio 与 Langfuse 相关测试 Exit 0，40 passed。
+- [x] 10.7 Live Experiment：Run `rag-query-rewrite-20260723-170605` 完成 28 条；人工回读为 27 PASS、1 PARTIAL、0 FAIL。
+- [x] 10.8 Commit：`fix(rag): generate complete rewritten queries`。

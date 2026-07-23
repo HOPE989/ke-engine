@@ -79,6 +79,9 @@ def test_objective_scorer_checks_only_the_output_contract():
         {"standalone_query": "   "}
     ).output_contract == (0, 1)
     assert score_query_rewrite_output(
+        {"standalone_query": "查"}
+    ).output_contract == (0, 1)
+    assert score_query_rewrite_output(
         {
             "standalone_query": "查询运单",
             "query_variants": ["查询运单", "搜索运单"],

@@ -34,6 +34,12 @@ async def test_query_rewrite_node_returns_one_result_and_passes_config():
     )
 
     assert model.schemas == [QueryRewriteResult]
+    assert model.structured_output_calls == [
+        {
+            "schema": QueryRewriteResult,
+            "method": "json_mode",
+        }
+    ]
     assert len(runnable.calls) == 1
     assert runnable.calls[0][1] is config
     assert update == {
@@ -51,6 +57,10 @@ async def test_query_rewrite_node_returns_one_result_and_passes_config():
         ),
         (
             RecordingStructuredRunnable([{"standalone_query": "   "}]),
+            None,
+        ),
+        (
+            RecordingStructuredRunnable([{"standalone_query": "查"}]),
             None,
         ),
         (

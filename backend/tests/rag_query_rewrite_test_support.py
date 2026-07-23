@@ -21,9 +21,13 @@ class RecordingStructuredModel:
         self.runnable = runnable
         self.binding_error = binding_error
         self.schemas = []
+        self.structured_output_calls = []
 
-    def with_structured_output(self, schema):
+    def with_structured_output(self, schema, **kwargs):
         self.schemas.append(schema)
+        self.structured_output_calls.append(
+            {"schema": schema, **kwargs}
+        )
         if self.binding_error is not None:
             raise self.binding_error
         return self.runnable

@@ -51,8 +51,8 @@ def test_query_rewrite_input_rejects_invalid_or_caller_owned_fields(payload):
         QueryRewriteInput.model_validate(payload)
 
 
-@pytest.mark.parametrize("standalone_query", ["", "   "])
-def test_query_rewrite_result_rejects_blank_query(standalone_query):
+@pytest.mark.parametrize("standalone_query", ["", "   ", "查", "《"])
+def test_query_rewrite_result_rejects_incomplete_query(standalone_query):
     from app.domains.rag.graph.query_rewrite import QueryRewriteResult
 
     with pytest.raises(ValidationError):
