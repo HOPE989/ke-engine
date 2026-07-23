@@ -111,7 +111,7 @@ def test_chat_model_factory_passes_optional_callbacks(monkeypatch):
     assert captured["callbacks"] is callbacks
 
 
-def test_langgraph_json_exports_only_the_thin_studio_graph():
+def test_langgraph_json_exports_thin_chat_and_rag_studio_graphs():
     config = json.loads(
         (BACKEND_ROOT / "langgraph.json").read_text(encoding="utf-8")
     )
@@ -120,6 +120,10 @@ def test_langgraph_json_exports_only_the_thin_studio_graph():
         "dependencies": ["."],
         "graphs": {
             "chat": "./app/entrypoints/studio_graph.py:create_studio_graph",
+            "rag_query_rewrite": (
+                "./app/entrypoints/rag_query_rewrite_studio.py:"
+                "create_rag_query_rewrite_studio_graph"
+            ),
         },
         "env": ".env",
     }

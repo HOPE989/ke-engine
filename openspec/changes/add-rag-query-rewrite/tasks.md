@@ -114,12 +114,12 @@ Observed: <passed test count>
 
 **Deliverable:** 复用生产 Graph/node 的开发期 Studio 入口。
 
-- [ ] 6.1 RED：新增 `test_rag_query_rewrite_studio.py`，覆盖模型装配、可选 Langfuse callback、无 Langfuse 仍可运行及 `langgraph.json` 注册。
-- [ ] 6.2 Verify RED：确认入口或注册尚不存在。
-- [ ] 6.3 GREEN：实现 `app/entrypoints/rag_query_rewrite_studio.py` 并更新 `backend/langgraph.json`。
-- [ ] 6.4 Verify GREEN：运行 Studio 与全部 Graph 测试。
-- [ ] 6.5 REFACTOR：确认入口不读取 Chat 历史、不启用 checkpoint、不实现业务逻辑。
-- [ ] 6.6 Commit：`feat(rag): add query rewrite studio graph`。
+- [x] 6.1 RED：新增 `test_rag_query_rewrite_studio.py`，覆盖模型装配、可选 Langfuse callback、无 Langfuse 仍可运行及 `langgraph.json` 注册。
+- [x] 6.2 Verify RED：Studio 测试 Exit 1，3 个失败分别证明入口与注册尚不存在。
+- [x] 6.3 GREEN：实现 `app/entrypoints/rag_query_rewrite_studio.py` 并更新 `backend/langgraph.json`。
+- [x] 6.4 Verify GREEN：Studio 与全部 Query Rewrite Graph 测试 Exit 0，32 passed。
+- [x] 6.5 REFACTOR：Chat API、数据库、Redis、checkpoint 和 RAG service 引用扫描无命中，编译检查通过。
+- [x] 6.6 Commit：`feat(rag): add query rewrite studio graph`。
 
 ## Task 7: Objective Evaluation Contracts and Curated Cases
 
