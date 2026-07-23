@@ -2,10 +2,8 @@
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
 from pydantic import ValidationError
 
-from app.domains.rag.graph.context import RagRuntimeContext
 from app.domains.rag.graph.query_rewrite import (
     QUERY_REWRITE_FALLBACK_WARNING,
     QueryRewriteFailureCode,
@@ -22,25 +20,11 @@ from app.domains.rag.graph.state import RagState
 
 async def query_rewrite_node(
     state: RagState,
-    config: RunnableConfig,
-    runtime: Runtime[RagRuntimeContext],
-) -> QueryRewriteUpdate:
-    """从当前 Graph runtime 取得模型并执行 Query Rewrite。"""
-
-    return await invoke_query_rewrite(
-        state,
-        model=runtime.context.model,
-        config=config,
-    )
-
-
-async def invoke_query_rewrite(
-    state: RagState,
     *,
     model: BaseChatModel,
     config: RunnableConfig | None = None,
 ) -> QueryRewriteUpdate:
-    """使用显式模型执行一次 Query Rewrite，供 runtime 与测试共同复用。"""
+    """使用装配期绑定的模型执行一次 Query Rewrite。"""
 
     request = QueryRewriteInput.model_validate(
         {

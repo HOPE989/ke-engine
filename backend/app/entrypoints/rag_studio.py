@@ -22,4 +22,4 @@ def create_rag_studio_graph(
         model=settings.openai_model,
         callbacks=callbacks,
     )
-    return build_rag_graph(bound_model=model).compile()
+    return build_rag_graph(model=model).compile()

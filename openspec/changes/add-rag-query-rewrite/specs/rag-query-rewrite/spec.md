@@ -81,7 +81,7 @@ The system SHALL transform the input into exactly one non-blank `standalone_quer
 
 ### Requirement: Query Rewrite uses validated structured model output
 
-The system SHALL invoke the injected Chat model with a versioned Prompt and validate the response as a single-field `QueryRewriteResult`.
+The system SHALL invoke the assembly-injected Chat model with a versioned Prompt and validate the response as a single-field `QueryRewriteResult`.
 
 #### Scenario: Structured output succeeds
 
@@ -149,7 +149,8 @@ The system SHALL add Query Rewrite to the request-scoped, pipeline-level RAG Gra
 #### Scenario: Model is injected
 
 - **WHEN** the Query Rewrite node executes
-- **THEN** it SHALL receive the Chat model through runtime context or an explicit development binding
+- **THEN** the RAG Graph builder SHALL have bound one explicitly provided Chat model to the node during assembly
+- **AND** the Graph MUST NOT define a runtime context solely for model injection
 - **AND** importing the RAG domain MUST NOT create a model client or read process settings
 
 #### Scenario: Graph state remains serializable

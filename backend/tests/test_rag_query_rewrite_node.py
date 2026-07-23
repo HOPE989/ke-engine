@@ -4,7 +4,6 @@ import sys
 
 import pytest
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
 from pydantic import ValidationError
 
 from rag_query_rewrite_test_support import (
@@ -14,8 +13,8 @@ from rag_query_rewrite_test_support import (
 
 
 @pytest.mark.asyncio
-async def test_invoke_query_rewrite_returns_one_result_and_passes_config():
-    from app.domains.rag.graph.nodes.query_rewrite import invoke_query_rewrite
+async def test_query_rewrite_node_returns_one_result_and_passes_config():
+    from app.domains.rag.graph.nodes.query_rewrite import query_rewrite_node
     from app.domains.rag.graph.query_rewrite import (
         QueryRewriteResult,
         QueryRewriteStatus,
@@ -31,7 +30,7 @@ async def test_invoke_query_rewrite_returns_one_result_and_passes_config():
         "metadata": {"request_id": "request-1"},
     }
 
-    update = await invoke_query_rewrite(
+    update = await query_rewrite_node(
         {"original_query": "按实际版呢"},
         model=model,
         config=config,
@@ -69,19 +68,19 @@ async def test_invoke_query_rewrite_returns_one_result_and_passes_config():
         ),
     ],
 )
-async def test_invoke_query_rewrite_falls_back_once_without_provider_error(
+async def test_query_rewrite_node_falls_back_once_without_provider_error(
     runnable,
     binding_error,
     expected_code,
 ):
-    from app.domains.rag.graph.nodes.query_rewrite import invoke_query_rewrite
+    from app.domains.rag.graph.nodes.query_rewrite import query_rewrite_node
     from app.domains.rag.graph.query_rewrite import (
         QUERY_REWRITE_FALLBACK_WARNING,
     )
 
     model = RecordingStructuredModel(runnable, binding_error=binding_error)
 
-    update = await invoke_query_rewrite(
+    update = await query_rewrite_node(
         {"original_query": "查询运单 YD2026001"},
         model=model,
     )
@@ -98,14 +97,14 @@ async def test_invoke_query_rewrite_falls_back_once_without_provider_error(
 
 
 @pytest.mark.asyncio
-async def test_invoke_query_rewrite_does_not_convert_cancellation_to_fallback():
-    from app.domains.rag.graph.nodes.query_rewrite import invoke_query_rewrite
+async def test_query_rewrite_node_does_not_convert_cancellation_to_fallback():
+    from app.domains.rag.graph.nodes.query_rewrite import query_rewrite_node
 
     runnable = RecordingStructuredRunnable(error=asyncio.CancelledError())
     model = RecordingStructuredModel(runnable)
 
     with pytest.raises(asyncio.CancelledError):
-        await invoke_query_rewrite(
+        await query_rewrite_node(
             {"original_query": "查询本月运量"},
             model=model,
         )
@@ -114,14 +113,14 @@ async def test_invoke_query_rewrite_does_not_convert_cancellation_to_fallback():
 
 
 @pytest.mark.asyncio
-async def test_invoke_query_rewrite_rejects_invalid_input_before_model_call():
-    from app.domains.rag.graph.nodes.query_rewrite import invoke_query_rewrite
+async def test_query_rewrite_node_rejects_invalid_input_before_model_call():
+    from app.domains.rag.graph.nodes.query_rewrite import query_rewrite_node
 
     runnable = RecordingStructuredRunnable()
     model = RecordingStructuredModel(runnable)
 
     with pytest.raises(ValidationError):
-        await invoke_query_rewrite(
+        await query_rewrite_node(
             {
                 "original_query": "按实际版呢",
                 "conversation_context": [
@@ -136,8 +135,7 @@ async def test_invoke_query_rewrite_rejects_invalid_input_before_model_call():
 
 
 @pytest.mark.asyncio
-async def test_query_rewrite_node_uses_runtime_model_and_preserves_warnings():
-    from app.domains.rag.graph.context import RagRuntimeContext
+async def test_query_rewrite_node_preserves_existing_warnings():
     from app.domains.rag.graph.nodes.query_rewrite import query_rewrite_node
     from app.domains.rag.graph.query_rewrite import QueryRewriteResult
 
@@ -162,8 +160,8 @@ async def test_query_rewrite_node_uses_runtime_model_and_preserves_warnings():
             },
             "warnings": ["upstream_warning"],
         },
-        config,
-        Runtime(context=RagRuntimeContext(model=model)),
+        model=model,
+        config=config,
     )
 
     assert update["standalone_query"] == "查询神木站实际版装车计划"
@@ -172,12 +170,8 @@ async def test_query_rewrite_node_uses_runtime_model_and_preserves_warnings():
 
 
 def test_query_rewrite_node_is_exported_from_nodes_package():
-    from app.domains.rag.graph.nodes import (
-        invoke_query_rewrite,
-        query_rewrite_node,
-    )
+    from app.domains.rag.graph.nodes import query_rewrite_node
 
-    assert callable(invoke_query_rewrite)
     assert callable(query_rewrite_node)
 
 
@@ -195,7 +189,6 @@ def test_importing_query_rewrite_node_does_not_initialize_runtime_resources(
     for module_name in [
         "app.domains.rag.graph.nodes.query_rewrite",
         "app.domains.rag.graph.nodes",
-        "app.domains.rag.graph.context",
     ]:
         sys.modules.pop(module_name, None)
 

@@ -2,9 +2,9 @@
 
 **Goal:** 在不实现 Router、Retriever、EvidencePackage、MCP API 或独立 Query Rewrite service 的前提下，为 RAG domain 增加可独立测试和运行的一对一 Query Rewrite LangGraph 阶段。
 
-**Architecture:** Query Rewrite 是完整 RAG Graph 的第一个阶段。阶段专属契约、Prompt 与评测辅助代码位于 `graph/query_rewrite/`，执行逻辑位于 `graph/nodes/query_rewrite.py`。顶层始终使用管线级 `RagState`、`build_rag_graph` 和 `rag` Studio 入口，当前一节点拓扑只是完整管线的首个增量，不是 Query Rewrite 子图。未来完整 RAG 管线形成后，再在 `domains/rag/services/` 提供管线级 service。
+**Architecture:** Query Rewrite 是完整 RAG Graph 的第一个阶段。阶段专属契约、Prompt 与评测辅助代码位于 `graph/query_rewrite/`，执行逻辑位于 `graph/nodes/query_rewrite.py`。顶层始终使用管线级 `RagState`、`build_rag_graph(model=...)` 和 `rag` Studio 入口；模型在 Graph 装配期绑定，请求期只透传 config，不引入无实际需求的 runtime context。当前一节点拓扑只是完整管线的首个增量，不是 Query Rewrite 子图。未来完整 RAG 管线形成后，再在 `domains/rag/services/` 提供管线级 service。
 
-**Test style:** 参考 Chat `business_understanding` 的测试方式，直接测试阶段模型、Prompt、可调用 node 函数、runtime wrapper 和 RAG Graph 当前拓扑；只参考其组织方式，不强制逐项对齐。
+**Test style:** 参考 Chat `business_understanding` 的测试方式，直接测试阶段模型、Prompt、可调用 node 函数和 RAG Graph 当前拓扑；只参考其测试组织方式，不复制 Chat 为动态切模设计的 runtime wrapper。
 
 ## Global Constraints
 
@@ -28,8 +28,7 @@
 | `backend/app/domains/rag/graph/query_rewrite/prompt.py` | 版本化 Prompt 与输入消息构造 |
 | `backend/app/domains/rag/graph/query_rewrite/evaluation.py` | 本地评测 case 与客观输出契约 scorer |
 | `backend/app/domains/rag/graph/state.py` | 随管线阶段增量扩展的 `RagState` |
-| `backend/app/domains/rag/graph/context.py` | 不进入 state 的 model runtime dependency |
-| `backend/app/domains/rag/graph/nodes/query_rewrite.py` | 单次模型调用、fallback、state/runtime 适配 |
+| `backend/app/domains/rag/graph/nodes/query_rewrite.py` | 单次模型调用、fallback 和 state 适配 |
 | `backend/app/domains/rag/graph/builder.py` | 完整 RAG Graph builder；当前拓扑为 `START -> query_rewrite -> END` |
 | `backend/app/entrypoints/rag_studio.py` | 管线级 RAG LangGraph Studio 装配入口 |
 | `backend/app/evaluation/rag_query_rewrite.py` | 显式真实模型评测命令 |
@@ -80,25 +79,25 @@ Observed: <passed test count>
 
 ## Task 3: Single-call Query Rewrite Node Invocation
 
-**Deliverable:** `invoke_query_rewrite(...)` 直接完成输入校验、一次结构化模型调用、config 透传和显式 fallback。
+**Deliverable:** `query_rewrite_node(...)` 直接完成输入校验、一次结构化模型调用、config 透传和显式 fallback。
 
 - [x] 3.1 RED：新增 test support 与 `test_rag_query_rewrite_node.py`，覆盖成功、schema 绑定、config 透传、模型失败、无效输出、无重试、取消传播和输入错误时不调用模型。
 - [x] 3.2 Verify RED：`uv run pytest tests/test_rag_query_rewrite_node.py -q`，Exit 1，6 个失败均为 node invocation 尚不存在。
-- [x] 3.3 GREEN：在 `graph/nodes/query_rewrite.py` 实现 `invoke_query_rewrite(...)`；fallback warning 常量位于阶段契约。
+- [x] 3.3 GREEN：在 `graph/nodes/query_rewrite.py` 实现 `query_rewrite_node(...)`；fallback warning 常量位于阶段契约。
 - [x] 3.4 Verify GREEN：node、Prompt 与模型测试 Exit 0，18 passed。
 - [x] 3.5 REFACTOR：重试、并发双查询、异常字符串和多查询标识扫描无命中，编译检查通过。
 - [x] 3.6 Commit：`feat(rag): add single-call query rewrite node`。
 
-## Task 4: Runtime-injected Node Wrapper
+## Task 4: Assembly-time Model Binding
 
-**Deliverable:** 从 runtime context 取得 model、保留已有 warnings，并且导入纯净的 LangGraph node wrapper。
+**Deliverable:** Graph builder 在装配期把 model 绑定到 node；node 保留已有 warnings，模块导入保持纯净，不定义仅用于模型注入的 runtime context。
 
-- [x] 4.1 RED：在 node 测试中增加 runtime 注入、state 映射、warning 合并和 import purity 用例。
-- [x] 4.2 Verify RED：node 测试 Exit 1，新增 3 个失败分别证明 runtime context、包导出和 wrapper 尚不存在。
-- [x] 4.3 GREEN：实现 `graph/context.py`、`query_rewrite_node(...)` 与 `graph/nodes/__init__.py`。
-- [x] 4.4 Verify GREEN：全部 node、Prompt 与模型测试 Exit 0，21 passed。
-- [x] 4.5 REFACTOR：runtime 资源访问与会话/checkpoint 标识扫描无命中，import purity 和编译检查通过。
-- [x] 4.6 Commit：`feat(rag): add runtime-injected query rewrite node`。
+- [x] 4.1 RED：测试要求 `query_rewrite_node(model=...)`、`build_rag_graph(model=...)`，并断言不存在 `RagRuntimeContext`。
+- [x] 4.2 Verify RED：node、Graph、Studio 测试 Exit 1，13 个失败锁定旧 runtime wrapper、双模式 builder 和 context 文件。
+- [x] 4.3 GREEN：node 接收装配期绑定的 model，builder 只保留一种装配模式，并删除 `graph/context.py`。
+- [x] 4.4 Verify GREEN：node、RAG Graph、Studio、Prompt 与模型测试 Exit 0，33 passed。
+- [x] 4.5 REFACTOR：保留 `RunnableConfig` callback/metadata 透传，确认无 runtime context 或旧调用入口残留。
+- [x] 4.6 Commit：`refactor(rag): bind model during graph assembly`。
 
 ## Task 5: RAG Graph Initial Topology
 
@@ -106,7 +105,7 @@ Observed: <passed test count>
 
 - [x] 5.1 RED：新增 `test_rag_graph.py`，覆盖拓扑、成功输出、fallback 输出、config 透传、连续调用隔离和 JSON 序列化。
 - [x] 5.2 Verify RED：Graph 测试 Exit 1，4 个失败均为 builder/公开导出尚不存在。
-- [x] 5.3 GREEN：实现管线级 `RagState`、`build_rag_graph` 与公开导出，支持 runtime model 和显式绑定 model。
+- [x] 5.3 GREEN：实现管线级 `RagState`、`build_rag_graph(model=...)` 与公开导出。
 - [x] 5.4 Verify GREEN：Graph、node、Prompt 与模型测试 Exit 0，25 passed。
 - [x] 5.5 REFACTOR：隐藏分支、retry/checkpointer/内部 compile 扫描无命中，编译与 diff 检查通过。
 - [x] 5.6 Commit：`feat(rag): add minimal query rewrite graph`。

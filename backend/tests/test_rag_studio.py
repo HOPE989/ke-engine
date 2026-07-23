@@ -9,7 +9,7 @@ def test_rag_studio_binds_model_callback_and_compiles(
     settings = SimpleNamespace(openai_model="gpt-test")
     handler = object()
     resources = SimpleNamespace(handler=handler)
-    bound_model = object()
+    assembled_model = object()
     compiled = object()
     calls = []
 
@@ -37,7 +37,7 @@ def test_rag_studio_binds_model_callback_and_compiles(
                 {"settings": value, "model": model, "callbacks": callbacks},
             )
         )
-        return bound_model
+        return assembled_model
 
     monkeypatch.setattr(studio, "create_chat_model", fake_create_chat_model)
     monkeypatch.setattr(
@@ -58,7 +58,7 @@ def test_rag_studio_binds_model_callback_and_compiles(
                 "callbacks": [handler],
             },
         ),
-        ("builder", {"bound_model": bound_model}),
+        ("builder", {"model": assembled_model}),
         ("compile", {}),
     ]
 

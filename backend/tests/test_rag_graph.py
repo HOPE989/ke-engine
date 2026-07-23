@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from langchain_core.callbacks import BaseCallbackHandler
@@ -52,15 +53,15 @@ def test_rag_state_contains_serializable_rewrite_slice_and_can_expand():
 def test_rag_graph_starts_with_rewrite_node_no_retry_or_checkpointer():
     from app.domains.rag.graph import (
         QUERY_REWRITE_NODE,
-        RagRuntimeContext,
         build_rag_graph,
     )
 
-    builder = build_rag_graph()
+    model = RecordingStructuredModel(RecordingStructuredRunnable())
+    builder = build_rag_graph(model=model)
     compiled = builder.compile()
 
     assert QUERY_REWRITE_NODE == "query_rewrite"
-    assert builder.context_schema is RagRuntimeContext
+    assert builder.context_schema is None
     assert set(builder.nodes) == {"query_rewrite"}
     assert builder.nodes["query_rewrite"].retry_policy is None
     assert {(edge.source, edge.target) for edge in compiled.get_graph().edges} == {
@@ -70,8 +71,17 @@ def test_rag_graph_starts_with_rewrite_node_no_retry_or_checkpointer():
     assert compiled.checkpointer is None
 
 
+def test_rag_graph_does_not_define_runtime_dependency_context():
+    import app.domains.rag.graph as graph_package
+
+    graph_dir = Path(graph_package.__file__).parent
+
+    assert "RagRuntimeContext" not in graph_package.__all__
+    assert not (graph_dir / "context.py").exists()
+
+
 @pytest.mark.asyncio
-async def test_bound_rag_graph_keeps_requests_isolated_and_serializable():
+async def test_assembled_rag_graph_keeps_requests_isolated_and_serializable():
     from app.domains.rag.graph import build_rag_graph
     from app.domains.rag.graph.query_rewrite import QueryRewriteResult
 
@@ -82,7 +92,7 @@ async def test_bound_rag_graph_keeps_requests_isolated_and_serializable():
         ]
     )
     graph = build_rag_graph(
-        bound_model=RecordingStructuredModel(runnable)
+        model=RecordingStructuredModel(runnable)
     ).compile()
 
     first = await graph.ainvoke({"original_query": "第一份呢"})
@@ -96,18 +106,14 @@ async def test_bound_rag_graph_keeps_requests_isolated_and_serializable():
 
 
 @pytest.mark.asyncio
-async def test_runtime_rag_graph_uses_model_and_returns_fallback_state():
-    from app.domains.rag.graph import (
-        RagRuntimeContext,
-        build_rag_graph,
-    )
+async def test_assembled_rag_graph_returns_fallback_state():
+    from app.domains.rag.graph import build_rag_graph
 
     runnable = RecordingStructuredRunnable(error=RuntimeError("unavailable"))
     model = RecordingStructuredModel(runnable)
 
-    result = await build_rag_graph().compile().ainvoke(
-        {"original_query": "查询本月运量"},
-        context=RagRuntimeContext(model=model),
+    result = await build_rag_graph(model=model).compile().ainvoke(
+        {"original_query": "查询本月运量"}
     )
 
     assert result["standalone_query"] == "查询本月运量"
@@ -118,7 +124,7 @@ async def test_runtime_rag_graph_uses_model_and_returns_fallback_state():
 
 
 @pytest.mark.asyncio
-async def test_bound_rag_graph_passes_metadata_and_callbacks_to_model_call():
+async def test_assembled_rag_graph_passes_config_to_model_call():
     from app.domains.rag.graph import build_rag_graph
     from app.domains.rag.graph.query_rewrite import QueryRewriteResult
 
@@ -127,7 +133,7 @@ async def test_bound_rag_graph_passes_metadata_and_callbacks_to_model_call():
     )
     handler = RecordingGraphCallback()
     graph = build_rag_graph(
-        bound_model=RecordingStructuredModel(runnable)
+        model=RecordingStructuredModel(runnable)
     ).compile()
 
     await graph.ainvoke(
