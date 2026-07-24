@@ -1,7 +1,7 @@
 # RAG 查询链路与 MCP 服务设计草稿
 
-> 状态：讨论中
-> 最后更新：2026-07-23
+> 状态：总体架构讨论中；Query Rewrite 首个 OpenSpec change 已完成
+> 最后更新：2026-07-24
 > 用途：持续记录 RAG 查询服务、检索编排和 MCP 暴露方式的阶段性结论。
 > 说明：本文是 `docs/my-specs` 下的探索草稿，不是已进入实施阶段的 OpenSpec change。标记为“已确认”的内容表示当前讨论基线；标记为“待讨论”的内容仍可能调整。
 
@@ -542,7 +542,7 @@ RetrieveEvidenceRequest
 ├── conversation_context
 └── business_context
     ├── intent
-    └── entities
+    └── entities（可选，由具备结构化上下文的调用方提供）
 ```
 
 职责边界是：
@@ -551,8 +551,9 @@ RetrieveEvidenceRequest
 - 其他 Agent 从自己的工作记忆中截取上下文；
 - 非对话型调用可以不传 `conversation_context`；
 - RAG 不接受 `conversation_id` 后自行访问调用方的会话数据库；
-- Business Understanding 继续负责业务边界、意图、实体和澄清，不增加自然语言 `rag_context_summary` 或 `rewritten_query`；
-- Business Understanding 的结构化结果可以作为 `business_context` 提示；
+- Business Understanding 只负责业务边界、主要意图和入口澄清，不再负责全局实体提取，也不增加自然语言 `rag_context_summary` 或 `rewritten_query`；
+- Business Understanding 的 `intent` 可以作为 `business_context` 提示；Chat Service 不应假设其结果中仍包含 `entities`；
+- `business_context.entities` 保留为调用方无关的可选扩展，只能由已经持有可靠结构化上下文的 Agent 或其他调用方显式提供；Query Rewrite 不自行提取或访问外部实体数据；
 - Query Rewrite 使用原始上下文完成指代消解、语义补全和检索改写。
 
 第一版不增加独立的 LLM 上下文摘要。调用方使用确定性窗口策略：
@@ -923,25 +924,23 @@ RAG Service
 
 - 分支：`feat/rag-query-rewrite`
 - OpenSpec change：`add-rag-query-rewrite`
-- OpenSpec 规划产物：proposal、design、delta spec、tasks 均已完成并通过 strict validation；
-- 实现任务：尚未开始，当前为 0/68；
-- 已提交基线：`dc0491f docs(rag): define query rewrite design and TDD plan`
+- OpenSpec 规划产物：proposal、design、delta spec、tasks 均已完成；
+- OpenSpec 状态：75/75 tasks complete，并通过 strict validation；
+- change 范围内的 Query Rewrite 实现已经完成，当前 RAG Graph 拓扑为 `START -> query_rewrite -> END`；
+- 当前功能基线：`3253717 fix(rag): generate complete rewritten queries`；
+- 聚焦回归结果：Query Rewrite、RAG Graph、Studio 和 Langfuse 相关测试共 40 passed；
+- 全量非集成验证记录：654 passed、3 skipped、6 deselected；
+- 第二轮真实模型 Experiment `rag-query-rewrite-20260723-170605` 的人工结果为 27 PASS、1 PARTIAL、0 FAIL。
 
-当前工作区还有一组属于本 change、尚未提交的评测设计改动：
-
-- 本设计草稿的 Query Rewrite 评测策略；
-- `design.md`、delta spec、`tasks.md` 中的语义评测边界；
-- `backend/tests/fixtures/query_rewrite_cases.json` 的 28 条实验 dataset 草稿。
-
-接手者不要把 dataset 中的参考查询或 annotations 改造成确定性关键词 scorer。
-它们只服务于人工评审和未来经校准的 LLM Judge。代码 scorer 只检查输出协议、
-状态和 fallback 一致性。
+`backend/tests/fixtures/query_rewrite_cases.json` 的 28 条样例仍是仓库事实源。
+不要把其中的参考查询或 annotations 改造成确定性关键词 scorer；它们只服务于
+人工评审和未来经校准的 LLM Judge。代码 scorer 只检查输出协议和单查询边界。
 
 建议下一步：
 
-1. 先评审并提交上述尚未提交的文档与 dataset 改动；
-2. 退出探索阶段，使用 `openspec-apply-change` 按 `tasks.md` 的 TDD 顺序实现；
-3. 完成 Query Rewrite node 后先运行 28 条真实模型 Experiment；
-4. 当前没有 LLM-as-a-Judge 配置，因此先建立人工 `PASS / PARTIAL / FAIL` 基线，
-   不设置语义质量 CI gate；
-5. Query Rewrite 验证稳定后，再继续讨论 Query Router 的多选协议和降级规则。
+1. 评审本轮状态与职责边界更新；
+2. 确认无需继续修改 Query Rewrite change 后，将 `add-rag-query-rewrite` 同步并归档；
+3. 以独立 OpenSpec change 继续讨论和实现 Query Router 的多选协议、结构化输出与降级规则；
+4. 当前没有经校准的 LLM-as-a-Judge，因此继续保留人工 `PASS / PARTIAL / FAIL`
+   基线，不设置语义质量 CI gate；
+5. Chat/MCP 接入时明确 `business_context` 的实际生产者，不重新引入全局实体识别职责。
