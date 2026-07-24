@@ -1,0 +1,355 @@
+[
+  {
+    "id": "followup-switch-to-actual-version",
+    "category": "multi_turn_ellipsis",
+    "original_query": "按实际版呢",
+    "conversation_context": [
+      {"role": "user", "content": "查询神木站本月模拟版装车计划"},
+      {"role": "assistant", "content": "你想继续查看哪个版本？"}
+    ],
+    "business_context": {
+      "intent": "BUSINESS_DATA_QUERY",
+      "entities": {"departure_station": "神木站", "time_range": "本月", "data_version": "模拟版", "metric_name": "装车计划"}
+    },
+    "expected_standalone_query": "查询神木站本月实际版装车计划",
+    "expected_preserved_terms": ["神木站", "本月", "实际版", "装车计划"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": ["模拟版"]
+  },
+  {
+    "id": "followup-switch-station",
+    "category": "multi_turn_ellipsis",
+    "original_query": "那榆林站呢",
+    "conversation_context": [
+      {"role": "user", "content": "查询神木站昨日装车数量"},
+      {"role": "assistant", "content": "已按神木站和昨日条件查询"}
+    ],
+    "business_context": {
+      "intent": "BUSINESS_DATA_QUERY",
+      "entities": {"departure_station": "神木站", "time_range": "昨日", "metric_name": "装车数量"}
+    },
+    "expected_standalone_query": "查询榆林站昨日装车数量",
+    "expected_preserved_terms": ["榆林站", "昨日", "装车数量"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": ["神木站"]
+  },
+  {
+    "id": "followup-switch-time-range",
+    "category": "multi_turn_ellipsis",
+    "original_query": "上个月的呢",
+    "conversation_context": [
+      {"role": "user", "content": "查询本月曹妃甸港煤炭到达量"},
+      {"role": "assistant", "content": "正在查询本月数据"}
+    ],
+    "business_context": {
+      "intent": "BUSINESS_DATA_QUERY",
+      "entities": {"arrival_station": "曹妃甸港", "time_range": "本月", "metric_name": "煤炭到达量"}
+    },
+    "expected_standalone_query": "查询上个月曹妃甸港煤炭到达量",
+    "expected_preserved_terms": ["曹妃甸港", "煤炭到达量"],
+    "expected_required_term_groups": [["上个月", "上月"]],
+    "expected_excluded_terms": ["本月"]
+  },
+  {
+    "id": "followup-resolve-document-reference",
+    "category": "multi_turn_ellipsis",
+    "original_query": "它的结算状态呢",
+    "conversation_context": [
+      {"role": "user", "content": "查询合同HT-2026-071的履约进度"},
+      {"role": "assistant", "content": "已定位合同HT-2026-071"}
+    ],
+    "business_context": {
+      "intent": "BUSINESS_DATA_QUERY",
+      "entities": {"contract_no": "HT-2026-071", "metric_name": "履约进度"}
+    },
+    "expected_standalone_query": "查询合同HT-2026-071的结算状态",
+    "expected_preserved_terms": ["合同", "HT-2026-071", "结算状态"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": ["它的"]
+  },
+  {
+    "id": "current-version-overrides-history",
+    "category": "current_query_precedence",
+    "original_query": "改查模拟版",
+    "conversation_context": [
+      {"role": "user", "content": "查询榆林站昨日实际版装车数量"},
+      {"role": "assistant", "content": "正在查询实际版数据"}
+    ],
+    "business_context": {
+      "intent": "BUSINESS_DATA_QUERY",
+      "entities": {"departure_station": "榆林站", "time_range": "昨日", "data_version": "实际版", "metric_name": "装车数量"}
+    },
+    "expected_standalone_query": "查询榆林站昨日模拟版装车数量",
+    "expected_preserved_terms": ["榆林站", "昨日", "模拟版", "装车数量"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": ["实际版"]
+  },
+  {
+    "id": "current-customer-correction-overrides-history",
+    "category": "current_query_precedence",
+    "original_query": "不是华能集团，是大唐集团",
+    "conversation_context": [
+      {"role": "user", "content": "查询华能集团本季度煤炭合同结算金额"},
+      {"role": "assistant", "content": "已按客户华能集团查询"}
+    ],
+    "business_context": {
+      "intent": "BUSINESS_DATA_QUERY",
+      "entities": {"customer": "华能集团", "time_range": "本季度", "metric_name": "合同结算金额"}
+    },
+    "expected_standalone_query": "查询客户大唐集团本季度煤炭合同结算金额",
+    "expected_preserved_terms": ["大唐集团", "本季度", "煤炭合同", "结算金额"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": ["华能集团"]
+  },
+  {
+    "id": "current-time-correction-overrides-history",
+    "category": "current_query_precedence",
+    "original_query": "不是本月，查上月",
+    "conversation_context": [
+      {"role": "user", "content": "查询神东站本月装车列数"},
+      {"role": "assistant", "content": "已采用本月作为统计周期"}
+    ],
+    "business_context": {
+      "intent": "BUSINESS_DATA_QUERY",
+      "entities": {"departure_station": "神东站", "time_range": "本月", "metric_name": "装车列数"}
+    },
+    "expected_standalone_query": "查询神东站上月装车列数",
+    "expected_preserved_terms": ["神东站", "装车列数"],
+    "expected_required_term_groups": [["上月", "上个月"]],
+    "expected_excluded_terms": ["本月"]
+  },
+  {
+    "id": "preserve-absolute-date-range",
+    "category": "time_range_preservation",
+    "original_query": "查询2026年7月1日至7月15日榆林站运量",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询榆林站2026年7月1日至2026年7月15日的运量",
+    "expected_preserved_terms": ["2026", "7月1日", "7月15日", "榆林站", "运量"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": ["7月31日"]
+  },
+  {
+    "id": "preserve-relative-window-and-cutoff",
+    "category": "time_range_preservation",
+    "original_query": "统计截至昨日近三个月神木站的发运量",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "统计神木站截至昨日近三个月的发运量",
+    "expected_preserved_terms": ["昨日", "三个月", "神木站", "发运量"],
+    "expected_required_term_groups": [["截至昨日", "截止昨日"], ["近三个月", "最近三个月"]],
+    "expected_excluded_terms": ["今日", "本月"]
+  },
+  {
+    "id": "preserve-calorific-value-range",
+    "category": "numeric_range_preservation",
+    "original_query": "筛选发热量在5500至6000千卡之间的煤炭合同",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询发热量在5500至6000千卡之间的煤炭合同",
+    "expected_preserved_terms": ["5500", "6000", "千卡", "煤炭合同"],
+    "expected_required_term_groups": [["至", "到", "-"], ["之间", "范围"]],
+    "expected_excluded_terms": ["5000", "6500"]
+  },
+  {
+    "id": "preserve-percentage-inequalities",
+    "category": "numeric_range_preservation",
+    "original_query": "查完成率不低于90%但低于95%的运行计划",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询完成率大于等于90%且小于95%的运行计划",
+    "expected_preserved_terms": ["90%", "95%", "运行计划"],
+    "expected_required_term_groups": [["不低于", "大于等于", "至少", "≥"], ["低于", "小于", "<"]],
+    "expected_excluded_terms": ["高于95%", "不高于90%"]
+  },
+  {
+    "id": "preserve-not-arrived-negation",
+    "category": "negation_preservation",
+    "original_query": "查询未到达曹妃甸港的列车",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询尚未到达曹妃甸港的列车",
+    "expected_preserved_terms": ["曹妃甸港", "列车"],
+    "expected_required_term_groups": [["未到达", "尚未到达", "尚未抵达", "没有到达"]],
+    "expected_excluded_terms": ["已到达曹妃甸港"]
+  },
+  {
+    "id": "preserve-exclusion-negation",
+    "category": "negation_preservation",
+    "original_query": "统计本周运单，但不要包含已作废的",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "统计本周运单，排除已作废运单",
+    "expected_preserved_terms": ["本周", "运单", "已作废"],
+    "expected_required_term_groups": [["不要包含", "排除", "不包含"]],
+    "expected_excluded_terms": []
+  },
+  {
+    "id": "preserve-station-comparison",
+    "category": "comparison_preservation",
+    "original_query": "比较神木站和榆林站本月装车数量",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "比较神木站与榆林站本月装车数量",
+    "expected_preserved_terms": ["神木站", "榆林站", "本月", "装车数量"],
+    "expected_required_term_groups": [["比较", "对比"]],
+    "expected_excluded_terms": []
+  },
+  {
+    "id": "preserve-version-comparison",
+    "category": "comparison_preservation",
+    "original_query": "对比榆林站昨日实际版和模拟版装车列数",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "对比榆林站昨日实际版与模拟版装车列数",
+    "expected_preserved_terms": ["榆林站", "昨日", "实际版", "模拟版", "装车列数"],
+    "expected_required_term_groups": [["比较", "对比"]],
+    "expected_excluded_terms": []
+  },
+  {
+    "id": "preserve-customer-ownership",
+    "category": "ownership_preservation",
+    "original_query": "查询客户华能集团名下合同的结算状态",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询属于客户华能集团的合同结算状态",
+    "expected_preserved_terms": ["客户", "华能集团", "合同", "结算状态"],
+    "expected_required_term_groups": [["名下", "属于"]],
+    "expected_excluded_terms": ["供应商华能集团"]
+  },
+  {
+    "id": "preserve-supplier-ownership",
+    "category": "ownership_preservation",
+    "original_query": "查供应商陕煤集团负责的未结算合同",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询供应商陕煤集团的未结算合同",
+    "expected_preserved_terms": ["供应商", "陕煤集团", "合同"],
+    "expected_required_term_groups": [["未结算", "尚未结算"]],
+    "expected_excluded_terms": ["客户陕煤集团", "已结算合同"]
+  },
+  {
+    "id": "preserve-waybill-leading-zero-identifier",
+    "category": "identifier_integrity",
+    "original_query": "查运单YD-2026-0007现在到哪了",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询运单YD-2026-0007当前到达状态",
+    "expected_preserved_terms": ["运单", "YD-2026-0007"],
+    "expected_required_term_groups": [["当前到达状态", "当前位置", "到站状态"]],
+    "expected_excluded_terms": ["YD-2026-007", "YD20260007"]
+  },
+  {
+    "id": "preserve-contract-punctuation-identifier",
+    "category": "identifier_integrity",
+    "original_query": "查询合同HT-2026/07-001的履约进度",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询合同HT-2026/07-001的履约进度",
+    "expected_preserved_terms": ["合同", "HT-2026/07-001", "履约进度"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": ["HT-2026-07-001", "HT202607001"]
+  },
+  {
+    "id": "do-not-invent-station-or-time",
+    "category": "no_invention",
+    "original_query": "查询运单YD2026003当前状态",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询运单YD2026003当前状态",
+    "expected_preserved_terms": ["运单", "YD2026003", "当前状态"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": ["神木站", "榆林站", "曹妃甸港", "今日", "昨日"]
+  },
+  {
+    "id": "do-not-invent-policy-scope",
+    "category": "no_invention",
+    "original_query": "煤炭销售合同审批有哪些要求",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "煤炭销售合同审批有哪些要求",
+    "expected_preserved_terms": ["煤炭销售合同", "审批", "要求"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": ["华能集团", "实际版", "2026年", "神木站"]
+  },
+  {
+    "id": "normalize-freight-waybill-alias",
+    "category": "terminology_normalization",
+    "original_query": "查货运单YD2026002的状态",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询运单YD2026002的状态",
+    "expected_preserved_terms": ["运单", "YD2026002", "状态"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": ["货运单"]
+  },
+  {
+    "id": "normalize-loading-count-expression",
+    "category": "terminology_normalization",
+    "original_query": "今天神东站装了几列",
+    "conversation_context": [],
+    "business_context": {
+      "intent": "BUSINESS_DATA_QUERY",
+      "entities": {"departure_station": "神东站", "time_range": "今天", "metric_name": "装车列数"}
+    },
+    "expected_standalone_query": "查询神东站今天的装车列数",
+    "expected_preserved_terms": ["神东站", "今天"],
+    "expected_required_term_groups": [["装车列数", "装车列次"]],
+    "expected_excluded_terms": ["装了几列"]
+  },
+  {
+    "id": "remove-politeness-and-filler",
+    "category": "conversational_noise",
+    "original_query": "你好，麻烦帮我看一下运单YD2026001现在到哪儿了，谢谢",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询运单YD2026001当前到达状态",
+    "expected_preserved_terms": ["运单", "YD2026001"],
+    "expected_required_term_groups": [["当前到达状态", "当前位置", "到站状态"]],
+    "expected_excluded_terms": ["你好", "麻烦帮我", "谢谢"]
+  },
+  {
+    "id": "keep-well-formed-data-query-stable",
+    "category": "standalone_stability",
+    "original_query": "查询2026年7月神木站实际版装车数量",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询2026年7月神木站实际版装车数量",
+    "expected_preserved_terms": ["2026年7月", "神木站", "实际版", "装车数量"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": []
+  },
+  {
+    "id": "keep-document-policy-query-stable",
+    "category": "standalone_stability",
+    "original_query": "《调度规程》对超限货物列车编组有什么要求",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "《调度规程》对超限货物列车编组有什么要求",
+    "expected_preserved_terms": ["《调度规程》", "超限货物列车", "编组", "要求"],
+    "expected_required_term_groups": [],
+    "expected_excluded_terms": []
+  },
+  {
+    "id": "keep-compound-query-as-one-query",
+    "category": "single_query_boundary",
+    "original_query": "查询神木站和榆林站本月装车数量并比较完成率",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询并比较神木站与榆林站本月装车数量及完成率",
+    "expected_preserved_terms": ["神木站", "榆林站", "本月", "装车数量", "完成率"],
+    "expected_required_term_groups": [["比较", "对比"]],
+    "expected_excluded_terms": ["问题一", "问题二", "步骤一", "步骤二", "SELECT", "MATCH"]
+  },
+  {
+    "id": "keep-filter-and-aggregation-as-one-query",
+    "category": "single_query_boundary",
+    "original_query": "查询昨日未到达曹妃甸港的列车并按客户汇总",
+    "conversation_context": [],
+    "business_context": null,
+    "expected_standalone_query": "查询昨日未到达曹妃甸港的列车并按客户汇总",
+    "expected_preserved_terms": ["昨日", "曹妃甸港", "列车", "客户", "汇总"],
+    "expected_required_term_groups": [["未到达", "尚未到达", "尚未抵达"], ["按客户汇总", "按客户统计"]],
+    "expected_excluded_terms": ["问题一", "问题二", "步骤一", "步骤二", "SELECT", "MATCH"]
+  }
+]

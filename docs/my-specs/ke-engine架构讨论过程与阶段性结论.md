@@ -4,7 +4,7 @@
 > 文档性质：讨论纪要、思路复盘和阶段性结论，不是正式技术规格，也不是实施计划。  
 > 记录目的：保留本轮关于 LLMentor know-engine、DeerFlow 1.x、ke-engine 和后续 Agent 项目之间关系的完整思考过程，避免以后只记得结论，却忘记结论产生的背景、争议和边界。
 >
-> 阅读提示：第 1～15 节记录第一轮围绕 AUTO/DEEP 和固定 DeepSearch 子图的推演；第 16～27 节记录第二轮讨论形成的修正版结论；第 28～33 节记录第三轮围绕 Business Understanding 和铁路业务意图体系的探索；第 34 节记录第四轮纠偏后的当前实施基线。旧结论仍保留，用于说明方案为何发生变化。发生冲突时，以第 34 节为准。
+> 阅读提示：第 1～15 节记录第一轮围绕 AUTO/DEEP 和固定 DeepSearch 子图的推演；第 16～27 节记录第二轮讨论形成的修正版结论；第 28～33 节记录第三轮围绕 Business Understanding 和铁路业务意图体系的探索；第 34～35 节记录第四轮纠偏及其实施事实；第 36 节记录后续对实体职责和 RAG 服务边界的最新收敛。旧结论仍保留，用于说明方案为何发生变化。发生冲突时，以第 36 节和已生效的 OpenSpec 主规格为准。
 
 ## 1. 这次讨论究竟在解决什么问题
 
@@ -1643,3 +1643,52 @@ PostgreSQL saver 对 `BusinessRoute`、`BusinessIntent` 和 `BusinessUnderstandi
 ### 35.5 仍然延期的范围
 
 本轮没有实现业务 RAG、SQL Tool 或结构化查询执行，也没有生成业务事实答案。引用、证据校验、证据冲突处理、Grounded Answer 和更细粒度的运行计划/运输单据/分析/异常意图仍需后续 change 与独立测试证明；固定 boundary 文本不能被解释为业务回答能力已经完成。
+
+## 36. 第六轮后续收敛：实体职责与 RAG 服务边界
+
+> 更新时间：2026-07-24
+>
+> 本节覆盖前文关于“入口统一实体提取”“按 intent 维护实体 Schema”以及
+> “SQL Tool 由 Chat Workflow 独立管理”的阶段性结论。第 34～35 节仍用于说明
+> 已归档 change 的实现事实，但不再代表后续目标架构。
+
+### 36.1 Business Understanding 不再承担实体提取
+
+后续讨论已经确认从 Business Understanding 中删除全局实体识别职责，目标输出
+收敛为 `reasoning`、`route`、`intent` 和 `clarification_question`。入口只判断
+业务边界、主要意图和是否需要入口澄清，不再输出 `BusinessEntities`。
+
+同时不增加独立的全局实体识别节点，也不按每个 intent 维护一套入口实体 Schema。
+Agent 根据具体 Tool Schema 生成调用参数属于正常 Tool Calling；工具或领域服务
+负责参数类型、名称规范化、对象存在性、业务约束和数据权限校验。
+
+这是后续目标边界，不表示第 34～35 节记录的现有实体实现已经删除。实际移除需要
+独立 OpenSpec change，并允许清理不兼容的开发 checkpoint。
+
+### 36.2 结构化数据检索纳入 RAG MCP Service
+
+结构化业务数据同样属于企业知识。当前服务边界调整为：
+
+```text
+RAG MCP Service
+├── 文档 Hybrid Retrieval
+├── Text2SQL / SQL Retrieval
+└── 后续 Graph Retrieval
+```
+
+因此，Text2SQL/SQL 检索不再由 Chat Service 维护一套独立 SQL Tool。RAG 采用
+同一进程、两个 Endpoint：标准 Endpoint 暴露完整证据召回管线，专家 Endpoint
+暴露文档、SQL 和 Graph 原子 Tool；两者复用同一组 domain services 和运行资源。
+
+### 36.3 RAG 当前实施事实
+
+`add-rag-query-rewrite` 已完成 75/75 tasks 并通过 strict validation。当前只落地
+完整 RAG Graph 的第一个增量：
+
+```text
+START -> query_rewrite -> END
+```
+
+Query Rewrite 生成一条受约束的 `standalone_query`，失败时单次回退原问题。
+Query Router、Retriever、Rerank、EvidencePackage 和 MCP Endpoint 尚未实现，
+需要后续独立 change 继续推进。

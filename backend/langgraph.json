@@ -1,7 +1,8 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "chat": "./app/entrypoints/studio_graph.py:create_studio_graph"
+    "chat": "./app/entrypoints/studio_graph.py:create_studio_graph",
+    "rag": "./app/entrypoints/rag_studio.py:create_rag_studio_graph"
   },
   "env": ".env"
 }
