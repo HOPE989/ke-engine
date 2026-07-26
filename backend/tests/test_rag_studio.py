@@ -4,6 +4,7 @@ from types import SimpleNamespace
 def test_rag_studio_binds_model_callback_and_compiles(
     monkeypatch,
 ):
+    from app.domains.rag.graph.query_router import RetrieverKind
     from app.entrypoints import rag_studio as studio
 
     settings = SimpleNamespace(openai_model="gpt-test")
@@ -58,7 +59,13 @@ def test_rag_studio_binds_model_callback_and_compiles(
                 "callbacks": [handler],
             },
         ),
-        ("builder", {"model": assembled_model}),
+        (
+            "builder",
+            {
+                "model": assembled_model,
+                "available_retrievers": tuple(RetrieverKind),
+            },
+        ),
         ("compile", {}),
     ]
 

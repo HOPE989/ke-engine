@@ -20,6 +20,7 @@ from app.domains.rag.graph.query_rewrite.evaluation import (
 from app.domains.rag.graph.query_rewrite.prompt import (
     QUERY_REWRITE_PROMPT_VERSION,
 )
+from app.domains.rag.graph.query_router import RetrieverKind
 from app.infrastructure.langfuse import (
     LangfuseResources,
     create_langfuse_resources,
@@ -149,7 +150,10 @@ def run_experiment(
             model=settings.openai_model,
             callbacks=[active_resources.handler],
         )
-        graph = build_rag_graph(model=model).compile()
+        graph = build_rag_graph(
+            model=model,
+            available_retrievers=tuple(RetrieverKind),
+        ).compile()
         result = dataset.run_experiment(
             name="rag-query-rewrite-live-model",
             run_name=_default_run_name(),

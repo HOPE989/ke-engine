@@ -11,9 +11,9 @@
 
 ## 3. RAG Graph 集成
 
-- [ ] 3.1 扩展 `RagState` 保存可序列化 `retrieval_plan`，并更新 RAG domain/node 的公开导出
-- [ ] 3.2 更新 Builder 注入非空可路由能力并绑定 `query_router`，使拓扑精确为 `START -> query_rewrite -> query_router -> END`
-- [ ] 3.3 更新 Graph、Studio 和现有 Query Rewrite 测试，证明无 checkpointer、无动态 `goto`、请求隔离及 callback 透传行为保持成立
+- [x] 3.1 扩展 `RagState` 保存可序列化 `retrieval_plan`，并更新 RAG domain/node 的公开导出
+- [x] 3.2 更新 Builder 注入非空可路由能力并绑定 `query_router`，使拓扑精确为 `START -> query_rewrite -> query_router -> END`
+- [x] 3.3 更新 Graph、Studio 和现有 Query Rewrite 测试，证明无 checkpointer、无动态 `goto`、请求隔离及 callback 透传行为保持成立
 
 ## 4. 离线与真实模型评测
 

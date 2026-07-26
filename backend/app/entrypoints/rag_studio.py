@@ -4,6 +4,7 @@ from langchain_core.runnables import RunnableConfig
 
 from app.core.config import create_settings, validate_chat_startup_settings
 from app.domains.rag.graph import build_rag_graph
+from app.domains.rag.graph.query_router import RetrieverKind
 from app.infrastructure.langfuse import create_langfuse_resources
 from app.infrastructure.llm import create_chat_model
 
@@ -22,4 +23,7 @@ def create_rag_studio_graph(
         model=settings.openai_model,
         callbacks=callbacks,
     )
-    return build_rag_graph(model=model).compile()
+    return build_rag_graph(
+        model=model,
+        available_retrievers=tuple(RetrieverKind),
+    ).compile()

@@ -31,6 +31,7 @@ def test_rag_state_contains_serializable_rewrite_slice_and_can_expand():
         "conversation_context",
         "business_context",
         "standalone_query",
+        "retrieval_plan",
     }
     assert current_rewrite_fields <= set(RagState.__annotations__)
     assert "rewrite_status" not in RagState.__annotations__
@@ -42,6 +43,11 @@ def test_rag_state_contains_serializable_rewrite_slice_and_can_expand():
         "conversation_context": [],
         "business_context": None,
         "standalone_query": "查询运单 YD2026001",
+        "retrieval_plan": {
+            "selected_retrievers": ["SQL"],
+            "routing_reason": "需要结构化业务事实",
+            "decision_source": "MODEL",
+        },
     }
 
     assert json.loads(json.dumps(state, ensure_ascii=False)) == state
@@ -49,21 +55,29 @@ def test_rag_state_contains_serializable_rewrite_slice_and_can_expand():
 
 def test_rag_graph_starts_with_rewrite_node_no_retry_or_checkpointer():
     from app.domains.rag.graph import (
+        QUERY_ROUTER_NODE,
         QUERY_REWRITE_NODE,
         build_rag_graph,
     )
+    from app.domains.rag.graph.query_router import RetrieverKind
 
     model = RecordingStructuredModel(RecordingStructuredRunnable())
-    builder = build_rag_graph(model=model)
+    builder = build_rag_graph(
+        model=model,
+        available_retrievers=tuple(RetrieverKind),
+    )
     compiled = builder.compile()
 
     assert QUERY_REWRITE_NODE == "query_rewrite"
+    assert QUERY_ROUTER_NODE == "query_router"
     assert builder.context_schema is None
-    assert set(builder.nodes) == {"query_rewrite"}
+    assert set(builder.nodes) == {"query_rewrite", "query_router"}
     assert builder.nodes["query_rewrite"].retry_policy is None
+    assert builder.nodes["query_router"].retry_policy is None
     assert {(edge.source, edge.target) for edge in compiled.get_graph().edges} == {
         (START, "query_rewrite"),
-        ("query_rewrite", END),
+        ("query_rewrite", "query_router"),
+        ("query_router", END),
     }
     assert compiled.checkpointer is None
 
@@ -81,15 +95,28 @@ def test_rag_graph_does_not_define_runtime_dependency_context():
 async def test_assembled_rag_graph_keeps_requests_isolated_and_serializable():
     from app.domains.rag.graph import build_rag_graph
     from app.domains.rag.graph.query_rewrite import QueryRewriteResult
+    from app.domains.rag.graph.query_router import (
+        QueryRouteResult,
+        RetrieverKind,
+    )
 
     runnable = RecordingStructuredRunnable(
         [
             QueryRewriteResult(standalone_query="查询第一份运单"),
+            QueryRouteResult(
+                selected_retrievers=[RetrieverKind.SQL],
+                routing_reason="需要查询运单事实",
+            ),
             QueryRewriteResult(standalone_query="查询第二份合同"),
+            QueryRouteResult(
+                selected_retrievers=[RetrieverKind.DOCUMENT_HYBRID],
+                routing_reason="需要查询合同文档",
+            ),
         ]
     )
     graph = build_rag_graph(
-        model=RecordingStructuredModel(runnable)
+        model=RecordingStructuredModel(runnable),
+        available_retrievers=tuple(RetrieverKind),
     ).compile()
 
     first = await graph.ainvoke({"original_query": "第一份呢"})
@@ -99,37 +126,57 @@ async def test_assembled_rag_graph_keeps_requests_isolated_and_serializable():
     assert second["standalone_query"] == "查询第二份合同"
     assert first["original_query"] == "第一份呢"
     assert second["original_query"] == "第二份呢"
+    assert first["retrieval_plan"]["selected_retrievers"] == ["SQL"]
+    assert second["retrieval_plan"]["selected_retrievers"] == [
+        "DOCUMENT_HYBRID"
+    ]
     assert "warnings" not in second
 
 
 @pytest.mark.asyncio
 async def test_assembled_rag_graph_returns_fallback_state():
     from app.domains.rag.graph import build_rag_graph
+    from app.domains.rag.graph.query_router import RetrieverKind
 
     runnable = RecordingStructuredRunnable(error=RuntimeError("unavailable"))
     model = RecordingStructuredModel(runnable)
 
-    result = await build_rag_graph(model=model).compile().ainvoke(
+    result = await build_rag_graph(
+        model=model,
+        available_retrievers=tuple(RetrieverKind),
+    ).compile().ainvoke(
         {"original_query": "查询本月运量"}
     )
 
     assert result["standalone_query"] == "查询本月运量"
+    assert result["retrieval_plan"]["decision_source"] == "FALLBACK"
     assert "rewrite_failure_code" not in result
     assert "warnings" not in result
-    assert len(runnable.calls) == 1
+    assert len(runnable.calls) == 2
 
 
 @pytest.mark.asyncio
 async def test_assembled_rag_graph_passes_config_to_model_call():
     from app.domains.rag.graph import build_rag_graph
     from app.domains.rag.graph.query_rewrite import QueryRewriteResult
+    from app.domains.rag.graph.query_router import (
+        QueryRouteResult,
+        RetrieverKind,
+    )
 
     runnable = RecordingStructuredRunnable(
-        [QueryRewriteResult(standalone_query="查询本月运量")]
+        [
+            QueryRewriteResult(standalone_query="查询本月运量"),
+            QueryRouteResult(
+                selected_retrievers=[RetrieverKind.SQL],
+                routing_reason="需要业务统计",
+            ),
+        ]
     )
     handler = RecordingGraphCallback()
     graph = build_rag_graph(
-        model=RecordingStructuredModel(runnable)
+        model=RecordingStructuredModel(runnable),
+        available_retrievers=tuple(RetrieverKind),
     ).compile()
 
     await graph.ainvoke(
@@ -140,9 +187,10 @@ async def test_assembled_rag_graph_passes_config_to_model_call():
         },
     )
 
-    received_config = runnable.calls[0][1]
-    assert received_config["metadata"]["request_id"] == "request-graph-1"
-    assert "callbacks" in received_config
+    assert len(runnable.calls) == 2
+    for _, received_config in runnable.calls:
+        assert received_config["metadata"]["request_id"] == "request-graph-1"
+        assert "callbacks" in received_config
     assert any(
         isinstance(value, dict)
         and value.get("original_query") == "查本月运量"

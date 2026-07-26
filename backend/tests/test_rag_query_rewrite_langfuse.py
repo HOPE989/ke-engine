@@ -82,14 +82,27 @@ def test_langfuse_evaluator_only_reports_objective_output_contract():
 @pytest.mark.asyncio
 async def test_experiment_task_invokes_compiled_production_rag_graph():
     from app.domains.rag.graph import build_rag_graph
+    from app.domains.rag.graph.query_router import (
+        QueryRouteResult,
+        RetrieverKind,
+    )
     from app.evaluation.rag_query_rewrite import run_query_rewrite_case
 
     case = load_query_rewrite_evaluation_cases()[0]
     runnable = RecordingStructuredRunnable(
-        [QueryRewriteResult(standalone_query="查询神木站实际版装车计划")]
+        [
+            QueryRewriteResult(
+                standalone_query="查询神木站实际版装车计划"
+            ),
+            QueryRouteResult(
+                selected_retrievers=[RetrieverKind.SQL],
+                routing_reason="需要查询计划数据",
+            ),
+        ]
     )
     graph = build_rag_graph(
-        model=RecordingStructuredModel(runnable)
+        model=RecordingStructuredModel(runnable),
+        available_retrievers=tuple(RetrieverKind),
     ).compile()
     item = SimpleNamespace(
         input=case.request.model_dump(mode="json")
@@ -100,7 +113,7 @@ async def test_experiment_task_invokes_compiled_production_rag_graph():
     assert output == {
         "standalone_query": "查询神木站实际版装车计划"
     }
-    assert len(runnable.calls) == 1
+    assert len(runnable.calls) == 2
 
 
 class FakeExperimentResult:
@@ -204,7 +217,7 @@ def test_run_experiment_syncs_dataset_and_runs_serial_production_graph(
     monkeypatch.setattr(
         module,
         "build_rag_graph",
-        lambda *, model: graph_builder,
+        lambda *, model, available_retrievers: graph_builder,
     )
     settings = SimpleNamespace(
         openai_model="deepseek-test",

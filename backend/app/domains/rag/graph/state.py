@@ -10,3 +10,4 @@ class RagState(TypedDict, total=False):
     conversation_context: NotRequired[list[dict[str, str]]]
     business_context: NotRequired[dict[str, object] | None]
     standalone_query: NotRequired[str]
+    retrieval_plan: NotRequired[dict[str, object]]
