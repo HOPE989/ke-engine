@@ -17,9 +17,9 @@
 
 ## 4. 离线与真实模型评测
 
-- [ ] 4.1 新增仓库 Router fixture，覆盖三类单选、三种双选、三选、关键词反例和能力受限案例
-- [ ] 4.2 实现离线路由集合 evaluator，并用测试覆盖完全匹配、过度路由和遗漏路由
-- [ ] 4.3 新增显式 Langfuse Dataset/Experiment 入口及其离线测试，确保默认 pytest 不访问网络且真实评测调用生产 RAG Graph
+- [x] 4.1 新增仓库 Router fixture，覆盖三类单选、三种双选、三选、关键词反例和能力受限案例
+- [x] 4.2 实现离线路由集合 evaluator，并用测试覆盖完全匹配、过度路由和遗漏路由
+- [x] 4.3 新增显式 Langfuse Dataset/Experiment 入口及其离线测试，确保默认 pytest 不访问网络且真实评测调用生产 RAG Graph
 
 ## 5. 验证
 

@@ -1,0 +1,72 @@
+[
+  {
+    "id": "document-only",
+    "category": "single_document",
+    "standalone_query": "装车计划一般怎么编制？",
+    "available_retrievers": ["DOCUMENT_HYBRID", "SQL", "GRAPH"],
+    "expected_retrievers": ["DOCUMENT_HYBRID"]
+  },
+  {
+    "id": "sql-only",
+    "category": "single_sql",
+    "standalone_query": "今天神东站装了几列？",
+    "available_retrievers": ["DOCUMENT_HYBRID", "SQL", "GRAPH"],
+    "expected_retrievers": ["SQL"]
+  },
+  {
+    "id": "graph-only",
+    "category": "single_graph",
+    "standalone_query": "A站到B站有哪些运输路径？",
+    "available_retrievers": ["DOCUMENT_HYBRID", "SQL", "GRAPH"],
+    "expected_retrievers": ["GRAPH"]
+  },
+  {
+    "id": "document-sql",
+    "category": "multi_document_sql",
+    "standalone_query": "本月各客户发运量及其统计口径是什么？",
+    "available_retrievers": ["DOCUMENT_HYBRID", "SQL", "GRAPH"],
+    "expected_retrievers": ["DOCUMENT_HYBRID", "SQL"]
+  },
+  {
+    "id": "document-graph",
+    "category": "multi_document_graph",
+    "standalone_query": "A站与B站的运输关系及适用调度规则是什么？",
+    "available_retrievers": ["DOCUMENT_HYBRID", "SQL", "GRAPH"],
+    "expected_retrievers": ["DOCUMENT_HYBRID", "GRAPH"]
+  },
+  {
+    "id": "sql-graph",
+    "category": "multi_sql_graph",
+    "standalone_query": "A站到B站运输路径上本月煤炭运量是多少？",
+    "available_retrievers": ["DOCUMENT_HYBRID", "SQL", "GRAPH"],
+    "expected_retrievers": ["SQL", "GRAPH"]
+  },
+  {
+    "id": "all-retrievers",
+    "category": "multi_all",
+    "standalone_query": "查询A站到B站路径的本月运量及其适用调度规则",
+    "available_retrievers": ["DOCUMENT_HYBRID", "SQL", "GRAPH"],
+    "expected_retrievers": ["DOCUMENT_HYBRID", "SQL", "GRAPH"]
+  },
+  {
+    "id": "count-keyword-document",
+    "category": "keyword_counterexample",
+    "standalone_query": "规程规定装车上限是多少？",
+    "available_retrievers": ["DOCUMENT_HYBRID", "SQL", "GRAPH"],
+    "expected_retrievers": ["DOCUMENT_HYBRID"]
+  },
+  {
+    "id": "relation-keyword-document",
+    "category": "keyword_counterexample",
+    "standalone_query": "合同条款之间的关系应当怎么解释？",
+    "available_retrievers": ["DOCUMENT_HYBRID", "SQL", "GRAPH"],
+    "expected_retrievers": ["DOCUMENT_HYBRID"]
+  },
+  {
+    "id": "document-capability-restricted",
+    "category": "capability_restricted",
+    "standalone_query": "《调度规程》对超限货物列车编组有什么要求？",
+    "available_retrievers": ["DOCUMENT_HYBRID"],
+    "expected_retrievers": ["DOCUMENT_HYBRID"]
+  }
+]
