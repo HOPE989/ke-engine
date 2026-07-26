@@ -104,10 +104,9 @@ def test_query_route_result_rejects_invalid_output(payload):
         QueryRouteResult.model_validate(payload)
 
 
-def test_retrieval_plan_and_update_have_only_execution_contract_fields():
+def test_retrieval_plan_has_only_execution_contract_fields():
     import app.domains.rag.graph.query_router as query_router
     from app.domains.rag.graph.query_router import (
-        QueryRouterUpdate,
         RetrievalPlan,
         RoutingDecisionSource,
         RetrieverKind,
@@ -124,7 +123,6 @@ def test_retrieval_plan_and_update_have_only_execution_contract_fields():
         "routing_reason": "需要查询已建模的运输路径",
         "decision_source": "MODEL",
     }
-    assert set(QueryRouterUpdate.__annotations__) == {"retrieval_plan"}
     assert issubclass(query_router.QueryRouterUnavailable, Exception)
     for field in ["confidence", "sql", "cypher", "queries"]:
         assert field not in RetrievalPlan.model_fields
@@ -135,7 +133,6 @@ def test_query_router_contracts_are_exported_from_package():
         QueryRouteResult,
         QueryRouterInput,
         QueryRouterUnavailable,
-        QueryRouterUpdate,
         RetrievalPlan,
         RetrieverKind,
         RoutingDecisionSource,
@@ -147,7 +144,6 @@ def test_query_router_contracts_are_exported_from_package():
             QueryRouteResult,
             QueryRouterInput,
             QueryRouterUnavailable,
-            QueryRouterUpdate,
             RetrievalPlan,
             RetrieverKind,
             RoutingDecisionSource,

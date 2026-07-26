@@ -1,6 +1,7 @@
 """文档检索在 LangGraph state 中使用的可序列化契约。"""
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -59,7 +60,7 @@ class DocumentRetrievalOptions(BaseModel):
 
     result_limit: int = Field(default=10, ge=1)
     rank_window_size: int = Field(default=50, ge=1)
-    rank_constant: int = Field(default=60, frozen=True)
+    rank_constant: Literal[60] = 60
     timeout_seconds: float = Field(default=10, gt=0)
 
     @model_validator(mode="after")

@@ -25,9 +25,9 @@
 
 ## 4. 纵向验证
 
-- [ ] 4.1 添加默认离线纵向测试，覆盖 `query_rewrite -> query_router -> document_hybrid -> collect_retrieval_outcomes`
-- [ ] 4.2 添加脱敏诊断测试，只记录请求耗时与结果数，不暴露连接信息、原始异常或未授权 metadata
-- [ ] 4.3 添加显式 Elasticsearch 集成测试，覆盖 BM25/KNN Hybrid、ACL/docId filters、原生 RRF、空结果、mapping 及目标集群能力，并确保默认测试不隐式运行
-- [ ] 4.4 运行相关格式化、类型检查和默认离线测试，修复所有回归
+- [x] 4.1 添加默认离线纵向测试，覆盖 `query_rewrite -> query_router -> document_hybrid -> collect_retrieval_outcomes`
+- [x] 4.2 添加脱敏诊断测试，只记录请求耗时与结果数，不暴露连接信息、原始异常或未授权 metadata
+- [x] 4.3 添加显式 Elasticsearch 集成测试，覆盖 BM25/KNN Hybrid、ACL/docId filters、原生 RRF、空结果、mapping 及目标集群能力，并确保默认测试不隐式运行
+- [x] 4.4 运行相关格式化、类型检查和默认离线测试，修复所有回归
 - [ ] 4.5 运行显式 Elasticsearch 集成测试，并记录 Elasticsearch 版本/许可证与索引重建或 reindex 前置条件
-- [ ] 4.6 运行 `openspec validate add-rag-hybrid-document-retrieval --type change --strict` 并确认 Change 全部 artifact 完成
+- [x] 4.6 运行 `openspec validate add-rag-hybrid-document-retrieval --type change --strict` 并确认 Change 全部 artifact 完成

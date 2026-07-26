@@ -1,5 +1,4 @@
 from enum import StrEnum
-from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -44,10 +43,6 @@ class RetrievalPlan(BaseModel):
     )
     routing_reason: str = Field(min_length=1, pattern=r"\S")
     decision_source: RoutingDecisionSource
-
-
-class QueryRouterUpdate(TypedDict):
-    retrieval_plan: dict[str, object]
 
 
 class QueryRouterUnavailable(Exception):

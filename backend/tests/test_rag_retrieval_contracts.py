@@ -95,6 +95,8 @@ def test_retrieval_options_are_immutable_and_require_valid_budgets():
             rank_window_size=10,
             timeout_seconds=8,
         )
+    with pytest.raises(ValidationError):
+        DocumentRetrievalOptions(rank_constant=59)
 
 
 def test_retrieval_outcome_reducer_merges_distinct_ids_deterministically():

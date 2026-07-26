@@ -166,6 +166,7 @@ def ensure_vector_index(
         .get("mappings", {})
         .get("properties", {})
     )
+    _require_mapping_type(properties, VECTOR_FIELD, "dense_vector")
     dimensions = properties.get(VECTOR_FIELD, {}).get("dims")
     if dimensions != embedding_dimensions:
         raise VectorIndexDimensionMismatch()

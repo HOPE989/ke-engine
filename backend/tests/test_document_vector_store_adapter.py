@@ -337,6 +337,7 @@ def test_ensure_vector_index_accepts_compatible_retrieval_mapping():
     ("field_path", "field_mapping"),
     [
         ("text", {"type": "keyword"}),
+        ("vector", {"type": "keyword", "dims": 1536}),
         ("metadata.docId", {"type": "text"}),
         ("metadata.chunkId", None),
         ("metadata.accessibleBy", {"type": "text"}),
@@ -360,8 +361,8 @@ def test_ensure_vector_index_rejects_incompatible_retrieval_mapping(
             },
         },
     }
-    if field_path == "text":
-        properties["text"] = field_mapping
+    if field_path in {"text", "vector"}:
+        properties[field_path] = field_mapping
     else:
         metadata_field = field_path.split(".", maxsplit=1)[1]
         if field_mapping is None:
