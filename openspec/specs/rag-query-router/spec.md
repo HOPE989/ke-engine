@@ -5,21 +5,22 @@ Define the capability-scoped Query Router that converts one standalone RAG query
 ## Requirements
 
 ### Requirement: Query Router has an explicit capability-scoped input
-The system SHALL route one non-blank `standalone_query` only among a non-empty set of Retriever capabilities supplied during RAG Graph assembly.
+The system SHALL route one non-blank `standalone_query` only among the non-empty set of Retriever capabilities backed by nodes registered during RAG Graph assembly.
 
 #### Scenario: Standalone query is routed
 - **WHEN** Query Router is invoked after Query Rewrite
 - **THEN** it SHALL use the resulting `standalone_query` as the information need
 - **AND** it MUST NOT load conversation history, Chat persistence, checkpoints, Redis, or another caller-owned memory store
 
-#### Scenario: Available capabilities are explicit
+#### Scenario: Available capabilities come from registered nodes
 - **WHEN** the RAG Graph is assembled
-- **THEN** the Builder SHALL bind a non-empty set of available `RetrieverKind` values to Query Router
+- **THEN** the Builder SHALL derive available `RetrieverKind` values from actual registered Retriever nodes
+- **AND** it MUST NOT advertise a Retriever that has no executable node
 - **AND** importing the RAG domain MUST NOT discover data sources or read process settings
 
 #### Scenario: No capability is available
-- **WHEN** the supplied available capability set is empty
-- **THEN** the system SHALL fail before invoking the Router model
+- **WHEN** no Retriever node is registered
+- **THEN** the system SHALL fail during Graph assembly before invoking the Router model
 
 ### Requirement: Query Router selects the minimum sufficient evidence sources
 The system SHALL select one or more values from `DOCUMENT_HYBRID`, `SQL`, and `GRAPH` according to the evidence sources required to answer the standalone query.
@@ -104,17 +105,23 @@ The system SHALL perform no Router retry and SHALL use `DOCUMENT_HYBRID` as the 
 - **THEN** Query Router MUST NOT convert cancellation into a successful fallback plan
 
 ### Requirement: Query Router extends the request-scoped RAG Graph
-The system SHALL extend the pipeline-level RAG Graph to the incremental topology `START -> query_rewrite -> query_router -> END`.
+The system SHALL use the retrieval plan to transfer control to registered Retriever nodes in the request-scoped RAG Graph.
 
-#### Scenario: Incremental Router topology is compiled
+#### Scenario: Incremental document retrieval topology is compiled
 - **WHEN** the RAG Graph Builder is inspected for this change
-- **THEN** it SHALL contain exactly the `query_rewrite` and `query_router` business nodes
-- **AND** it SHALL connect them using only the fixed edges in the incremental topology
+- **THEN** it SHALL contain `query_rewrite`, `query_router`, `document_hybrid`, and `collect_retrieval_outcomes`
+- **AND** it SHALL connect selected `DOCUMENT_HYBRID` plans to `document_hybrid`
+- **AND** it SHALL end after `collect_retrieval_outcomes`
 
-#### Scenario: Router only updates state
-- **WHEN** Query Router completes in this change
-- **THEN** it SHALL add the `retrieval_plan` to `RagState`
-- **AND** it MUST NOT execute a Retriever or return a dynamic `goto`
+#### Scenario: Router atomically updates and routes
+- **WHEN** Query Router produces a valid plan
+- **THEN** it SHALL update `retrieval_plan` and transfer control to every selected registered Retriever in one LangGraph routing result
+- **AND** it MUST NOT route to `END` while a selected Retriever remains unexecuted
+
+#### Scenario: Unimplemented Retriever nodes are absent
+- **WHEN** only `DOCUMENT_HYBRID` is implemented
+- **THEN** the production Graph SHALL advertise and register only `DOCUMENT_HYBRID`
+- **AND** it MUST NOT register SQL or Graph placeholder nodes
 
 #### Scenario: Graph remains request scoped and serializable
 - **WHEN** the RAG Graph is compiled and invoked
