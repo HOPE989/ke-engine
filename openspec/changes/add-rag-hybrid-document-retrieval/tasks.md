@@ -1,9 +1,9 @@
 ## 1. 检索契约与索引约束
 
-- [ ] 1.1 先编写离线单元测试，覆盖请求级 scope、Candidate、`RetrievalOutcome`、不可变检索选项及按 Retriever ID 合并的 reducer
-- [ ] 1.2 实现可序列化的文档检索契约与 reducer，并拒绝缺失访问范围及重复 Retriever outcome
-- [ ] 1.3 先补充 Elasticsearch mapping 测试，覆盖 `text`、`vector`、`metadata.docId`、`metadata.chunkId`、`metadata.accessibleBy` 及不兼容 mapping
-- [ ] 1.4 更新 Elasticsearch 索引创建与兼容性校验，确保不兼容或缺少访问过滤字段时 fail closed
+- [x] 1.1 先编写离线单元测试，覆盖请求级 scope、Candidate、`RetrievalOutcome`、不可变检索选项及按 Retriever ID 合并的 reducer
+- [x] 1.2 实现可序列化的文档检索契约与 reducer，并拒绝缺失访问范围及重复 Retriever outcome
+- [x] 1.3 先补充 Elasticsearch mapping 测试，覆盖 `text`、`vector`、`metadata.docId`、`metadata.chunkId`、`metadata.accessibleBy` 及不兼容 mapping
+- [x] 1.4 更新 Elasticsearch 索引创建与兼容性校验，确保不兼容或缺少访问过滤字段时 fail closed
 
 ## 2. LangChain Elasticsearch Hybrid Retriever
 

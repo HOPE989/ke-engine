@@ -254,7 +254,14 @@ def test_ensure_vector_index_creates_mapping_with_configured_dimensions():
                 "properties": {
                     "text": {"type": "text"},
                     "vector": {"type": "dense_vector", "dims": 1536},
-                    "metadata": {"type": "object", "enabled": True},
+                    "metadata": {
+                        "type": "object",
+                        "properties": {
+                            "docId": {"type": "keyword"},
+                            "chunkId": {"type": "keyword"},
+                            "accessibleBy": {"type": "keyword"},
+                        },
+                    },
                 }
             },
         }
@@ -284,6 +291,99 @@ def test_ensure_vector_index_rejects_dimension_mismatch():
     with pytest.raises(vector_store.VectorIndexDimensionMismatch):
         vector_store.ensure_vector_index(
             client,
+            index_name="custom-vector-index",
+            embedding_dimensions=1536,
+        )
+
+
+def test_ensure_vector_index_accepts_compatible_retrieval_mapping():
+    from app.infrastructure import elasticsearch as vector_store
+
+    class FakeIndices:
+        def exists(self, *, index):
+            return True
+
+        def get_mapping(self, *, index):
+            return {
+                index: {
+                    "mappings": {
+                        "properties": {
+                            "text": {"type": "text"},
+                            "vector": {
+                                "type": "dense_vector",
+                                "dims": 1536,
+                            },
+                            "metadata": {
+                                "type": "object",
+                                "properties": {
+                                    "docId": {"type": "keyword"},
+                                    "chunkId": {"type": "keyword"},
+                                    "accessibleBy": {"type": "keyword"},
+                                },
+                            },
+                        }
+                    }
+                }
+            }
+
+    vector_store.ensure_vector_index(
+        SimpleNamespace(indices=FakeIndices()),
+        index_name="custom-vector-index",
+        embedding_dimensions=1536,
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_path", "field_mapping"),
+    [
+        ("text", {"type": "keyword"}),
+        ("metadata.docId", {"type": "text"}),
+        ("metadata.chunkId", None),
+        ("metadata.accessibleBy", {"type": "text"}),
+    ],
+)
+def test_ensure_vector_index_rejects_incompatible_retrieval_mapping(
+    field_path,
+    field_mapping,
+):
+    from app.infrastructure import elasticsearch as vector_store
+
+    properties = {
+        "text": {"type": "text"},
+        "vector": {"type": "dense_vector", "dims": 1536},
+        "metadata": {
+            "type": "object",
+            "properties": {
+                "docId": {"type": "keyword"},
+                "chunkId": {"type": "keyword"},
+                "accessibleBy": {"type": "keyword"},
+            },
+        },
+    }
+    if field_path == "text":
+        properties["text"] = field_mapping
+    else:
+        metadata_field = field_path.split(".", maxsplit=1)[1]
+        if field_mapping is None:
+            del properties["metadata"]["properties"][metadata_field]
+        else:
+            properties["metadata"]["properties"][metadata_field] = (
+                field_mapping
+            )
+
+    class FakeIndices:
+        def exists(self, *, index):
+            return True
+
+        def get_mapping(self, *, index):
+            return {index: {"mappings": {"properties": properties}}}
+
+    with pytest.raises(
+        vector_store.VectorIndexMappingMismatch,
+        match=field_path,
+    ):
+        vector_store.ensure_vector_index(
+            SimpleNamespace(indices=FakeIndices()),
             index_name="custom-vector-index",
             embedding_dimensions=1536,
         )

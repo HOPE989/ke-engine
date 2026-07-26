@@ -25,6 +25,16 @@ class VectorIndexDimensionMismatch(Exception):
     """现有 Elasticsearch 向量索引维度与配置的 embedding 维度不一致。"""
 
 
+class VectorIndexMappingMismatch(Exception):
+    """现有 Elasticsearch 索引不能安全支持文档混合检索。"""
+
+    def __init__(self, field_path: str) -> None:
+        self.field_path = field_path
+        super().__init__(
+            f"incompatible Elasticsearch mapping: {field_path}"
+        )
+
+
 def create_elasticsearch_store(
     *,
     settings: Any,
@@ -57,22 +67,40 @@ def ensure_vector_index(
                 "properties": {
                     TEXT_FIELD: {"type": "text"},
                     VECTOR_FIELD: {"type": "dense_vector", "dims": embedding_dimensions},
-                    "metadata": {"type": "object", "enabled": True},
+                    "metadata": {
+                        "type": "object",
+                        "properties": {
+                            "docId": {"type": "keyword"},
+                            "chunkId": {"type": "keyword"},
+                            "accessibleBy": {"type": "keyword"},
+                        },
+                    },
                 }
             },
         )
         return
 
     mapping = client.indices.get_mapping(index=index_name)
-    dimensions = (
+    properties = (
         mapping.get(index_name, {})
         .get("mappings", {})
         .get("properties", {})
-        .get(VECTOR_FIELD, {})
-        .get("dims")
     )
+    dimensions = properties.get(VECTOR_FIELD, {}).get("dims")
     if dimensions != embedding_dimensions:
         raise VectorIndexDimensionMismatch()
+    _require_mapping_type(properties, TEXT_FIELD, "text")
+    metadata = properties.get("metadata", {})
+    if metadata.get("type") != "object":
+        raise VectorIndexMappingMismatch("metadata")
+    metadata_properties = metadata.get("properties", {})
+    for field_name in ("docId", "chunkId", "accessibleBy"):
+        _require_mapping_type(
+            metadata_properties,
+            field_name,
+            "keyword",
+            path_prefix="metadata.",
+        )
 
 
 class ElasticsearchVectorStoreAdapter:
@@ -136,6 +164,17 @@ def _segment_metadata(segment: Any) -> dict[str, Any]:
     if metadata is None:
         metadata = getattr(segment, "metadata", {})
     return dict(metadata)
+
+
+def _require_mapping_type(
+    properties: dict[str, Any],
+    field_name: str,
+    expected_type: str,
+    *,
+    path_prefix: str = "",
+) -> None:
+    if properties.get(field_name, {}).get("type") != expected_type:
+        raise VectorIndexMappingMismatch(f"{path_prefix}{field_name}")
 
 
 def _is_index_not_found_error(exc: NotFoundError) -> bool:
