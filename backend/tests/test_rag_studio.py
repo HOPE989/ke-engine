@@ -77,7 +77,7 @@ def test_rag_studio_assembles_model_hybrid_store_and_registered_node(
     )
     monkeypatch.setattr(
         studio,
-        "create_hybrid_elasticsearch_store",
+        "create_document_retrieval_store",
         lambda **kwargs: calls.append(("store", kwargs)) or store,
     )
     monkeypatch.setattr(
@@ -110,13 +110,17 @@ def test_rag_studio_assembles_model_hybrid_store_and_registered_node(
         {
             "settings": settings,
             "embedding_model": embedding_model,
-            "options": options,
             "client": client,
         },
     ) in calls
     assert (
         "factory",
-        {"store": store, "options": options},
+        {
+            "client": client,
+            "store": store,
+            "index_name": "rag-documents",
+            "options": options,
+        },
     ) in calls
     assert (
         "builder",
@@ -127,6 +131,8 @@ def test_rag_studio_assembles_model_hybrid_store_and_registered_node(
         },
     ) in calls
     assert calls[-1] == ("compile", {})
+
+
 def test_rag_studio_runs_without_langfuse(monkeypatch):
     from app.entrypoints import rag_studio as studio
 
@@ -168,7 +174,7 @@ def test_rag_studio_runs_without_langfuse(monkeypatch):
     monkeypatch.setattr(studio, "ensure_vector_index", lambda *a, **k: None)
     monkeypatch.setattr(
         studio,
-        "create_hybrid_elasticsearch_store",
+        "create_document_retrieval_store",
         lambda **kwargs: object(),
     )
     monkeypatch.setattr(

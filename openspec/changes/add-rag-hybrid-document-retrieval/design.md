@@ -136,6 +136,11 @@ Builder 从实际注册的 Retriever 节点生成 Router 能力集合。当前�
 4. 集成测试通过后启用新的 RAG Studio Graph。
 5. 回滚时恢复旧 Graph Builder；保留新增 mapping 不影响旧向量写入。
 
+验证基线（2026-07-26）：Elasticsearch `8.15.3`、active Basic
+License，显式集成测试通过。已有索引若缺少 `text`、`vector` 或
+`metadata.docId`、`metadata.chunkId`、`metadata.accessibleBy` 的兼容
+mapping，部署前必须重建或 reindex，不能绕过 mapping 校验。
+
 ## Open Questions
 
 无。Analyzer、Document Rerank、EvidencePackage 和跨 Retriever fallback 在后续 change 中决策。

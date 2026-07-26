@@ -82,17 +82,18 @@ def test_retrieval_options_are_immutable_and_require_valid_budgets():
 
     options = DocumentRetrievalOptions(
         result_limit=10,
-        rank_window_size=50,
+        candidate_limit=50,
         timeout_seconds=8,
     )
 
     assert options.rank_constant == 60
+    assert options.candidate_limit == 50
     with pytest.raises(ValidationError):
         options.result_limit = 20
     with pytest.raises(ValidationError):
         DocumentRetrievalOptions(
             result_limit=20,
-            rank_window_size=10,
+            candidate_limit=10,
             timeout_seconds=8,
         )
     with pytest.raises(ValidationError):

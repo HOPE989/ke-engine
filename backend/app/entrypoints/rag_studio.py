@@ -7,8 +7,8 @@ from app.domains.rag.graph import build_rag_graph
 from app.domains.rag.graph.retrieval import DocumentRetrievalOptions
 from app.infrastructure.elasticsearch import (
     DocumentHybridRetrieverFactory,
+    create_document_retrieval_store,
     create_elasticsearch_client,
-    create_hybrid_elasticsearch_store,
     ensure_vector_index,
 )
 from app.infrastructure.langfuse import create_langfuse_resources
@@ -40,14 +40,15 @@ def create_rag_studio_graph(
         embedding_dimensions=settings.embedding_dimensions,
     )
     options = DocumentRetrievalOptions()
-    store = create_hybrid_elasticsearch_store(
+    store = create_document_retrieval_store(
         settings=settings,
         embedding_model=embedding_model,
-        options=options,
         client=client,
     )
     retriever_factory = DocumentHybridRetrieverFactory(
+        client=client,
         store=store,
+        index_name=settings.elasticsearch_index,
         options=options,
     )
     return build_rag_graph(

@@ -314,7 +314,6 @@ def test_ensure_vector_index_accepts_compatible_retrieval_mapping():
                                 "dims": 1536,
                             },
                             "metadata": {
-                                "type": "object",
                                 "properties": {
                                     "docId": {"type": "keyword"},
                                     "chunkId": {"type": "keyword"},

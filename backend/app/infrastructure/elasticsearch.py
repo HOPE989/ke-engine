@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 from elasticsearch import Elasticsearch, NotFoundError
 from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
 from langchain_elasticsearch import DenseVectorStrategy, ElasticsearchStore
+from pydantic import ConfigDict, Field
 
 from app.domains.rag.graph.retrieval import (
     DocumentRetrievalOptions,
@@ -64,14 +67,13 @@ def create_elasticsearch_store(
     )
 
 
-def create_hybrid_elasticsearch_store(
+def create_document_retrieval_store(
     *,
     settings: Any,
     embedding_model: Any,
-    options: DocumentRetrievalOptions,
     client: Any | None = None,
 ) -> ElasticsearchStore:
-    """创建复用原生 BM25/KNN/RRF 的 LangChain ElasticsearchStore。"""
+    """创建仅负责 KNN 的 LangChain ElasticsearchStore。"""
 
     connection = (
         {"client": client}
@@ -84,14 +86,7 @@ def create_hybrid_elasticsearch_store(
         query_field=TEXT_FIELD,
         vector_query_field=VECTOR_FIELD,
         num_dimensions=settings.embedding_dimensions,
-        strategy=DenseVectorStrategy(
-            hybrid=True,
-            rrf={
-                "rank_constant": options.rank_constant,
-                "rank_window_size": options.rank_window_size,
-            },
-            text_field=TEXT_FIELD,
-        ),
+        strategy=DenseVectorStrategy(hybrid=False),
         **connection,
     )
 
@@ -115,20 +110,157 @@ def build_document_retrieval_filters(
     return filters
 
 
-@dataclass(frozen=True, slots=True)
-class DocumentHybridRetrieverFactory:
-    """从共享 Store 创建绑定单次请求授权范围的 Retriever。"""
+def reciprocal_rank_fusion(
+    ranked_documents: Sequence[Sequence[Document]],
+    *,
+    rank_constant: int,
+    result_limit: int,
+) -> list[Document]:
+    """按稳定 chunkId 对多个排序列表执行确定性 RRF。"""
 
-    store: Any
+    if rank_constant < 1:
+        raise ValueError("rank_constant must be positive")
+    if result_limit < 1:
+        raise ValueError("result_limit must be positive")
+
+    scores: dict[str, float] = {}
+    documents: dict[str, Document] = {}
+    for ranking in ranked_documents:
+        seen: set[str] = set()
+        for rank, document in enumerate(ranking, start=1):
+            chunk_id = _document_chunk_id(document)
+            if chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            documents.setdefault(chunk_id, document)
+            scores[chunk_id] = (
+                scores.get(chunk_id, 0.0)
+                + 1.0 / (rank_constant + rank)
+            )
+
+    ordered_chunk_ids = sorted(
+        scores,
+        key=lambda chunk_id: (-scores[chunk_id], chunk_id),
+    )
+    return [
+        documents[chunk_id]
+        for chunk_id in ordered_chunk_ids[:result_limit]
+    ]
+
+
+class ElasticsearchHybridRetriever(BaseRetriever):
+    """并行执行 Elasticsearch BM25/KNN 并在应用层 RRF。"""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        frozen=True,
+    )
+
+    client: Any = Field(exclude=True, repr=False)
+    store: Any = Field(exclude=True, repr=False)
+    index_name: str
+    scope: DocumentRetrievalScope
     options: DocumentRetrievalOptions
 
-    def create(self, scope: DocumentRetrievalScope) -> Any:
-        return self.store.as_retriever(
-            search_kwargs={
-                "k": self.options.result_limit,
-                "fetch_k": self.options.rank_window_size,
-                "filter": build_document_retrieval_filters(scope),
-            }
+    def _get_relevant_documents(
+        self,
+        query: str,
+        *,
+        run_manager: Any,
+    ) -> list[Document]:
+        del run_manager
+        full_text_documents = self._full_text_search(query)
+        vector_documents = self._vector_search(query)
+        return self._fuse(full_text_documents, vector_documents)
+
+    async def _aget_relevant_documents(
+        self,
+        query: str,
+        *,
+        run_manager: Any,
+    ) -> list[Document]:
+        del run_manager
+        full_text_documents, vector_documents = await asyncio.gather(
+            asyncio.to_thread(self._full_text_search, query),
+            self._avector_search(query),
+        )
+        return self._fuse(full_text_documents, vector_documents)
+
+    def _full_text_search(self, query: str) -> list[Document]:
+        filters = build_document_retrieval_filters(self.scope)
+        response = self.client.search(
+            index=self.index_name,
+            size=self.options.candidate_limit,
+            query={
+                "bool": {
+                    "must": [
+                        {
+                            "match": {
+                                TEXT_FIELD: {
+                                    "query": query,
+                                }
+                            }
+                        }
+                    ],
+                    "filter": filters,
+                }
+            },
+        )
+        return [
+            _document_from_hit(hit)
+            for hit in response["hits"]["hits"]
+        ]
+
+    def _vector_search(self, query: str) -> list[Document]:
+        return self.store.similarity_search(
+            query,
+            **self._vector_search_kwargs(),
+        )
+
+    async def _avector_search(self, query: str) -> list[Document]:
+        return await self.store.asimilarity_search(
+            query,
+            **self._vector_search_kwargs(),
+        )
+
+    def _vector_search_kwargs(self) -> dict[str, Any]:
+        return {
+            "k": self.options.candidate_limit,
+            "fetch_k": self.options.candidate_limit,
+            "filter": build_document_retrieval_filters(self.scope),
+        }
+
+    def _fuse(
+        self,
+        full_text_documents: Sequence[Document],
+        vector_documents: Sequence[Document],
+    ) -> list[Document]:
+        return reciprocal_rank_fusion(
+            [full_text_documents, vector_documents],
+            rank_constant=self.options.rank_constant,
+            result_limit=self.options.result_limit,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentHybridRetrieverFactory:
+    """创建绑定单次请求授权范围的自定义 Hybrid Retriever。"""
+
+    client: Any
+    store: Any
+    index_name: str
+    options: DocumentRetrievalOptions
+
+    def create(
+        self,
+        scope: DocumentRetrievalScope,
+    ) -> ElasticsearchHybridRetriever:
+        return ElasticsearchHybridRetriever(
+            client=self.client,
+            store=self.store,
+            index_name=self.index_name,
+            scope=scope,
+            options=self.options,
         )
 
 
@@ -172,9 +304,13 @@ def ensure_vector_index(
         raise VectorIndexDimensionMismatch()
     _require_mapping_type(properties, TEXT_FIELD, "text")
     metadata = properties.get("metadata", {})
-    if metadata.get("type") != "object":
+    metadata_type = metadata.get("type")
+    metadata_properties = metadata.get("properties")
+    if (
+        metadata_type not in (None, "object")
+        or not isinstance(metadata_properties, dict)
+    ):
         raise VectorIndexMappingMismatch("metadata")
-    metadata_properties = metadata.get("properties", {})
     for field_name in ("docId", "chunkId", "accessibleBy"):
         _require_mapping_type(
             metadata_properties,
@@ -245,6 +381,29 @@ def _segment_metadata(segment: Any) -> dict[str, Any]:
     if metadata is None:
         metadata = getattr(segment, "metadata", {})
     return dict(metadata)
+
+
+def _document_chunk_id(document: Document) -> str:
+    chunk_id = document.metadata.get("chunkId")
+    if not isinstance(chunk_id, str) or not chunk_id.strip():
+        raise ValueError("retrieved document missing chunkId")
+    return chunk_id.strip()
+
+
+def _document_from_hit(hit: dict[str, Any]) -> Document:
+    source = hit.get("_source")
+    if not isinstance(source, dict):
+        raise ValueError("Elasticsearch hit missing _source")
+    text = source.get(TEXT_FIELD)
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Elasticsearch hit missing text")
+    metadata = source.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError("Elasticsearch hit missing metadata")
+    return Document(
+        page_content=text,
+        metadata=dict(metadata),
+    )
 
 
 def _require_mapping_type(
