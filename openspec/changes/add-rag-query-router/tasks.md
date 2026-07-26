@@ -23,5 +23,5 @@
 
 ## 5. 验证
 
-- [ ] 5.1 运行 Query Router 与 RAG Graph 聚焦测试，并修复全部回归
-- [ ] 5.2 运行 backend 全量非集成测试和 OpenSpec strict validation，记录验证结果
+- [x] 5.1 运行 Query Router 与 RAG Graph 聚焦测试，并修复全部回归（80 passed）
+- [x] 5.2 运行 backend 全量非集成测试和 OpenSpec strict validation，记录验证结果（697 passed、3 skipped、6 deselected；strict validation passed）
