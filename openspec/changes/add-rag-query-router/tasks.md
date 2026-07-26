@@ -1,7 +1,7 @@
 ## 1. Router 契约与 Prompt
 
-- [ ] 1.1 先新增 `RetrieverKind`、`QueryRouterInput`、`QueryRouteResult`、`RetrievalPlan` 和 update/error 契约测试，再实现严格 Pydantic 模型与公开导出
-- [ ] 1.2 先新增能力边界、最小充分多选、反关键词误判和输出禁令的 Prompt 测试，再实现版本化 Query Router Prompt
+- [x] 1.1 先新增 `RetrieverKind`、`QueryRouterInput`、`QueryRouteResult`、`RetrievalPlan` 和 update/error 契约测试，再实现严格 Pydantic 模型与公开导出
+- [x] 1.2 先新增能力边界、最小充分多选、反关键词误判和输出禁令的 Prompt 测试，再实现版本化 Query Router Prompt
 
 ## 2. Router 节点
 
