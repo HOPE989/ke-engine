@@ -4,7 +4,7 @@ Query Router 已能产出 `DOCUMENT_HYBRID` 计划，但 RAG Graph 尚未执行�
 
 ## What Changes
 
-- 新增 `DOCUMENT_HYBRID` Retriever，同时并行执行 Dense 与 BM25 文档检索。
+- 新增继承 LangChain `BaseRetriever` 的 `DOCUMENT_HYBRID` Retriever，组合现有 `ElasticsearchStore` 与 Elasticsearch client，同时并行执行 Dense 与 BM25 文档检索。
 - 使用确定性的 RRF 按 `chunkId` 融合、去重并限制候选数量，保留真实文档来源与通道诊断信息。
 - 在 Dense 与 BM25 查询中强制应用服务端提供的知识库范围和访问范围过滤，Router 选择不能绕过授权。
 - 定义可序列化的 Document Candidate、`RetrievalOutcome` 和 Graph state reducer，允许单通道失败时使用另一通道的结果。
@@ -27,7 +27,7 @@ Query Router 已能产出 `DOCUMENT_HYBRID` 计划，但 RAG Graph 尚未执行�
 
 ## Impact
 
-- 影响 `backend/app/domains/rag/graph/`，新增文档检索契约、节点、outcome reducer 和汇合节点。
+- 影响 `backend/app/domains/rag/`，新增标准 LangChain Retriever、文档检索契约、Graph 节点、outcome reducer 和汇合节点。
 - 影响 `backend/app/infrastructure/elasticsearch.py`，增加 Dense/BM25 查询适配及可检索 mapping 校验。
 - 影响 RAG Graph Builder、Studio 装配、Router node 返回类型和现有 RAG 测试。
-- 复用现有 Elasticsearch、Embedding Model、LangGraph 和 Langfuse callback，不新增外部服务或对外 API。
+- 复用现有 LangChain `BaseRetriever`、`ElasticsearchStore`、Embedding Model、LangGraph 和 Langfuse callback，不新增外部服务或对外 API。

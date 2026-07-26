@@ -9,6 +9,7 @@
 **Goals:**
 
 - 并行执行 Elasticsearch Dense 和 BM25 文档检索。
+- 通过 LangChain `BaseRetriever` 提供标准 `invoke` / `ainvoke` 契约和 callback 传播。
 - 使用确定性 RRF 按 `chunkId` 融合与去重。
 - 对两个通道使用完全相同、服务端提供的访问范围和文档范围过滤。
 - 以稳定 `RetrievalOutcome` 写入 Graph state，并为后续多个 Retriever 并行写入提供 reducer。
@@ -22,32 +23,41 @@
 - 不实现 SQL、Graph Retriever 或其占位节点。
 - 不接入 Chat API、MCP 或 checkpoint。
 - 不实现跨 Retriever fallback。
+- 不使用 LangChain `EnsembleRetriever` 隐藏请求级权限、通道诊断或失败语义。
 
 ## Decisions
 
 ### 1. Retriever 输入显式携带请求级检索范围
 
-`document_hybrid` 从 `RagState` 读取 `standalone_query` 和服务端调用方提供的 `document_retrieval_scope`。scope 至少包含一个允许访问的 `accessibleBy` 值，并可选限制 `docId` 集合。
+`document_hybrid` 从 `RagState` 读取 `standalone_query` 和服务端调用方提供的 `document_retrieval_scope`。scope 至少包含一个允许访问的 `accessibleBy` 值，并可选限制 `docId` 集合。Retriever factory 共享 Elasticsearch client、`ElasticsearchStore` 和 Embedding Model，但为每次 Graph 请求创建绑定不可变 scope 的 Retriever 实例。
 
 scope 缺失、为空或非法时节点在访问 Elasticsearch 前失败。Router 的选择只决定是否执行 Retriever，不授予文档权限。
 
-备选方案是在 Retriever 内读取全局用户或 Chat 会话，但这会破坏请求级 RAG Graph 的调用方独立性，也难以离线测试。
+不得在进程级单例 Retriever 上修改 filter，也不得从 Retriever 内读取全局用户或 Chat 会话；这两种方案都会引入跨请求权限污染或破坏请求级 RAG Graph 的调用方独立性。
 
-### 2. Dense 与 BM25 是一个 Retriever 内部的并行通道
+### 2. Hybrid Retriever 继承 LangChain BaseRetriever
 
-两个通道接收同一查询、同一 filter 和相同候选上限，通过 `asyncio` 并发执行：
+`HybridDocumentRetriever` 继承 `langchain_core.retrievers.BaseRetriever`，组合现有 `ElasticsearchStore`、Elasticsearch async client 和不可变检索选项，而不继承 `ElasticsearchStore`。它通过 `_aget_relevant_documents` 实现原生异步检索，并提供同步 `_get_relevant_documents` 契约。
+
+Retriever 输入是 query string，输出是标准 `list[Document]`。融合分数、通道 rank、原始 score、`chunkId`、`docId` 和脱敏通道诊断写入 `Document.metadata`。`document_hybrid` Graph node 只负责调用 `retriever.ainvoke(...)`、把 `Document` 转换为领域 Candidate/`RetrievalOutcome`、把稳定检索异常转换为 failed outcome，以及写入 state；节点不承载 Elasticsearch 查询或 RRF 算法。
+
+这样能够复用 LangChain 的 `invoke`、`ainvoke`、callback、Langfuse tracing 和标准测试工具，同时让未来 SQL、Neo4j Retriever 使用相同抽象。
+
+### 3. Dense 与 BM25 是一个 Retriever 内部的并行通道
+
+两个通道接收同一查询、同一 filter 和相同候选上限，在 `_aget_relevant_documents` 中通过 `asyncio` 并发执行：
 
 ```text
-document_hybrid
+HybridDocumentRetriever
 ├── dense_search
 └── bm25_search
         ↓
       RRF
 ```
 
-Dense/BM25 不作为 Router 顶层能力。一个普通通道异常时保留另一通道结果并标记 degraded；两个通道都失败时返回 failed outcome。运行时取消和非普通异常继续向外传播。
+Dense/BM25 不作为 Router 顶层能力。一个普通通道异常且另一通道返回候选时，Retriever 保留候选并把失败通道写入每个返回 `Document` 的脱敏诊断；一个通道失败且另一通道无候选，或两个通道都失败时，Retriever 抛出携带结构化失败通道但不携带原始异常文本的稳定检索异常，由 Graph node 转换为 failed outcome。两个通道均成功但无候选时返回空列表。运行时取消和非普通异常继续向外传播。
 
-### 3. 使用固定、确定性的 RRF
+### 4. 使用固定、确定性的 RRF
 
 第一版使用固定 RRF 常量 `60`，每个通道贡献 `1 / (60 + rank)`。候选按 fused score 降序、最佳通道 rank、`chunkId` 排序，保证并发完成顺序不影响结果。
 
@@ -55,11 +65,11 @@ Dense/BM25 不作为 Router 顶层能力。一个普通通道异常时保留另�
 
 备选方案是直接归一化原始 score，但 Dense 相似度和 BM25 分数不共享同一量纲。
 
-### 4. 检索参数在装配时注入
+### 5. 检索参数在装配时注入
 
-每通道候选数、最终候选数和 timeout 由不可变 `DocumentRetrievalOptions` 在 Graph 装配时注入，domain import 不读取 Settings。第一版使用稳定默认值并在入口装配，后续可映射为配置项。
+每通道候选数、最终候选数和 timeout 由不可变 `DocumentRetrievalOptions` 在 Graph 装配时注入 Retriever factory，domain import 不读取 Settings。第一版使用稳定默认值并在入口装配，后续可映射为配置项。
 
-### 5. Elasticsearch mapping 明确支持三种访问方式
+### 6. Elasticsearch mapping 明确支持三种访问方式
 
 同一索引继续承载写入与检索：
 
@@ -69,7 +79,7 @@ Dense/BM25 不作为 Router 顶层能力。一个普通通道异常时保留另�
 
 新索引创建时显式声明这些字段。现有索引 mapping 不兼容时启动/装配应明确失败，而不是无过滤检索；部署时需要重建或 reindex 现有开发索引。
 
-### 6. 使用类型化 outcome 和按 Retriever ID 合并的 reducer
+### 7. 使用类型化 outcome 和按 Retriever ID 合并的 reducer
 
 `document_hybrid` 输出：
 
@@ -88,7 +98,7 @@ RetrievalOutcome
 
 `RagState.retrieval_outcomes` 使用确定性 reducer 按 `retriever_id` 合并，并拒绝同一 superstep 中同一 Retriever 的重复写入。state 只保存可序列化数据，不保存 ES client、embedding model 或异常对象。
 
-### 7. Router 使用 Command 跳转到注册节点
+### 8. Router 使用 Command 跳转到注册节点
 
 目标拓扑为：
 
@@ -107,6 +117,7 @@ Builder 从实际注册的 Retriever 节点生成 Router 能力集合。当前�
 ## Risks / Trade-offs
 
 - [现有 Elasticsearch mapping 不兼容精确过滤] → fail closed，并在部署时重建或 reindex 索引。
+- [LangChain Retriever 接口升级造成适配变化] → 依赖锁定在当前主版本，并用继承契约、同步/异步调用和 callback 传播测试保护边界。
 - [并行通道增加一次请求的 ES 负载] → 限制每通道候选数、最终候选数和 timeout。
 - [单通道失败降低召回质量] → outcome 明确标记 degraded channel，便于观测和后续回答策略使用。
 - [当前 Router 在生产只看到一个能力] → 这是首个真实 Retriever 的阶段性结果；后续 SQL/Graph change 从注册节点扩展能力集合。

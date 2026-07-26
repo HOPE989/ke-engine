@@ -18,11 +18,39 @@ The system SHALL retrieve documents using one non-blank `standalone_query` and a
 - **THEN** both searches SHALL apply the same authorized `accessibleBy` filter
 - **AND** both SHALL apply the same allowed `docId` filter when one is present
 
+#### Scenario: Scope is bound per request
+- **WHEN** the Graph prepares `DOCUMENT_HYBRID` for one request
+- **THEN** it SHALL create a Retriever instance with an immutable validated scope
+- **AND** it MUST NOT mutate filters on a process-wide Retriever shared by concurrent requests
+
+### Requirement: Hybrid document retrieval implements the LangChain Retriever contract
+The system SHALL implement `DOCUMENT_HYBRID` as a subclass of LangChain `BaseRetriever` that composes Elasticsearch dependencies.
+
+#### Scenario: Asynchronous retrieval uses the standard contract
+- **WHEN** `document_hybrid` executes
+- **THEN** it SHALL invoke the Retriever through `ainvoke` with the standalone query and Runnable config
+- **AND** the Retriever SHALL return a list of LangChain `Document` values
+
+#### Scenario: Retriever preserves callback propagation
+- **WHEN** Runnable callbacks are supplied for Graph execution
+- **THEN** the Retriever invocation SHALL propagate them through the LangChain Retriever lifecycle
+- **AND** it MUST NOT create an unrelated callback chain
+
+#### Scenario: Elasticsearch infrastructure is composed
+- **WHEN** the Hybrid Retriever is assembled
+- **THEN** it SHALL compose the existing `ElasticsearchStore`, Elasticsearch client, and Embedding Model
+- **AND** it MUST NOT duplicate vector-store connection or embedding infrastructure
+
+#### Scenario: Graph state remains domain shaped
+- **WHEN** the Retriever returns LangChain Documents
+- **THEN** `document_hybrid` SHALL convert them into serializable document candidates and one `RetrievalOutcome`
+- **AND** LangChain or Elasticsearch runtime objects MUST NOT be stored in `RagState`
+
 ### Requirement: Hybrid document retrieval runs Dense and BM25 concurrently
 The system SHALL execute Dense and BM25 as internal channels of one `DOCUMENT_HYBRID` Retriever.
 
 #### Scenario: Both channels are available
-- **WHEN** `document_hybrid` receives a valid request
+- **WHEN** the Hybrid Retriever receives a valid request through `ainvoke`
 - **THEN** Dense and BM25 searches SHALL begin without waiting for the other channel to complete
 - **AND** each channel SHALL use the assembly-injected candidate limit and timeout
 
@@ -64,13 +92,19 @@ The system SHALL return serializable document candidates with the source data re
 The system SHALL isolate ordinary Dense and BM25 channel failures without hiding complete Retriever failure.
 
 #### Scenario: One channel fails
-- **WHEN** one channel raises an ordinary dependency error or times out and the other succeeds
+- **WHEN** one channel raises an ordinary dependency error or times out and the other returns candidates
 - **THEN** the Retriever SHALL fuse the successful channel's candidates
-- **AND** diagnostics SHALL identify the failed channel
+- **AND** returned Document metadata SHALL identify the failed channel without raw exception text
+
+#### Scenario: One channel fails without usable candidates
+- **WHEN** one channel raises an ordinary dependency error or times out and the other returns no candidates
+- **THEN** the Retriever SHALL raise a stable retrieval failure containing structured failed-channel identifiers
+- **AND** `document_hybrid` SHALL convert it into a `FAILED` outcome with no candidates
 
 #### Scenario: Both channels fail
 - **WHEN** both channels raise ordinary dependency errors or time out
-- **THEN** the Retriever SHALL return a `FAILED` outcome with no candidates
+- **THEN** the Retriever SHALL raise a stable retrieval failure containing structured failed-channel identifiers
+- **AND** `document_hybrid` SHALL return a `FAILED` outcome with no candidates
 - **AND** it MUST NOT silently call another Retriever
 
 #### Scenario: Search succeeds without matches
