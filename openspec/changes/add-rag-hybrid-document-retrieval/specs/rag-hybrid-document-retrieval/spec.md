@@ -10,110 +10,97 @@ The system SHALL retrieve documents using one non-blank `standalone_query` and a
 
 #### Scenario: Scope is missing or invalid
 - **WHEN** the document retrieval scope is missing, empty, malformed, or caller-controlled without server validation
-- **THEN** the Retriever SHALL fail before querying Elasticsearch
+- **THEN** the system SHALL fail before creating the Retriever or querying Elasticsearch
 - **AND** it MUST NOT perform an unfiltered search
-
-#### Scenario: Filters are consistent across channels
-- **WHEN** Dense and BM25 searches execute for one request
-- **THEN** both searches SHALL apply the same authorized `accessibleBy` filter
-- **AND** both SHALL apply the same allowed `docId` filter when one is present
 
 #### Scenario: Scope is bound per request
 - **WHEN** the Graph prepares `DOCUMENT_HYBRID` for one request
-- **THEN** it SHALL create a Retriever instance with an immutable validated scope
+- **THEN** it SHALL create a request-scoped Retriever with immutable search filters
 - **AND** it MUST NOT mutate filters on a process-wide Retriever shared by concurrent requests
 
-### Requirement: Hybrid document retrieval implements the LangChain Retriever contract
-The system SHALL implement `DOCUMENT_HYBRID` as a subclass of LangChain `BaseRetriever` that composes Elasticsearch dependencies.
+### Requirement: Hybrid document retrieval reuses the LangChain Elasticsearch Retriever
+The system SHALL implement `DOCUMENT_HYBRID` with the existing LangChain `ElasticsearchStore`, native Hybrid strategy, and `VectorStoreRetriever`.
 
-#### Scenario: Asynchronous retrieval uses the standard contract
-- **WHEN** `document_hybrid` executes
-- **THEN** it SHALL invoke the Retriever through `ainvoke` with the standalone query and Runnable config
+#### Scenario: Hybrid store is configured
+- **WHEN** the retrieval Elasticsearch store is assembled
+- **THEN** it SHALL use `DenseVectorStrategy` with `hybrid=True`
+- **AND** it SHALL configure RRF with `rank_constant` equal to `60` and the assembly-injected rank window
+
+#### Scenario: Request-scoped Retriever is created
+- **WHEN** `document_hybrid` has a validated request
+- **THEN** it SHALL obtain a Retriever through `ElasticsearchStore.as_retriever()`
+- **AND** its search kwargs SHALL contain the assembly-injected result limits and authorized filters
+
+#### Scenario: Asynchronous invocation uses the standard contract
+- **WHEN** `document_hybrid` executes the Retriever
+- **THEN** it SHALL call `ainvoke` with the standalone query and Runnable config
 - **AND** the Retriever SHALL return a list of LangChain `Document` values
 
-#### Scenario: Retriever preserves callback propagation
-- **WHEN** Runnable callbacks are supplied for Graph execution
-- **THEN** the Retriever invocation SHALL propagate them through the LangChain Retriever lifecycle
-- **AND** it MUST NOT create an unrelated callback chain
+#### Scenario: Existing infrastructure is reused
+- **WHEN** the Hybrid store is assembled
+- **THEN** it SHALL reuse the configured Elasticsearch client, index, and Embedding Model
+- **AND** it MUST NOT implement a custom `BaseRetriever`, vector search algorithm, or embedding client
 
-#### Scenario: Elasticsearch infrastructure is composed
-- **WHEN** the Hybrid Retriever is assembled
-- **THEN** it SHALL compose the existing `ElasticsearchStore`, Elasticsearch client, and Embedding Model
-- **AND** it MUST NOT duplicate vector-store connection or embedding infrastructure
+### Requirement: Elasticsearch executes native BM25 and KNN hybrid retrieval
+The system SHALL execute BM25, KNN, and reciprocal rank fusion as one native Elasticsearch Hybrid request.
 
-#### Scenario: Graph state remains domain shaped
-- **WHEN** the Retriever returns LangChain Documents
-- **THEN** `document_hybrid` SHALL convert them into serializable document candidates and one `RetrievalOutcome`
-- **AND** LangChain or Elasticsearch runtime objects MUST NOT be stored in `RagState`
+#### Scenario: Full-text sub-retrieval is generated
+- **WHEN** Hybrid retrieval executes
+- **THEN** the standard sub-retriever SHALL use a `match` query against `text`
+- **AND** Elasticsearch SHALL rank that sub-retrieval with its configured BM25 similarity
 
-### Requirement: Hybrid document retrieval runs Dense and BM25 concurrently
-The system SHALL execute Dense and BM25 as internal channels of one `DOCUMENT_HYBRID` Retriever.
+#### Scenario: Vector sub-retrieval is generated
+- **WHEN** Hybrid retrieval executes
+- **THEN** the KNN sub-retriever SHALL query the configured `vector` field
+- **AND** it SHALL use the assembly-injected candidate limits
 
-#### Scenario: Both channels are available
-- **WHEN** the Hybrid Retriever receives a valid request through `ainvoke`
-- **THEN** Dense and BM25 searches SHALL begin without waiting for the other channel to complete
-- **AND** each channel SHALL use the assembly-injected candidate limit and timeout
+#### Scenario: Filters are identical across sub-retrievals
+- **WHEN** the native Hybrid request is generated
+- **THEN** the BM25 and KNN sub-retrievers SHALL apply the same authorized `accessibleBy` filter
+- **AND** both SHALL apply the same allowed `docId` filter when one is present
 
-#### Scenario: Router does not select internal channels
+#### Scenario: Native RRF fuses results
+- **WHEN** BM25 and KNN produce ranked hits
+- **THEN** Elasticsearch SHALL fuse them with its native RRF retriever
+- **AND** the application MUST NOT run separate Dense/BM25 calls or perform application-level RRF
+
+#### Scenario: Router does not select internal sub-retrievals
 - **WHEN** Query Router creates a retrieval plan
 - **THEN** it SHALL select `DOCUMENT_HYBRID`
-- **AND** it MUST NOT select Dense or BM25 independently
+- **AND** it MUST NOT select BM25 or KNN independently
 
-### Requirement: Hybrid document retrieval fuses candidates deterministically
-The system SHALL fuse Dense and BM25 candidates with reciprocal rank fusion and deduplicate them by `chunkId`.
-
-#### Scenario: Candidate appears in both channels
-- **WHEN** Dense and BM25 return the same `chunkId`
-- **THEN** the fused result SHALL contain that chunk exactly once
-- **AND** its fused score SHALL include the reciprocal-rank contribution from both channels
-
-#### Scenario: Candidate appears in one channel
-- **WHEN** only one channel returns a `chunkId`
-- **THEN** the candidate SHALL remain eligible using that channel's reciprocal-rank contribution
-
-#### Scenario: Result order is deterministic
-- **WHEN** the same channel results arrive in different completion orders
-- **THEN** the fused candidate order SHALL remain identical
-- **AND** ties SHALL be resolved using stable rank and `chunkId` fields
-
-#### Scenario: Final candidate budget is enforced
-- **WHEN** fusion produces more candidates than the assembly-injected final limit
-- **THEN** the Retriever SHALL return only the highest-ranked candidates within that limit
-
-### Requirement: Document candidates preserve source information
-The system SHALL return serializable document candidates with the source data required by later evidence construction.
+### Requirement: Document candidates preserve available source information
+The system SHALL convert LangChain Documents into serializable document candidates required by later evidence construction.
 
 #### Scenario: Candidate shape is produced
-- **WHEN** a fused candidate is returned
-- **THEN** it SHALL include `chunkId`, `docId`, text, source metadata, fused score, and available channel rank and score diagnostics
-- **AND** it MUST NOT contain an Elasticsearch client, embedding model, callback handler, or raw provider response
+- **WHEN** a Hybrid result is returned
+- **THEN** each candidate SHALL include `chunkId`, `docId`, text, and available source metadata
+- **AND** it MUST NOT contain an Elasticsearch client, Retriever, Embedding Model, callback handler, or raw provider response
 
-### Requirement: Hybrid document retrieval has explicit channel failure behavior
-The system SHALL isolate ordinary Dense and BM25 channel failures without hiding complete Retriever failure.
+#### Scenario: Unsupported Hybrid scores are not fabricated
+- **WHEN** the installed LangChain Elasticsearch integration does not expose Hybrid scores or sub-retrieval ranks
+- **THEN** the candidate SHALL omit those optional diagnostics
+- **AND** the system MUST NOT infer, normalize, or fabricate them
 
-#### Scenario: One channel fails
-- **WHEN** one channel raises an ordinary dependency error or times out and the other returns candidates
-- **THEN** the Retriever SHALL fuse the successful channel's candidates
-- **AND** returned Document metadata SHALL identify the failed channel without raw exception text
+### Requirement: Native Hybrid retrieval has request-level failure behavior
+The system SHALL treat the Elasticsearch Hybrid operation as one retrieval request.
 
-#### Scenario: One channel fails without usable candidates
-- **WHEN** one channel raises an ordinary dependency error or times out and the other returns no candidates
-- **THEN** the Retriever SHALL raise a stable retrieval failure containing structured failed-channel identifiers
-- **AND** `document_hybrid` SHALL convert it into a `FAILED` outcome with no candidates
+#### Scenario: Hybrid request succeeds with candidates
+- **WHEN** the Retriever returns one or more Documents
+- **THEN** `document_hybrid` SHALL return a `SUCCESS` outcome containing those candidates
 
-#### Scenario: Both channels fail
-- **WHEN** both channels raise ordinary dependency errors or time out
-- **THEN** the Retriever SHALL raise a stable retrieval failure containing structured failed-channel identifiers
-- **AND** `document_hybrid` SHALL return a `FAILED` outcome with no candidates
-- **AND** it MUST NOT silently call another Retriever
+#### Scenario: Hybrid request succeeds without matches
+- **WHEN** the Retriever returns an empty Document list
+- **THEN** `document_hybrid` SHALL return an `EMPTY` outcome
 
-#### Scenario: Search succeeds without matches
-- **WHEN** both channels complete successfully without candidates
-- **THEN** the Retriever SHALL return an `EMPTY` outcome
+#### Scenario: Hybrid dependency fails
+- **WHEN** Elasticsearch, embedding, or the native Hybrid request raises an ordinary dependency error or times out
+- **THEN** `document_hybrid` SHALL return a `FAILED` outcome with no candidates
+- **AND** it MUST NOT run a separate BM25, KNN, or another Retriever fallback
 
 #### Scenario: Cancellation propagates
 - **WHEN** Graph execution is cancelled
-- **THEN** the Retriever MUST NOT convert cancellation into a successful, empty, or failed outcome
+- **THEN** the system MUST NOT convert cancellation into a successful, empty, or failed outcome
 
 ### Requirement: Retrieval outcomes merge safely in RAG state
 The system SHALL store Retriever results in a serializable `retrieval_outcomes` mapping keyed by Retriever ID.
@@ -121,7 +108,7 @@ The system SHALL store Retriever results in a serializable `retrieval_outcomes` 
 #### Scenario: Document outcome is written
 - **WHEN** `document_hybrid` completes
 - **THEN** it SHALL write exactly one outcome under `DOCUMENT_HYBRID`
-- **AND** the outcome SHALL contain status, candidates, duration and channel/result counts
+- **AND** the outcome SHALL contain status, candidates, duration and result count
 
 #### Scenario: Parallel outcomes are merged
 - **WHEN** future distinct Retriever nodes write outcomes in the same Graph superstep
@@ -151,19 +138,23 @@ The system SHALL extend the request-scoped RAG Graph through `document_hybrid` a
 - **AND** a missing selected outcome SHALL fail the Graph
 
 ### Requirement: Hybrid retrieval is observable and testable offline
-The system SHALL expose sanitized retrieval diagnostics and provide deterministic offline tests plus explicit Elasticsearch integration tests.
+The system SHALL expose sanitized request-level diagnostics and provide deterministic offline tests plus explicit Elasticsearch integration tests.
 
 #### Scenario: Diagnostics are recorded
 - **WHEN** document retrieval completes
-- **THEN** diagnostics SHALL include duration, per-channel candidate count, fused result count, and failed channel identifiers
+- **THEN** diagnostics SHALL include duration and result count
 - **AND** diagnostics MUST NOT expose credentials, Elasticsearch URLs, raw exception text, or unauthorized document metadata
 
 #### Scenario: Default tests are offline
 - **WHEN** default pytest runs
-- **THEN** Hybrid Retriever tests SHALL use fake Dense and BM25 adapters
+- **THEN** Hybrid Retriever tests SHALL use fake stores or Retrievers
 - **AND** they MUST NOT require Elasticsearch, provider credentials, Langfuse, Redis, PostgreSQL, Neo4j, or MCP
+
+#### Scenario: Generated Hybrid query is verified offline
+- **WHEN** infrastructure unit tests inspect the configured strategy
+- **THEN** they SHALL verify native Hybrid mode, RRF parameters, BM25/KNN fields, and shared filters
 
 #### Scenario: Elasticsearch integration is explicit
 - **WHEN** a developer explicitly runs the Elasticsearch integration tests
-- **THEN** the tests SHALL verify Dense search, BM25 search, metadata filters, RRF fusion, empty results, and mapping compatibility against a configured test index
+- **THEN** the tests SHALL verify BM25/KNN Hybrid retrieval, metadata filters, native RRF, empty results, mapping compatibility, and target-cluster feature compatibility
 - **AND** those tests MUST NOT run implicitly in the default test suite

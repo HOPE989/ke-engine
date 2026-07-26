@@ -1,85 +1,97 @@
 ## Context
 
-当前 RAG Graph 能完成 Query Rewrite 和 Query Router，但 Router 只写入计划并静态结束。文档 segment 已由现有异步流程写入 Elasticsearch，其中正文位于 `text`，向量位于 `vector`，来源与访问范围位于 `metadata`。
+当前 RAG Graph 能完成 Query Rewrite 和 Query Router，但 Router 只写入计划并静态结束。文档 segment 已写入 Elasticsearch，正文位于 `text`，向量位于 `vector`，来源与访问范围位于 `metadata`。
 
-本 change 把 `DOCUMENT_HYBRID` 变成第一个真实 Retriever。它需要同时解决检索算法、请求级访问过滤、LangGraph 动态跳转和并行结果写入 state，且不能提前引入尚未实现的 SQL/Graph 节点。
+项目锁定的 `langchain-elasticsearch` 已支持 `DenseVectorStrategy(hybrid=True)`：它在一次 Elasticsearch 请求中构造 BM25 `match` 与 KNN 子检索，对两者应用相同 filter，并通过 Elasticsearch 原生 RRF 融合结果。因此本 change 直接复用该能力，不在应用层重复实现 Dense/BM25 并发和 RRF。
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- 并行执行 Elasticsearch Dense 和 BM25 文档检索。
-- 通过 LangChain `BaseRetriever` 提供标准 `invoke` / `ainvoke` 契约和 callback 传播。
-- 使用确定性 RRF 按 `chunkId` 融合与去重。
-- 对两个通道使用完全相同、服务端提供的访问范围和文档范围过滤。
+- 使用 LangChain `ElasticsearchStore` 和 `VectorStoreRetriever` 执行原生 Hybrid 检索。
+- 对 BM25 与 KNN 使用完全相同、服务端提供的访问范围和文档范围过滤。
+- 由 Elasticsearch 使用固定 RRF 参数融合结果。
 - 以稳定 `RetrievalOutcome` 写入 Graph state，并为后续多个 Retriever 并行写入提供 reducer。
 - 让 Query Router 只跳转到真实注册的 `document_hybrid` 节点。
 - 通过离线 fake 测试与显式 Elasticsearch 集成测试证明纵向链路。
 
 **Non-Goals:**
 
-- 不实现 Document Rerank 或多查询扩展。
-- 不构建最终 EvidencePackage 或回答。
+- 不自行实现 BM25、KNN、应用层并发或 RRF。
+- 不要求 Hybrid 模式返回各子检索的原始 score、rank 或独立诊断。
+- 不实现单子检索降级；一次原生 Hybrid 请求整体成功或失败。
+- 不实现 Document Rerank、多查询扩展、EvidencePackage 或回答。
 - 不实现 SQL、Graph Retriever 或其占位节点。
-- 不接入 Chat API、MCP 或 checkpoint。
-- 不实现跨 Retriever fallback。
-- 不使用 LangChain `EnsembleRetriever` 隐藏请求级权限、通道诊断或失败语义。
+- 不接入 Chat API、MCP、checkpoint 或跨 Retriever fallback。
+- 不在本 change 引入 IK、拼音或领域词典 analyzer。
 
 ## Decisions
 
-### 1. Retriever 输入显式携带请求级检索范围
+### 1. 请求级 Retriever 绑定服务端授权范围
 
-`document_hybrid` 从 `RagState` 读取 `standalone_query` 和服务端调用方提供的 `document_retrieval_scope`。scope 至少包含一个允许访问的 `accessibleBy` 值，并可选限制 `docId` 集合。Retriever factory 共享 Elasticsearch client、`ElasticsearchStore` 和 Embedding Model，但为每次 Graph 请求创建绑定不可变 scope 的 Retriever 实例。
+`document_hybrid` 从 `RagState` 读取 `standalone_query` 和服务端调用方提供的 `document_retrieval_scope`。scope 至少包含一个非空 `accessibleBy` 值，并可选限制 `docId` 集合。
 
-scope 缺失、为空或非法时节点在访问 Elasticsearch 前失败。Router 的选择只决定是否执行 Retriever，不授予文档权限。
+共享的 `ElasticsearchStore` 持有 Elasticsearch client、索引信息和 Embedding Model。Retriever factory 针对每次 Graph 请求调用 `store.as_retriever()`，把由已验证 scope 生成的 filter 放入不可变 `search_kwargs`。不得修改进程级共享 Retriever 的 filter，也不得从 Retriever 内读取全局用户或 Chat 会话。
 
-不得在进程级单例 Retriever 上修改 filter，也不得从 Retriever 内读取全局用户或 Chat 会话；这两种方案都会引入跨请求权限污染或破坏请求级 RAG Graph 的调用方独立性。
+scope 缺失、为空或非法时，在创建 Retriever 和访问 Elasticsearch 前 fail closed。Router 只决定是否执行 Retriever，不授予文档权限。
 
-### 2. Hybrid Retriever 继承 LangChain BaseRetriever
+### 2. 直接使用 ElasticsearchStore 原生 Hybrid Strategy
 
-`HybridDocumentRetriever` 继承 `langchain_core.retrievers.BaseRetriever`，组合现有 `ElasticsearchStore`、Elasticsearch async client 和不可变检索选项，而不继承 `ElasticsearchStore`。它通过 `_aget_relevant_documents` 实现原生异步检索，并提供同步 `_get_relevant_documents` 契约。
+检索用 `ElasticsearchStore` 配置如下：
 
-Retriever 输入是 query string，输出是标准 `list[Document]`。融合分数、通道 rank、原始 score、`chunkId`、`docId` 和脱敏通道诊断写入 `Document.metadata`。`document_hybrid` Graph node 只负责调用 `retriever.ainvoke(...)`、把 `Document` 转换为领域 Candidate/`RetrievalOutcome`、把稳定检索异常转换为 failed outcome，以及写入 state；节点不承载 Elasticsearch 查询或 RRF 算法。
-
-这样能够复用 LangChain 的 `invoke`、`ainvoke`、callback、Langfuse tracing 和标准测试工具，同时让未来 SQL、Neo4j Retriever 使用相同抽象。
-
-### 3. Dense 与 BM25 是一个 Retriever 内部的并行通道
-
-两个通道接收同一查询、同一 filter 和相同候选上限，在 `_aget_relevant_documents` 中通过 `asyncio` 并发执行：
-
-```text
-HybridDocumentRetriever
-├── dense_search
-└── bm25_search
-        ↓
-      RRF
+```python
+DenseVectorStrategy(
+    hybrid=True,
+    rrf={
+        "rank_constant": 60,
+        "rank_window_size": fetch_k,
+    },
+    text_field="text",
+)
 ```
 
-Dense/BM25 不作为 Router 顶层能力。一个普通通道异常且另一通道返回候选时，Retriever 保留候选并把失败通道写入每个返回 `Document` 的脱敏诊断；一个通道失败且另一通道无候选，或两个通道都失败时，Retriever 抛出携带结构化失败通道但不携带原始异常文本的稳定检索异常，由 Graph node 转换为 failed outcome。两个通道均成功但无候选时返回空列表。运行时取消和非普通异常继续向外传播。
+`VectorStoreRetriever.ainvoke(standalone_query, config)` 触发一次原生 Hybrid 请求：
 
-### 4. 使用固定、确定性的 RRF
+```text
+Elasticsearch Hybrid request
+├── standard: bool.must(match(text)) + shared filters
+├── knn: vector query + shared filters
+└── rrf(rank_constant=60, rank_window_size=fetch_k)
+```
 
-第一版使用固定 RRF 常量 `60`，每个通道贡献 `1 / (60 + rank)`。候选按 fused score 降序、最佳通道 rank、`chunkId` 排序，保证并发完成顺序不影响结果。
+应用层不分别调用 Dense 与 BM25，不使用 `asyncio.gather`，也不实现自己的 RRF。默认 `match` 查询使用 Elasticsearch BM25 similarity。
 
-同一 `chunkId` 只输出一次；融合结果保留 Dense/BM25 原始 rank 和 score 作为诊断，但不把不同通道的原始 score 直接相加或比较。
-
-备选方案是直接归一化原始 score，但 Dense 相似度和 BM25 分数不共享同一量纲。
-
-### 5. 检索参数在装配时注入
-
-每通道候选数、最终候选数和 timeout 由不可变 `DocumentRetrievalOptions` 在 Graph 装配时注入 Retriever factory，domain import 不读取 Settings。第一版使用稳定默认值并在入口装配，后续可映射为配置项。
-
-### 6. Elasticsearch mapping 明确支持三种访问方式
+### 3. 精确过滤字段由 mapping 保证
 
 同一索引继续承载写入与检索：
 
 - `text`：BM25 全文检索；
-- `vector`：Dense 检索；
-- `metadata.docId`、`metadata.chunkId`、`metadata.accessibleBy`：精确过滤和来源定位。
+- `vector`：KNN Dense 检索；
+- `metadata.docId`、`metadata.chunkId`、`metadata.accessibleBy`：`term` / `terms` 精确过滤和来源定位。
 
-新索引创建时显式声明这些字段。现有索引 mapping 不兼容时启动/装配应明确失败，而不是无过滤检索；部署时需要重建或 reindex 现有开发索引。
+新索引创建时显式声明这些字段。现有索引 mapping 不兼容时启动或装配明确失败，不允许退化为无过滤检索；部署时需要重建或 reindex 现有开发索引。
 
-### 7. 使用类型化 outcome 和按 Retriever ID 合并的 reducer
+中文分词本轮沿用目标 Elasticsearch 的现有 analyzer。引入额外 analyzer 或插件会改变索引迁移和部署要求，留给独立 change。
+
+### 4. Graph node 转换标准 Document
+
+LangChain Retriever 返回标准 `list[Document]`。`document_hybrid` Graph node 只负责：
+
+1. 校验 query 和 scope；
+2. 创建请求级 `VectorStoreRetriever`；
+3. 调用 `ainvoke` 并传播 Runnable config；
+4. 把 `Document.page_content` 与 metadata 转换为领域 Candidate；
+5. 写入一个 `RetrievalOutcome`。
+
+Hybrid 返回文档时 outcome 为 `SUCCESS`，空列表为 `EMPTY`，普通 Elasticsearch/Embedding 依赖失败转换为 `FAILED`。运行时取消和非普通异常继续传播。state 不保存 store、retriever、client、model、callback 或异常对象。
+
+当前 `langchain-elasticsearch` 不支持 Hybrid 模式的 `similarity_search_with_score`，因此 Candidate 不承诺融合 score 或子检索 rank；后续若 EvidencePackage 确实需要 score，再单独扩展。
+
+### 5. 检索参数在装配时注入
+
+最终结果数 `k`、RRF window `fetch_k`、固定 `rank_constant=60` 和请求 timeout 由不可变 `DocumentRetrievalOptions` 在入口装配。domain import 不读取 Settings。
+
+### 6. 使用类型化 outcome 和按 Retriever ID 合并的 reducer
 
 `document_hybrid` 输出：
 
@@ -90,15 +102,12 @@ RetrievalOutcome
 ├── candidates
 └── diagnostics
     ├── duration_ms
-    ├── dense_count
-    ├── bm25_count
-    ├── result_count
-    └── failed_channels
+    └── result_count
 ```
 
-`RagState.retrieval_outcomes` 使用确定性 reducer 按 `retriever_id` 合并，并拒绝同一 superstep 中同一 Retriever 的重复写入。state 只保存可序列化数据，不保存 ES client、embedding model 或异常对象。
+`RagState.retrieval_outcomes` 使用确定性 reducer 按 `retriever_id` 合并，并拒绝同一 superstep 中同一 Retriever 的重复写入。
 
-### 8. Router 使用 Command 跳转到注册节点
+### 7. Router 使用 Command 跳转到注册节点
 
 目标拓扑为：
 
@@ -116,20 +125,21 @@ Builder 从实际注册的 Retriever 节点生成 Router 能力集合。当前�
 
 ## Risks / Trade-offs
 
-- [现有 Elasticsearch mapping 不兼容精确过滤] → fail closed，并在部署时重建或 reindex 索引。
-- [LangChain Retriever 接口升级造成适配变化] → 依赖锁定在当前主版本，并用继承契约、同步/异步调用和 callback 传播测试保护边界。
-- [并行通道增加一次请求的 ES 负载] → 限制每通道候选数、最终候选数和 timeout。
-- [单通道失败降低召回质量] → outcome 明确标记 degraded channel，便于观测和后续回答策略使用。
-- [当前 Router 在生产只看到一个能力] → 这是首个真实 Retriever 的阶段性结果；后续 SQL/Graph change 从注册节点扩展能力集合。
-- [当前 collect 后没有最终回答] → 本 change 只证明检索纵向链路，EvidencePackage 和回答属于后续 change。
+- [目标 Elasticsearch 不支持原生 RRF Retriever] → 在显式集成测试和启动检查中尽早失败，并记录所需版本/许可证。
+- [现有 mapping 不兼容精确过滤] → fail closed，并在部署时重建或 reindex 索引。
+- [LangChain Hybrid 模式不返回 score] → 本轮只返回排序后的 Document，不伪造或反推 score。
+- [默认 analyzer 的中文召回不足] → 先验证真实语料；需要时单独设计 analyzer change。
+- [当前 Router 只看到一个能力] → 后续 SQL/Graph change 从注册节点扩展能力集合。
+- [当前 collect 后没有最终回答] → EvidencePackage 和回答属于后续 change。
 
 ## Migration Plan
 
-1. 部署前检查目标 Elasticsearch 索引 mapping。
+1. 部署前检查目标 Elasticsearch 版本、原生 RRF 能力和索引 mapping。
 2. mapping 不兼容时重建或 reindex 文档向量索引，并重新执行已有文档的向量存储。
-3. 先运行显式 Elasticsearch 集成测试，再启用新的 RAG Studio Graph。
-4. 回滚时恢复旧 Graph Builder；保留新增 mapping 不影响旧向量写入。
+3. 运行显式 Elasticsearch 集成测试，验证 Hybrid DSL、ACL/docId filters、RRF、空结果和失败行为。
+4. 集成测试通过后启用新的 RAG Studio Graph。
+5. 回滚时恢复旧 Graph Builder；保留新增 mapping 不影响旧向量写入。
 
 ## Open Questions
 
-无。Document Rerank、EvidencePackage 和跨 Retriever fallback 在后续 change 中决策。
+无。Analyzer、Document Rerank、EvidencePackage 和跨 Retriever fallback 在后续 change 中决策。
