@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import dataclass
 from typing import Any
 
 from elasticsearch import NotFoundError
 from langchain_core.documents import Document
-from langchain_elasticsearch import ElasticsearchStore
+from langchain_elasticsearch import DenseVectorStrategy, ElasticsearchStore
+
+from app.domains.rag.graph.retrieval import (
+    DocumentRetrievalOptions,
+    DocumentRetrievalScope,
+)
 
 VECTOR_FIELD = "vector"
 TEXT_FIELD = "text"
@@ -50,6 +56,74 @@ def create_elasticsearch_store(
         vector_query_field=VECTOR_FIELD,
         num_dimensions=settings.embedding_dimensions,
     )
+
+
+def create_hybrid_elasticsearch_store(
+    *,
+    settings: Any,
+    embedding_model: Any,
+    options: DocumentRetrievalOptions,
+    client: Any | None = None,
+) -> ElasticsearchStore:
+    """创建复用原生 BM25/KNN/RRF 的 LangChain ElasticsearchStore。"""
+
+    connection = (
+        {"client": client}
+        if client is not None
+        else {"es_url": settings.elasticsearch_url}
+    )
+    return ElasticsearchStore(
+        index_name=settings.elasticsearch_index,
+        embedding=embedding_model,
+        query_field=TEXT_FIELD,
+        vector_query_field=VECTOR_FIELD,
+        num_dimensions=settings.embedding_dimensions,
+        strategy=DenseVectorStrategy(
+            hybrid=True,
+            rrf={
+                "rank_constant": options.rank_constant,
+                "rank_window_size": options.rank_window_size,
+            },
+            text_field=TEXT_FIELD,
+        ),
+        **connection,
+    )
+
+
+def build_document_retrieval_filters(
+    scope: DocumentRetrievalScope,
+) -> list[dict[str, Any]]:
+    """把已验证的服务端 scope 转为 BM25/KNN 共用的 ES filters。"""
+
+    filters: list[dict[str, Any]] = [
+        {
+            "terms": {
+                "metadata.accessibleBy": list(scope.accessible_by),
+            }
+        }
+    ]
+    if scope.doc_ids:
+        filters.append(
+            {"terms": {"metadata.docId": list(scope.doc_ids)}}
+        )
+    return filters
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentHybridRetrieverFactory:
+    """从共享 Store 创建绑定单次请求授权范围的 Retriever。"""
+
+    store: Any
+    options: DocumentRetrievalOptions
+
+    def create(self, scope: DocumentRetrievalScope) -> Any:
+        return self.store.as_retriever(
+            search_kwargs={
+                "k": self.options.result_limit,
+                "fetch_k": self.options.rank_window_size,
+                "filter": build_document_retrieval_filters(scope),
+            }
+        )
 
 
 def ensure_vector_index(

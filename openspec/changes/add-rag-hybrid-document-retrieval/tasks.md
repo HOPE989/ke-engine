@@ -7,11 +7,11 @@
 
 ## 2. LangChain Elasticsearch Hybrid Retriever
 
-- [ ] 2.1 先编写基础设施测试，证明 retrieval store 使用 `DenseVectorStrategy(hybrid=True)`、固定 `rank_constant=60` 和注入的 rank window
-- [ ] 2.2 装配复用现有 client、index 和 Embedding Model 的 Hybrid `ElasticsearchStore`
-- [ ] 2.3 实现服务端 scope 到 Elasticsearch `terms` filters 的转换，并测试 `accessibleBy` 必填及可选 `docId`
-- [ ] 2.4 实现请求级 Retriever factory，通过 `store.as_retriever()` 绑定结果限制和不可变授权 filters
-- [ ] 2.5 测试 LangChain 生成的原生 Hybrid 查询同时包含 `match(text)`、KNN、相同 filters 和 RRF 参数
+- [x] 2.1 先编写基础设施测试，证明 retrieval store 使用 `DenseVectorStrategy(hybrid=True)`、固定 `rank_constant=60` 和注入的 rank window
+- [x] 2.2 装配复用现有 client、index 和 Embedding Model 的 Hybrid `ElasticsearchStore`
+- [x] 2.3 实现服务端 scope 到 Elasticsearch `terms` filters 的转换，并测试 `accessibleBy` 必填及可选 `docId`
+- [x] 2.4 实现请求级 Retriever factory，通过 `store.as_retriever()` 绑定结果限制和不可变授权 filters
+- [x] 2.5 测试 LangChain 生成的原生 Hybrid 查询同时包含 `match(text)`、KNN、相同 filters 和 RRF 参数
 
 ## 3. RAG Graph 动态路由与检索节点
 
