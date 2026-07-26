@@ -4,9 +4,18 @@ from langchain_core.runnables import RunnableConfig
 
 from app.core.config import create_settings, validate_chat_startup_settings
 from app.domains.rag.graph import build_rag_graph
-from app.domains.rag.graph.query_router import RetrieverKind
+from app.domains.rag.graph.retrieval import DocumentRetrievalOptions
+from app.infrastructure.elasticsearch import (
+    DocumentHybridRetrieverFactory,
+    create_elasticsearch_client,
+    create_hybrid_elasticsearch_store,
+    ensure_vector_index,
+)
 from app.infrastructure.langfuse import create_langfuse_resources
-from app.infrastructure.llm import create_chat_model
+from app.infrastructure.llm import (
+    create_chat_model,
+    create_embedding_model,
+)
 
 
 def create_rag_studio_graph(
@@ -23,7 +32,26 @@ def create_rag_studio_graph(
         model=settings.openai_model,
         callbacks=callbacks,
     )
+    embedding_model = create_embedding_model(settings)
+    client = create_elasticsearch_client(settings)
+    ensure_vector_index(
+        client,
+        index_name=settings.elasticsearch_index,
+        embedding_dimensions=settings.embedding_dimensions,
+    )
+    options = DocumentRetrievalOptions()
+    store = create_hybrid_elasticsearch_store(
+        settings=settings,
+        embedding_model=embedding_model,
+        options=options,
+        client=client,
+    )
+    retriever_factory = DocumentHybridRetrieverFactory(
+        store=store,
+        options=options,
+    )
     return build_rag_graph(
         model=model,
-        available_retrievers=tuple(RetrieverKind),
+        document_retriever_factory=retriever_factory,
+        retrieval_options=options,
     ).compile()

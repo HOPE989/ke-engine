@@ -28,13 +28,13 @@ async def test_query_router_node_returns_model_plan_and_passes_config():
         "metadata": {"request_id": "request-router-1"},
     }
 
-    update = await query_router_node(
+    command = await query_router_node(
         {"standalone_query": "查询本月各客户发运量"},
         model=model,
-        available_retrievers=(
-            RetrieverKind.DOCUMENT_HYBRID,
-            RetrieverKind.SQL,
-        ),
+        retriever_destinations={
+            RetrieverKind.DOCUMENT_HYBRID: "document_hybrid",
+            RetrieverKind.SQL: "sql",
+        },
         config=config,
     )
 
@@ -47,13 +47,14 @@ async def test_query_router_node_returns_model_plan_and_passes_config():
     ]
     assert len(runnable.calls) == 1
     assert runnable.calls[0][1] is config
-    assert update == {
+    assert command.update == {
         "retrieval_plan": {
             "selected_retrievers": ["SQL"],
             "routing_reason": "需要查询结构化业务统计",
             "decision_source": "MODEL",
         }
     }
+    assert command.goto == ["sql"]
 
 
 @pytest.mark.asyncio
@@ -77,17 +78,22 @@ async def test_query_router_node_deduplicates_and_canonically_orders_routes():
         ]
     )
 
-    update = await query_router_node(
+    command = await query_router_node(
         {"standalone_query": "查询本月发运量及统计口径"},
         model=RecordingStructuredModel(runnable),
-        available_retrievers=tuple(RetrieverKind),
+        retriever_destinations={
+            RetrieverKind.DOCUMENT_HYBRID: "document_hybrid",
+            RetrieverKind.SQL: "sql",
+            RetrieverKind.GRAPH: "graph",
+        },
     )
 
-    assert update["retrieval_plan"]["selected_retrievers"] == [
+    assert command.update["retrieval_plan"]["selected_retrievers"] == [
         "DOCUMENT_HYBRID",
         "SQL",
     ]
-    assert update["retrieval_plan"]["decision_source"] == "MODEL"
+    assert command.update["retrieval_plan"]["decision_source"] == "MODEL"
+    assert command.goto == ["document_hybrid", "sql"]
 
 
 @pytest.mark.asyncio
@@ -134,25 +140,26 @@ async def test_query_router_node_falls_back_to_document_once(
         binding_error=binding_error,
     )
 
-    update = await query_router_node(
+    command = await query_router_node(
         {"standalone_query": "查询本月发运量"},
         model=model,
-        available_retrievers=(
-            RetrieverKind.DOCUMENT_HYBRID,
-            RetrieverKind.SQL,
-        ),
+        retriever_destinations={
+            RetrieverKind.DOCUMENT_HYBRID: "document_hybrid",
+            RetrieverKind.SQL: "sql",
+        },
     )
 
-    assert update == {
+    assert command.update == {
         "retrieval_plan": {
             "selected_retrievers": ["DOCUMENT_HYBRID"],
             "routing_reason": "路由不可用，使用文档混合检索",
             "decision_source": "FALLBACK",
         }
     }
+    assert command.goto == ["document_hybrid"]
     assert len(model.schemas) == 1
     assert len(runnable.calls) <= 1
-    assert "provider failed" not in repr(update)
+    assert "provider failed" not in repr(command)
 
 
 @pytest.mark.asyncio
@@ -174,7 +181,7 @@ async def test_query_router_node_raises_stable_error_without_document_fallback()
         await query_router_node(
             {"standalone_query": "查询本月发运量"},
             model=RecordingStructuredModel(runnable),
-            available_retrievers=(RetrieverKind.SQL,),
+            retriever_destinations={RetrieverKind.SQL: "sql"},
         )
 
     assert "database endpoint leaked" not in str(exc_info.value)
@@ -192,7 +199,9 @@ async def test_query_router_node_does_not_convert_cancellation_to_fallback():
         await query_router_node(
             {"standalone_query": "查询本月发运量"},
             model=RecordingStructuredModel(runnable),
-            available_retrievers=(RetrieverKind.DOCUMENT_HYBRID,),
+            retriever_destinations={
+                RetrieverKind.DOCUMENT_HYBRID: "document_hybrid"
+            },
         )
 
     assert len(runnable.calls) == 1

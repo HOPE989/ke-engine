@@ -15,13 +15,13 @@
 
 ## 3. RAG Graph 动态路由与检索节点
 
-- [ ] 3.1 先更新 Router 与 Graph 测试，证明可用能力由实际注册节点生成，且未实现的 SQL/Graph 节点不会被暴露
-- [ ] 3.2 修改 Query Router，使其在写入 `retrieval_plan` 的同时通过 LangGraph `Command` 跳转到已注册的 Retriever
-- [ ] 3.3 实现 `document_hybrid` node，通过 `ainvoke` 调用请求级 `VectorStoreRetriever`、传播 Runnable config 并转换 LangChain Documents
-- [ ] 3.4 测试并实现 Hybrid 请求成功、空结果、普通依赖失败、timeout 和取消传播语义
-- [ ] 3.5 将 `retrieval_outcomes` reducer、`document_hybrid` 和 `collect_retrieval_outcomes` 接入 Graph Builder
-- [ ] 3.6 实现 collector 完整性校验，确保计划中的每个 Retriever 都产生一个 outcome
-- [ ] 3.7 更新 Studio/入口装配，注入 Hybrid store、请求级 Retriever factory 和检索选项，同时保持 Graph 无 checkpointer
+- [x] 3.1 先更新 Router 与 Graph 测试，证明可用能力由实际注册节点生成，且未实现的 SQL/Graph 节点不会被暴露
+- [x] 3.2 修改 Query Router，使其在写入 `retrieval_plan` 的同时通过 LangGraph `Command` 跳转到已注册的 Retriever
+- [x] 3.3 实现 `document_hybrid` node，通过 `ainvoke` 调用请求级 `VectorStoreRetriever`、传播 Runnable config 并转换 LangChain Documents
+- [x] 3.4 测试并实现 Hybrid 请求成功、空结果、普通依赖失败、timeout 和取消传播语义
+- [x] 3.5 将 `retrieval_outcomes` reducer、`document_hybrid` 和 `collect_retrieval_outcomes` 接入 Graph Builder
+- [x] 3.6 实现 collector 完整性校验，确保计划中的每个 Retriever 都产生一个 outcome
+- [x] 3.7 更新 Studio/入口装配，注入 Hybrid store、请求级 Retriever factory 和检索选项，同时保持 Graph 无 checkpointer
 
 ## 4. 纵向验证
 

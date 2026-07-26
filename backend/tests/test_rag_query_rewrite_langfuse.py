@@ -8,6 +8,7 @@ from app.domains.rag.graph.query_rewrite.evaluation import (
     load_query_rewrite_evaluation_cases,
 )
 from rag_query_rewrite_test_support import (
+    RecordingRetrieverFactory,
     RecordingStructuredModel,
     RecordingStructuredRunnable,
 )
@@ -95,14 +96,16 @@ async def test_experiment_task_invokes_compiled_production_rag_graph():
                 standalone_query="查询神木站实际版装车计划"
             ),
             QueryRouteResult(
-                selected_retrievers=[RetrieverKind.SQL],
-                routing_reason="需要查询计划数据",
+                selected_retrievers=[
+                    RetrieverKind.DOCUMENT_HYBRID
+                ],
+                routing_reason="需要查询计划文档",
             ),
         ]
     )
     graph = build_rag_graph(
         model=RecordingStructuredModel(runnable),
-        available_retrievers=tuple(RetrieverKind),
+        document_retriever_factory=RecordingRetrieverFactory(),
     ).compile()
     item = SimpleNamespace(
         input=case.request.model_dump(mode="json")
@@ -217,7 +220,7 @@ def test_run_experiment_syncs_dataset_and_runs_serial_production_graph(
     monkeypatch.setattr(
         module,
         "build_rag_graph",
-        lambda *, model, available_retrievers: graph_builder,
+        lambda *, model, document_retriever_factory: graph_builder,
     )
     settings = SimpleNamespace(
         openai_model="deepseek-test",

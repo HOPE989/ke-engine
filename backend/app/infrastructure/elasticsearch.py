@@ -6,7 +6,7 @@ import inspect
 from dataclasses import dataclass
 from typing import Any
 
-from elasticsearch import NotFoundError
+from elasticsearch import Elasticsearch, NotFoundError
 from langchain_core.documents import Document
 from langchain_elasticsearch import DenseVectorStrategy, ElasticsearchStore
 
@@ -39,6 +39,12 @@ class VectorIndexMappingMismatch(Exception):
         super().__init__(
             f"incompatible Elasticsearch mapping: {field_path}"
         )
+
+
+def create_elasticsearch_client(settings: Any) -> Elasticsearch:
+    """创建供 mapping 校验与 LangChain Store 共享的 ES client。"""
+
+    return Elasticsearch(settings.elasticsearch_url)
 
 
 def create_elasticsearch_store(

@@ -1,13 +1,13 @@
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
+from langgraph.types import Command
 
 from app.domains.rag.graph.query_router import (
     QueryRouteResult,
     QueryRouterInput,
     QueryRouterUnavailable,
-    QueryRouterUpdate,
     RetrievalPlan,
     RetrieverKind,
     RoutingDecisionSource,
@@ -22,15 +22,15 @@ async def query_router_node(
     state: RagState,
     *,
     model: BaseChatModel,
-    available_retrievers: Collection[RetrieverKind],
+    retriever_destinations: Mapping[RetrieverKind, str],
     config: RunnableConfig | None = None,
-) -> QueryRouterUpdate:
-    """生成经服务端校验和规范化的检索计划。"""
+) -> Command:
+    """生成检索计划，并原子更新 state 后跳转到已注册节点。"""
 
     request = QueryRouterInput.model_validate(
         {
             "standalone_query": state["standalone_query"],
-            "available_retrievers": list(available_retrievers),
+            "available_retrievers": list(retriever_destinations),
         }
     )
     try:
@@ -58,7 +58,13 @@ async def query_router_node(
     except Exception as exc:
         plan = _fallback_plan(request.available_retrievers, cause=exc)
 
-    return {"retrieval_plan": plan.model_dump(mode="json")}
+    return Command(
+        update={"retrieval_plan": plan.model_dump(mode="json")},
+        goto=[
+            retriever_destinations[retriever]
+            for retriever in plan.selected_retrievers
+        ],
+    )
 
 
 def _fallback_plan(

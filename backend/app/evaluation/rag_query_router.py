@@ -11,7 +11,7 @@ from langfuse import Evaluation
 from langfuse.api.commons.errors import NotFoundError
 
 from app.core.config import Settings, create_settings
-from app.domains.rag.graph import build_rag_graph
+from app.domains.rag.graph.nodes.query_router import query_router_node
 from app.domains.rag.graph.query_rewrite.prompt import (
     QUERY_REWRITE_PROMPT_VERSION,
 )
@@ -105,14 +105,15 @@ async def run_query_router_case(
         RetrieverKind(value)
         for value in request["available_retrievers"]
     )
-    graph = build_rag_graph(
+    command = await query_router_node(
+        {"standalone_query": request["standalone_query"]},
         model=model,
-        available_retrievers=available_retrievers,
-    ).compile()
-    result = await graph.ainvoke(
-        {"original_query": request["standalone_query"]}
+        retriever_destinations={
+            retriever: f"evaluation_{retriever.value.lower()}"
+            for retriever in available_retrievers
+        },
     )
-    return {"retrieval_plan": result["retrieval_plan"]}
+    return {"retrieval_plan": command.update["retrieval_plan"]}
 
 
 def sync_dataset(

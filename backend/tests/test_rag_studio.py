@@ -1,16 +1,23 @@
 from types import SimpleNamespace
 
 
-def test_rag_studio_binds_model_callback_and_compiles(
+def test_rag_studio_assembles_model_hybrid_store_and_registered_node(
     monkeypatch,
 ):
-    from app.domains.rag.graph.query_router import RetrieverKind
     from app.entrypoints import rag_studio as studio
 
-    settings = SimpleNamespace(openai_model="gpt-test")
+    settings = SimpleNamespace(
+        openai_model="gpt-test",
+        elasticsearch_index="rag-documents",
+        embedding_dimensions=1536,
+    )
     handler = object()
-    resources = SimpleNamespace(handler=handler)
-    assembled_model = object()
+    model = object()
+    embedding_model = object()
+    client = object()
+    store = object()
+    options = object()
+    factory = object()
     compiled = object()
     calls = []
 
@@ -28,52 +35,106 @@ def test_rag_studio_binds_model_callback_and_compiles(
     monkeypatch.setattr(
         studio,
         "create_langfuse_resources",
-        lambda value: calls.append(("langfuse", value)) or resources,
+        lambda value: SimpleNamespace(handler=handler),
     )
+    def fake_create_chat_model(
+        value,
+        *,
+        model: str,
+        callbacks=None,
+    ):
+        calls.append(("model", callbacks))
+        return globals_model
 
-    def fake_create_chat_model(value, *, model: str, callbacks=None):
-        calls.append(
-            (
-                "model",
-                {"settings": value, "model": model, "callbacks": callbacks},
-            )
-        )
-        return assembled_model
-
-    monkeypatch.setattr(studio, "create_chat_model", fake_create_chat_model)
+    globals_model = model
+    monkeypatch.setattr(
+        studio,
+        "create_chat_model",
+        fake_create_chat_model,
+    )
+    monkeypatch.setattr(
+        studio,
+        "create_embedding_model",
+        lambda value: calls.append(("embedding", value))
+        or embedding_model,
+    )
+    monkeypatch.setattr(
+        studio,
+        "create_elasticsearch_client",
+        lambda value: calls.append(("client", value)) or client,
+    )
+    monkeypatch.setattr(
+        studio,
+        "ensure_vector_index",
+        lambda value, **kwargs: calls.append(
+            ("mapping", value, kwargs)
+        ),
+    )
+    monkeypatch.setattr(
+        studio,
+        "DocumentRetrievalOptions",
+        lambda: options,
+    )
+    monkeypatch.setattr(
+        studio,
+        "create_hybrid_elasticsearch_store",
+        lambda **kwargs: calls.append(("store", kwargs)) or store,
+    )
+    monkeypatch.setattr(
+        studio,
+        "DocumentHybridRetrieverFactory",
+        lambda **kwargs: calls.append(("factory", kwargs)) or factory,
+    )
     monkeypatch.setattr(
         studio,
         "build_rag_graph",
-        lambda **kwargs: calls.append(("builder", kwargs)) or FakeBuilder(),
+        lambda **kwargs: calls.append(("builder", kwargs))
+        or FakeBuilder(),
     )
 
-    assert studio.create_rag_studio_graph() is compiled
-    assert calls == [
-        ("validate", settings),
-        ("langfuse", settings),
-        (
-            "model",
-            {
-                "settings": settings,
-                "model": "gpt-test",
-                "callbacks": [handler],
-            },
-        ),
-        (
-            "builder",
-            {
-                "model": assembled_model,
-                "available_retrievers": tuple(RetrieverKind),
-            },
-        ),
-        ("compile", {}),
-    ]
+    result = studio.create_rag_studio_graph()
 
-
+    assert result is compiled
+    assert ("model", [handler]) in calls
+    assert ("embedding", settings) in calls
+    assert (
+        "mapping",
+        client,
+        {
+            "index_name": "rag-documents",
+            "embedding_dimensions": 1536,
+        },
+    ) in calls
+    assert (
+        "store",
+        {
+            "settings": settings,
+            "embedding_model": embedding_model,
+            "options": options,
+            "client": client,
+        },
+    ) in calls
+    assert (
+        "factory",
+        {"store": store, "options": options},
+    ) in calls
+    assert (
+        "builder",
+        {
+            "model": model,
+            "document_retriever_factory": factory,
+            "retrieval_options": options,
+        },
+    ) in calls
+    assert calls[-1] == ("compile", {})
 def test_rag_studio_runs_without_langfuse(monkeypatch):
     from app.entrypoints import rag_studio as studio
 
-    settings = SimpleNamespace(openai_model="gpt-test")
+    settings = SimpleNamespace(
+        openai_model="gpt-test",
+        elasticsearch_index="rag-documents",
+        embedding_dimensions=1536,
+    )
     callbacks_seen = []
     monkeypatch.setattr(studio, "create_settings", lambda: settings)
     monkeypatch.setattr(
@@ -93,6 +154,22 @@ def test_rag_studio_runs_without_langfuse(monkeypatch):
             callbacks
         )
         or object(),
+    )
+    monkeypatch.setattr(
+        studio,
+        "create_embedding_model",
+        lambda value: object(),
+    )
+    monkeypatch.setattr(
+        studio,
+        "create_elasticsearch_client",
+        lambda value: SimpleNamespace(indices=SimpleNamespace()),
+    )
+    monkeypatch.setattr(studio, "ensure_vector_index", lambda *a, **k: None)
+    monkeypatch.setattr(
+        studio,
+        "create_hybrid_elasticsearch_store",
+        lambda **kwargs: object(),
     )
     monkeypatch.setattr(
         studio,

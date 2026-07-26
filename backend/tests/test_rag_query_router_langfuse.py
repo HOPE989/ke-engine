@@ -3,7 +3,6 @@ from types import SimpleNamespace
 import pytest
 from langfuse.api.commons.errors import NotFoundError
 
-from app.domains.rag.graph.query_rewrite import QueryRewriteResult
 from app.domains.rag.graph.query_router import (
     QueryRouteResult,
     RetrieverKind,
@@ -77,7 +76,7 @@ def test_router_langfuse_evaluator_reports_objective_set_metrics():
 
 
 @pytest.mark.asyncio
-async def test_router_experiment_task_invokes_production_rag_graph():
+async def test_router_experiment_task_invokes_production_router_node():
     from app.evaluation.rag_query_router import run_query_router_case
 
     case = next(
@@ -87,9 +86,6 @@ async def test_router_experiment_task_invokes_production_rag_graph():
     )
     runnable = RecordingStructuredRunnable(
         [
-            QueryRewriteResult(
-                standalone_query=case.request.standalone_query
-            ),
             QueryRouteResult(
                 selected_retrievers=[
                     RetrieverKind.SQL,
@@ -110,7 +106,7 @@ async def test_router_experiment_task_invokes_production_rag_graph():
         "DOCUMENT_HYBRID",
         "SQL",
     ]
-    assert len(runnable.calls) == 2
+    assert len(runnable.calls) == 1
 
 
 class FakeExperimentResult:

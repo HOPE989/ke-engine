@@ -20,7 +20,6 @@ from app.domains.rag.graph.query_rewrite.evaluation import (
 from app.domains.rag.graph.query_rewrite.prompt import (
     QUERY_REWRITE_PROMPT_VERSION,
 )
-from app.domains.rag.graph.query_router import RetrieverKind
 from app.infrastructure.langfuse import (
     LangfuseResources,
     create_langfuse_resources,
@@ -30,6 +29,16 @@ from app.infrastructure.llm import create_chat_model
 
 DATASET_NAME = "ke-engine/rag-query-rewrite-v1"
 DATASET_ITEM_NAMESPACE = UUID("90c7a3fb-7dd7-4a9f-a1f5-0d3a0ab2702e")
+
+
+class _EmptyRetriever:
+    async def ainvoke(self, query: str, config: Any = None) -> list[Any]:
+        return []
+
+
+class _EmptyRetrieverFactory:
+    def create(self, scope: Any) -> _EmptyRetriever:
+        return _EmptyRetriever()
 
 
 def dataset_item_id(case: QueryRewriteEvaluationCase) -> str:
@@ -93,7 +102,12 @@ async def run_query_rewrite_case(
 ) -> dict[str, str]:
     """使用生产 RAG Graph 执行一个 Dataset item。"""
 
-    result = await graph.ainvoke(dict(item.input))
+    request = dict(item.input)
+    request.setdefault(
+        "document_retrieval_scope",
+        {"accessibleBy": ["evaluation"]},
+    )
+    result = await graph.ainvoke(request)
     return {"standalone_query": result["standalone_query"]}
 
 
@@ -152,7 +166,7 @@ def run_experiment(
         )
         graph = build_rag_graph(
             model=model,
-            available_retrievers=tuple(RetrieverKind),
+            document_retriever_factory=_EmptyRetrieverFactory(),
         ).compile()
         result = dataset.run_experiment(
             name="rag-query-rewrite-live-model",

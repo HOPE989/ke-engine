@@ -3,11 +3,12 @@ from pathlib import Path
 
 import pytest
 from langchain_core.callbacks import BaseCallbackHandler
-from langgraph.graph import END, START
 
 from rag_query_rewrite_test_support import (
+    RecordingRetrieverFactory,
     RecordingStructuredModel,
     RecordingStructuredRunnable,
+    document,
 )
 
 
@@ -23,63 +24,37 @@ class RecordingGraphCallback(BaseCallbackHandler):
         self.chain_outputs.append(outputs)
 
 
-def test_rag_state_contains_serializable_rewrite_slice_and_can_expand():
+def test_rag_state_is_request_scoped_and_serializable():
     from app.domains.rag.graph.state import RagState
 
-    current_rewrite_fields = {
+    expected_fields = {
         "original_query",
         "conversation_context",
         "business_context",
         "standalone_query",
         "retrieval_plan",
+        "document_retrieval_scope",
+        "retrieval_outcomes",
     }
-    assert current_rewrite_fields <= set(RagState.__annotations__)
-    assert "rewrite_status" not in RagState.__annotations__
-    assert "rewrite_failure_code" not in RagState.__annotations__
-    assert "warnings" not in RagState.__annotations__
+    assert expected_fields <= set(RagState.__annotations__)
 
     state: RagState = {
-        "original_query": "查询运单 YD2026001",
-        "conversation_context": [],
-        "business_context": None,
-        "standalone_query": "查询运单 YD2026001",
+        "original_query": "查询合同",
+        "standalone_query": "查询合同付款周期",
+        "document_retrieval_scope": {
+            "accessibleBy": ["team-a"]
+        },
         "retrieval_plan": {
-            "selected_retrievers": ["SQL"],
-            "routing_reason": "需要结构化业务事实",
+            "selected_retrievers": ["DOCUMENT_HYBRID"],
+            "routing_reason": "需要合同文档",
             "decision_source": "MODEL",
+        },
+        "retrieval_outcomes": {
+            "DOCUMENT_HYBRID": {"status": "EMPTY"}
         },
     }
 
     assert json.loads(json.dumps(state, ensure_ascii=False)) == state
-
-
-def test_rag_graph_starts_with_rewrite_node_no_retry_or_checkpointer():
-    from app.domains.rag.graph import (
-        QUERY_ROUTER_NODE,
-        QUERY_REWRITE_NODE,
-        build_rag_graph,
-    )
-    from app.domains.rag.graph.query_router import RetrieverKind
-
-    model = RecordingStructuredModel(RecordingStructuredRunnable())
-    builder = build_rag_graph(
-        model=model,
-        available_retrievers=tuple(RetrieverKind),
-    )
-    compiled = builder.compile()
-
-    assert QUERY_REWRITE_NODE == "query_rewrite"
-    assert QUERY_ROUTER_NODE == "query_router"
-    assert builder.context_schema is None
-    assert set(builder.nodes) == {"query_rewrite", "query_router"}
-    assert builder.nodes["query_rewrite"].retry_policy is None
-    assert builder.nodes["query_router"].retry_policy is None
-    assert {(edge.source, edge.target) for edge in compiled.get_graph().edges} == {
-        (START, "query_rewrite"),
-        ("query_rewrite", "query_router"),
-        ("query_router", END),
-    }
-    assert compiled.checkpointer is None
 
 
 def test_rag_graph_does_not_define_runtime_dependency_context():
@@ -92,7 +67,7 @@ def test_rag_graph_does_not_define_runtime_dependency_context():
 
 
 @pytest.mark.asyncio
-async def test_assembled_rag_graph_keeps_requests_isolated_and_serializable():
+async def test_assembled_rag_graph_keeps_requests_isolated():
     from app.domains.rag.graph import build_rag_graph
     from app.domains.rag.graph.query_rewrite import QueryRewriteResult
     from app.domains.rag.graph.query_router import (
@@ -102,61 +77,81 @@ async def test_assembled_rag_graph_keeps_requests_isolated_and_serializable():
 
     runnable = RecordingStructuredRunnable(
         [
-            QueryRewriteResult(standalone_query="查询第一份运单"),
+            QueryRewriteResult(standalone_query="查询第一份合同"),
             QueryRouteResult(
-                selected_retrievers=[RetrieverKind.SQL],
-                routing_reason="需要查询运单事实",
+                selected_retrievers=[
+                    RetrieverKind.DOCUMENT_HYBRID
+                ],
+                routing_reason="需要第一份文档",
             ),
             QueryRewriteResult(standalone_query="查询第二份合同"),
             QueryRouteResult(
-                selected_retrievers=[RetrieverKind.DOCUMENT_HYBRID],
-                routing_reason="需要查询合同文档",
+                selected_retrievers=[
+                    RetrieverKind.DOCUMENT_HYBRID
+                ],
+                routing_reason="需要第二份文档",
             ),
         ]
     )
+    factory = RecordingRetrieverFactory([document()])
     graph = build_rag_graph(
         model=RecordingStructuredModel(runnable),
-        available_retrievers=tuple(RetrieverKind),
+        document_retriever_factory=factory,
     ).compile()
 
-    first = await graph.ainvoke({"original_query": "第一份呢"})
-    second = await graph.ainvoke({"original_query": "第二份呢"})
+    first = await graph.ainvoke(
+        {
+            "original_query": "第一份呢",
+            "document_retrieval_scope": {
+                "accessibleBy": ["team-a"]
+            },
+        }
+    )
+    second = await graph.ainvoke(
+        {
+            "original_query": "第二份呢",
+            "document_retrieval_scope": {
+                "accessibleBy": ["team-b"]
+            },
+        }
+    )
 
-    assert first["standalone_query"] == "查询第一份运单"
+    assert first["standalone_query"] == "查询第一份合同"
     assert second["standalone_query"] == "查询第二份合同"
-    assert first["original_query"] == "第一份呢"
-    assert second["original_query"] == "第二份呢"
-    assert first["retrieval_plan"]["selected_retrievers"] == ["SQL"]
-    assert second["retrieval_plan"]["selected_retrievers"] == [
-        "DOCUMENT_HYBRID"
-    ]
+    assert factory.scopes[0].accessible_by == ("team-a",)
+    assert factory.scopes[1].accessible_by == ("team-b",)
     assert "warnings" not in second
 
 
 @pytest.mark.asyncio
-async def test_assembled_rag_graph_returns_fallback_state():
+async def test_assembled_rag_graph_returns_fallback_document_outcome():
     from app.domains.rag.graph import build_rag_graph
-    from app.domains.rag.graph.query_router import RetrieverKind
 
-    runnable = RecordingStructuredRunnable(error=RuntimeError("unavailable"))
-    model = RecordingStructuredModel(runnable)
-
+    runnable = RecordingStructuredRunnable(
+        error=RuntimeError("unavailable")
+    )
     result = await build_rag_graph(
-        model=model,
-        available_retrievers=tuple(RetrieverKind),
+        model=RecordingStructuredModel(runnable),
+        document_retriever_factory=RecordingRetrieverFactory(),
     ).compile().ainvoke(
-        {"original_query": "查询本月运量"}
+        {
+            "original_query": "查询合同",
+            "document_retrieval_scope": {
+                "accessibleBy": ["team-a"]
+            },
+        }
     )
 
-    assert result["standalone_query"] == "查询本月运量"
     assert result["retrieval_plan"]["decision_source"] == "FALLBACK"
-    assert "rewrite_failure_code" not in result
-    assert "warnings" not in result
+    assert (
+        result["retrieval_outcomes"]["DOCUMENT_HYBRID"]["status"]
+        == "EMPTY"
+    )
     assert len(runnable.calls) == 2
 
 
 @pytest.mark.asyncio
-async def test_assembled_rag_graph_passes_config_to_model_call():
+async def test_assembled_rag_graph_passes_config_to_models_and_retriever():
     from app.domains.rag.graph import build_rag_graph
     from app.domains.rag.graph.query_rewrite import QueryRewriteResult
     from app.domains.rag.graph.query_router import (
@@ -166,38 +161,44 @@ async def test_assembled_rag_graph_passes_config_to_model_call():
 
     runnable = RecordingStructuredRunnable(
         [
-            QueryRewriteResult(standalone_query="查询本月运量"),
+            QueryRewriteResult(standalone_query="查询合同"),
             QueryRouteResult(
-                selected_retrievers=[RetrieverKind.SQL],
-                routing_reason="需要业务统计",
+                selected_retrievers=[
+                    RetrieverKind.DOCUMENT_HYBRID
+                ],
+                routing_reason="需要文档",
             ),
         ]
     )
+    factory = RecordingRetrieverFactory([document()])
     handler = RecordingGraphCallback()
     graph = build_rag_graph(
         model=RecordingStructuredModel(runnable),
-        available_retrievers=tuple(RetrieverKind),
+        document_retriever_factory=factory,
     ).compile()
 
     await graph.ainvoke(
-        {"original_query": "查本月运量"},
+        {
+            "original_query": "查合同",
+            "document_retrieval_scope": {
+                "accessibleBy": ["team-a"]
+            },
+        },
         config={
             "callbacks": [handler],
             "metadata": {"request_id": "request-graph-1"},
         },
     )
 
-    assert len(runnable.calls) == 2
     for _, received_config in runnable.calls:
-        assert received_config["metadata"]["request_id"] == "request-graph-1"
-        assert "callbacks" in received_config
+        assert (
+            received_config["metadata"]["request_id"]
+            == "request-graph-1"
+        )
+    retriever_config = factory.retrievers[0].calls[0][1]
+    assert retriever_config["metadata"]["request_id"] == "request-graph-1"
     assert any(
         isinstance(value, dict)
-        and value.get("original_query") == "查本月运量"
+        and value.get("original_query") == "查合同"
         for value in handler.chain_inputs
-    )
-    assert any(
-        isinstance(value, dict)
-        and value.get("standalone_query") == "查询本月运量"
-        for value in handler.chain_outputs
     )
