@@ -18,31 +18,31 @@ The system SHALL retrieve documents using one non-blank `standalone_query` and a
 - **THEN** it SHALL create a request-scoped Retriever with immutable search filters
 - **AND** it MUST NOT mutate filters on a process-wide Retriever shared by concurrent requests
 
-### Requirement: Hybrid document retrieval reuses the LangChain Elasticsearch Retriever
-The system SHALL implement `DOCUMENT_HYBRID` with the existing LangChain `ElasticsearchStore`, native Hybrid strategy, and `VectorStoreRetriever`.
+### Requirement: Hybrid document retrieval uses a custom LangChain Retriever
+The system SHALL implement `DOCUMENT_HYBRID` as a custom LangChain `BaseRetriever` that reuses the existing Elasticsearch client, `ElasticsearchStore`, and Embedding Model.
 
-#### Scenario: Hybrid store is configured
+#### Scenario: Vector store is configured
 - **WHEN** the retrieval Elasticsearch store is assembled
-- **THEN** it SHALL use `DenseVectorStrategy` with `hybrid=True`
-- **AND** it SHALL configure RRF with `rank_constant` equal to `60` and the assembly-injected rank window
+- **THEN** it SHALL use `DenseVectorStrategy` with `hybrid=False`
+- **AND** it MUST NOT generate an Elasticsearch native RRF retriever
 
 #### Scenario: Request-scoped Retriever is created
 - **WHEN** `document_hybrid` has a validated request
-- **THEN** it SHALL obtain a Retriever through `ElasticsearchStore.as_retriever()`
-- **AND** its search kwargs SHALL contain the assembly-injected result limits and authorized filters
+- **THEN** the factory SHALL create a request-scoped custom `BaseRetriever`
+- **AND** it SHALL bind immutable scope, result limit, candidate limit, and `rank_constant=60`
 
 #### Scenario: Asynchronous invocation uses the standard contract
 - **WHEN** `document_hybrid` executes the Retriever
 - **THEN** it SHALL call `ainvoke` with the standalone query and Runnable config
-- **AND** the Retriever SHALL return a list of LangChain `Document` values
+- **AND** the Retriever SHALL return a fused list of LangChain `Document` values
 
 #### Scenario: Existing infrastructure is reused
-- **WHEN** the Hybrid store is assembled
+- **WHEN** the custom Retriever is assembled
 - **THEN** it SHALL reuse the configured Elasticsearch client, index, and Embedding Model
-- **AND** it MUST NOT implement a custom `BaseRetriever`, vector search algorithm, or embedding client
+- **AND** it MUST NOT implement a custom vector search algorithm or embedding client
 
-### Requirement: Elasticsearch executes native BM25 and KNN hybrid retrieval
-The system SHALL execute BM25, KNN, and reciprocal rank fusion as one native Elasticsearch Hybrid request.
+### Requirement: The custom Retriever executes BM25 and KNN then applies RRF
+The system SHALL execute Elasticsearch BM25 and LangChain KNN as two authorized sub-retrievals and fuse their ranked results in the application.
 
 #### Scenario: Full-text sub-retrieval is generated
 - **WHEN** Hybrid retrieval executes
@@ -55,14 +55,19 @@ The system SHALL execute BM25, KNN, and reciprocal rank fusion as one native Ela
 - **AND** it SHALL use the assembly-injected candidate limits
 
 #### Scenario: Filters are identical across sub-retrievals
-- **WHEN** the native Hybrid request is generated
+- **WHEN** the custom Hybrid Retriever executes
 - **THEN** the BM25 and KNN sub-retrievers SHALL apply the same authorized `accessibleBy` filter
 - **AND** both SHALL apply the same allowed `docId` filter when one is present
 
-#### Scenario: Native RRF fuses results
+#### Scenario: Application RRF fuses results
 - **WHEN** BM25 and KNN produce ranked hits
-- **THEN** Elasticsearch SHALL fuse them with its native RRF retriever
-- **AND** the application MUST NOT run separate Dense/BM25 calls or perform application-level RRF
+- **THEN** the application SHALL sum `1 / (60 + rank)` for each stable `chunkId`
+- **AND** it SHALL deduplicate, sort deterministically, and return at most the configured result limit
+
+#### Scenario: Asynchronous sub-retrievals run concurrently
+- **WHEN** the Graph invokes the custom Retriever asynchronously
+- **THEN** BM25 and KNN SHALL start without waiting for the other to complete
+- **AND** the fused result SHALL be independent of branch completion order
 
 #### Scenario: Router does not select internal sub-retrievals
 - **WHEN** Query Router creates a retrieval plan
@@ -82,8 +87,8 @@ The system SHALL convert LangChain Documents into serializable document candidat
 - **THEN** the candidate SHALL omit those optional diagnostics
 - **AND** the system MUST NOT infer, normalize, or fabricate them
 
-### Requirement: Native Hybrid retrieval has request-level failure behavior
-The system SHALL treat the Elasticsearch Hybrid operation as one retrieval request.
+### Requirement: Custom Hybrid retrieval has request-level failure behavior
+The system SHALL treat the two sub-retrievals and application RRF as one retrieval request.
 
 #### Scenario: Hybrid request succeeds with candidates
 - **WHEN** the Retriever returns one or more Documents
@@ -94,7 +99,7 @@ The system SHALL treat the Elasticsearch Hybrid operation as one retrieval reque
 - **THEN** `document_hybrid` SHALL return an `EMPTY` outcome
 
 #### Scenario: Hybrid dependency fails
-- **WHEN** Elasticsearch, embedding, or the native Hybrid request raises an ordinary dependency error or times out
+- **WHEN** Elasticsearch, embedding, either sub-retrieval, or fusion raises an ordinary dependency error or times out
 - **THEN** `document_hybrid` SHALL return a `FAILED` outcome with no candidates
 - **AND** it MUST NOT run a separate BM25, KNN, or another Retriever fallback
 
@@ -150,11 +155,11 @@ The system SHALL expose sanitized request-level diagnostics and provide determin
 - **THEN** Hybrid Retriever tests SHALL use fake stores or Retrievers
 - **AND** they MUST NOT require Elasticsearch, provider credentials, Langfuse, Redis, PostgreSQL, Neo4j, or MCP
 
-#### Scenario: Generated Hybrid query is verified offline
-- **WHEN** infrastructure unit tests inspect the configured strategy
-- **THEN** they SHALL verify native Hybrid mode, RRF parameters, BM25/KNN fields, and shared filters
+#### Scenario: Custom Hybrid behavior is verified offline
+- **WHEN** infrastructure unit tests inspect the custom Retriever
+- **THEN** they SHALL verify concurrent BM25/KNN calls, application RRF, deterministic deduplication, result limits, and shared filters
 
 #### Scenario: Elasticsearch integration is explicit
 - **WHEN** a developer explicitly runs the Elasticsearch integration tests
-- **THEN** the tests SHALL verify BM25/KNN Hybrid retrieval, metadata filters, native RRF, empty results, mapping compatibility, and target-cluster feature compatibility
+- **THEN** the tests SHALL verify real BM25/KNN retrieval, application RRF, metadata filters, empty results, mapping compatibility, and Basic License compatibility
 - **AND** those tests MUST NOT run implicitly in the default test suite
