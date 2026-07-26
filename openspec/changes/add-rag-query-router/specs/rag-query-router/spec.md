@@ -150,4 +150,3 @@ The system SHALL provide deterministic default tests and a separate opt-in path 
 - **WHEN** a developer runs the live-model Router evaluation with valid model configuration
 - **THEN** it SHALL invoke the production RAG Graph against the Router Dataset
 - **AND** default pytest or CI MUST NOT run that evaluation implicitly
-

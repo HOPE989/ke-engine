@@ -75,4 +75,3 @@ def _fallback_plan(
         routing_reason="路由不可用，使用文档混合检索",
         decision_source=RoutingDecisionSource.FALLBACK,
     )
-

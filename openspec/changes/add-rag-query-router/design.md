@@ -92,4 +92,3 @@ START -> query_rewrite -> query_router -> END
 - [模型过度多选增加未来成本] → Prompt 强调最小充分集合，并在评测中单独统计过度路由。
 - [固定能力描述随数据范围变化而过期] → 本 change 保持三类稳定边界，后续 Retriever change 再把描述接入实际能力目录。
 - [文档 fallback 可能无法回答结构化问题] → fallback 仅保证产生保守计划，不宣称能够回答；不自动改选 SQL 或 Graph。
-

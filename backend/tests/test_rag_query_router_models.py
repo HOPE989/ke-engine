@@ -153,4 +153,3 @@ def test_query_router_contracts_are_exported_from_package():
             RoutingDecisionSource,
         ]
     )
-

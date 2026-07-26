@@ -52,4 +52,3 @@ class QueryRouterUpdate(TypedDict):
 
 class QueryRouterUnavailable(Exception):
     """Router 失败且没有安全 fallback 能力。"""
-
