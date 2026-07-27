@@ -36,9 +36,16 @@ class RecordingStructuredModel:
 
 
 class RecordingRetriever:
-    def __init__(self, documents=(), *, error=None):
+    def __init__(
+        self,
+        documents=(),
+        *,
+        error=None,
+        retrieval_stages=None,
+    ):
         self.documents = list(documents)
         self.error = error
+        self.retrieval_stages = retrieval_stages
         self.calls = []
 
     async def ainvoke(self, query, config=None):
@@ -49,9 +56,16 @@ class RecordingRetriever:
 
 
 class RecordingRetrieverFactory:
-    def __init__(self, documents=(), *, error=None):
+    def __init__(
+        self,
+        documents=(),
+        *,
+        error=None,
+        retrieval_stages=None,
+    ):
         self.documents = list(documents)
         self.error = error
+        self.retrieval_stages = retrieval_stages
         self.scopes = []
         self.retrievers = []
 
@@ -60,6 +74,7 @@ class RecordingRetrieverFactory:
         retriever = RecordingRetriever(
             self.documents,
             error=self.error,
+            retrieval_stages=self.retrieval_stages,
         )
         self.retrievers.append(retriever)
         return retriever

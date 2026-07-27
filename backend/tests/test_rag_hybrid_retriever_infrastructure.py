@@ -219,6 +219,7 @@ def test_sync_hybrid_retriever_applies_identical_filters():
                 "hits": {
                     "hits": [
                         {
+                            "_score": 8.5,
                             "_source": {
                                 "text": "全文结果",
                                 "metadata": {
@@ -235,9 +236,12 @@ def test_sync_hybrid_retriever_applies_identical_filters():
         def __init__(self):
             self.calls = []
 
-        def similarity_search(self, query, **kwargs):
+        def similarity_search_with_score(self, query, **kwargs):
             self.calls.append((query, kwargs))
-            return [_document("vector")]
+            return [
+                (_document("full-text"), 0.91),
+                (_document("vector"), 0.82),
+            ]
 
     client = FakeClient()
     store = FakeStore()
@@ -294,6 +298,80 @@ def test_sync_hybrid_retriever_applies_identical_filters():
             },
         )
     ]
+    assert retriever.retrieval_stages == {
+        "BM25": {
+            "resultCount": 1,
+            "scoreType": "ELASTICSEARCH_BM25",
+            "ranking": [
+                {
+                    "rank": 1,
+                    "chunkId": "full-text",
+                    "docId": "doc-full-text",
+                    "score": 8.5,
+                    "textPreview": "全文结果",
+                }
+            ],
+        },
+        "VECTOR": {
+            "resultCount": 2,
+            "scoreType": "ELASTICSEARCH_KNN",
+            "ranking": [
+                {
+                    "rank": 1,
+                    "chunkId": "full-text",
+                    "docId": "doc-full-text",
+                    "score": 0.91,
+                    "textPreview": "full-text",
+                },
+                {
+                    "rank": 2,
+                    "chunkId": "vector",
+                    "docId": "doc-vector",
+                    "score": 0.82,
+                    "textPreview": "vector",
+                }
+            ],
+        },
+        "RRF": {
+            "resultCount": 2,
+            "rankConstant": 60,
+            "ranking": [
+                {
+                    "rank": 1,
+                    "chunkId": "full-text",
+                    "docId": "doc-full-text",
+                    "rrfScore": 2 / 61,
+                    "channels": {
+                        "BM25": {
+                            "rank": 1,
+                            "score": 8.5,
+                            "rrfContribution": 1 / 61,
+                        },
+                        "VECTOR": {
+                            "rank": 1,
+                            "score": 0.91,
+                            "rrfContribution": 1 / 61,
+                        }
+                    },
+                    "textPreview": "全文结果",
+                },
+                {
+                    "rank": 2,
+                    "chunkId": "vector",
+                    "docId": "doc-vector",
+                    "rrfScore": 1 / 62,
+                    "channels": {
+                        "VECTOR": {
+                            "rank": 2,
+                            "score": 0.82,
+                            "rrfContribution": 1 / 62,
+                        }
+                    },
+                    "textPreview": "vector",
+                },
+            ],
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -317,7 +395,7 @@ async def test_async_hybrid_retriever_starts_bm25_and_knn_concurrently():
             return {"hits": {"hits": []}}
 
     class FakeStore:
-        async def asimilarity_search(self, query, **kwargs):
+        async def asimilarity_search_with_score(self, query, **kwargs):
             del query, kwargs
             vector_started.set()
             assert full_text_started.wait(timeout=1)
@@ -332,6 +410,23 @@ async def test_async_hybrid_retriever_starts_bm25_and_knn_concurrently():
     )
 
     assert await retriever.ainvoke("合同") == []
+    assert retriever.retrieval_stages == {
+        "BM25": {
+            "resultCount": 0,
+            "scoreType": "ELASTICSEARCH_BM25",
+            "ranking": [],
+        },
+        "VECTOR": {
+            "resultCount": 0,
+            "scoreType": "ELASTICSEARCH_KNN",
+            "ranking": [],
+        },
+        "RRF": {
+            "resultCount": 0,
+            "rankConstant": 60,
+            "ranking": [],
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -350,7 +445,7 @@ async def test_async_hybrid_retriever_propagates_subsearch_failure():
             raise RuntimeError("full text unavailable")
 
     class FakeStore:
-        async def asimilarity_search(self, query, **kwargs):
+        async def asimilarity_search_with_score(self, query, **kwargs):
             del query, kwargs
             return []
 

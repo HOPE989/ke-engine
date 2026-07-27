@@ -7,6 +7,14 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
+        source: "/api/health/chat",
+        destination: `${chatApiBaseUrl}/health`
+      },
+      {
+        source: "/api/health/document",
+        destination: `${documentApiBaseUrl}/health`
+      },
+      {
         source: "/api/v1/chat/:path*",
         destination: `${chatApiBaseUrl}/api/v1/chat/:path*`
       },

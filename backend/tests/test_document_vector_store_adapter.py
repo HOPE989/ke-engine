@@ -102,6 +102,11 @@ def test_elasticsearch_store_uses_configured_index_and_dimensions(monkeypatch):
         "query_field": "text",
         "vector_query_field": "vector",
         "num_dimensions": 1536,
+        "metadata_mappings": {
+            "docId": {"type": "keyword"},
+            "chunkId": {"type": "keyword"},
+            "accessibleBy": {"type": "keyword"},
+        },
     }
 
 

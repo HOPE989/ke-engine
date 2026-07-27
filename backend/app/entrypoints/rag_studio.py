@@ -9,7 +9,6 @@ from app.infrastructure.elasticsearch import (
     DocumentHybridRetrieverFactory,
     create_document_retrieval_store,
     create_elasticsearch_client,
-    ensure_vector_index,
 )
 from app.infrastructure.langfuse import create_langfuse_resources
 from app.infrastructure.llm import (
@@ -34,11 +33,6 @@ def create_rag_studio_graph(
     )
     embedding_model = create_embedding_model(settings)
     client = create_elasticsearch_client(settings)
-    ensure_vector_index(
-        client,
-        index_name=settings.elasticsearch_index,
-        embedding_dimensions=settings.embedding_dimensions,
-    )
     options = DocumentRetrievalOptions()
     store = create_document_retrieval_store(
         settings=settings,

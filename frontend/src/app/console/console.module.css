@@ -1,0 +1,447 @@
+.shell {
+  --ink: #17201d;
+  --muted: #65716c;
+  --line: #cfd8d2;
+  --paper: #f4f6f1;
+  --green: #176b4d;
+  min-height: 100vh;
+  padding: 2rem;
+  background:
+    linear-gradient(rgba(23, 32, 29, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 32, 29, 0.035) 1px, transparent 1px),
+    var(--paper);
+  background-size: 2rem 2rem;
+  color: var(--ink);
+}
+
+.header {
+  display: flex;
+  max-width: 96rem;
+  margin: 0 auto 1.5rem;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.kicker,
+.panelTitle span,
+.historyTitle > span {
+  color: var(--green);
+  font-family: "Courier New", monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.header h1 {
+  margin: 0.35rem 0;
+  font-family: Georgia, serif;
+  font-size: clamp(2.2rem, 4vw, 4.5rem);
+  font-weight: 400;
+  line-height: 1;
+}
+
+.header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.presetSection {
+  display: grid;
+  max-width: 96rem;
+  margin: 0 auto 1.5rem;
+  grid-template-columns: repeat(8, minmax(9rem, 1fr));
+  overflow-x: auto;
+  border: 1px solid var(--ink);
+  background: #fff;
+}
+
+.presetSection button {
+  display: grid;
+  min-height: 7rem;
+  grid-template-columns: auto 1fr;
+  align-content: start;
+  gap: 0.35rem 0.6rem;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  padding: 0.8rem;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.presetSection button:hover {
+  background: #e3eee7;
+}
+
+.presetSection button > span {
+  color: var(--green);
+  font-family: monospace;
+  font-size: 0.7rem;
+}
+
+.presetSection strong {
+  font-family: Georgia, serif;
+  font-size: 0.86rem;
+}
+
+.presetSection small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.67rem;
+  line-height: 1.45;
+}
+
+.workspace {
+  display: grid;
+  max-width: 96rem;
+  min-height: 42rem;
+  margin: 0 auto;
+  grid-template-columns: minmax(20rem, 0.85fr) minmax(24rem, 1.3fr) 17rem;
+  border: 1px solid var(--ink);
+  background: #fff;
+}
+
+.requestPanel,
+.responsePanel {
+  min-width: 0;
+  padding: 1.2rem;
+  border-right: 1px solid var(--ink);
+}
+
+.requestPanel {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.panelTitle,
+.historyTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.panelTitle h2 {
+  margin: 0.25rem 0 0;
+  font-family: Georgia, serif;
+  font-size: 1.45rem;
+  font-weight: 400;
+}
+
+.panelTitle .localOnly {
+  border: 1px solid var(--line);
+  padding: 0.3rem 0.45rem;
+  color: var(--muted);
+  letter-spacing: 0;
+}
+
+.endpointRow {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  border: 1px solid var(--ink);
+}
+
+.endpointRow select,
+.endpointRow input,
+.requestPanel label input,
+.requestPanel textarea {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: #fafbf8;
+  padding: 0.75rem;
+  color: var(--ink);
+  font-family: "Courier New", monospace;
+  font-size: 0.78rem;
+}
+
+.endpointRow select {
+  border-right: 1px solid var(--ink);
+  background: #dceae1;
+  font-weight: 700;
+}
+
+.requestPanel label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.requestPanel label span {
+  display: flex;
+  justify-content: space-between;
+}
+
+.requestPanel label small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.requestPanel label input,
+.requestPanel textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.requestPanel textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.requestPanel input:focus,
+.requestPanel textarea:focus,
+.endpointRow:focus-within {
+  box-shadow: 0 0 0 2px rgba(23, 107, 77, 0.18);
+}
+
+.error {
+  margin: 0;
+  border-left: 3px solid #b13a30;
+  background: #fff0ed;
+  padding: 0.65rem;
+  color: #8b241d;
+  font-size: 0.75rem;
+}
+
+.sendButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  padding: 0.85rem 1rem;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sendButton:hover:not(:disabled) {
+  background: var(--green);
+}
+
+.sendButton:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.responsePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow: hidden;
+  background: #f9faf7;
+}
+
+.metrics {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  font-family: monospace;
+  font-size: 0.72rem;
+}
+
+.metrics strong {
+  padding: 0.3rem 0.45rem;
+  color: white;
+}
+
+.ok {
+  background: var(--green);
+}
+
+.bad {
+  background: #a3342b;
+}
+
+.responseActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-block: 1px solid var(--line);
+  padding: 0.6rem 0;
+}
+
+.responseActions code {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.responseActions button,
+.historyTitle button {
+  border: 0;
+  background: transparent;
+  color: var(--green);
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.responsePanel details {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.8rem;
+}
+
+.responsePanel summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.responsePanel pre {
+  overflow: auto;
+  margin: 0.7rem 0 0;
+  font-family: "Courier New", monospace;
+  font-size: 0.72rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.responseBody {
+  flex: 1;
+  min-height: 26rem;
+  border: 1px solid var(--line);
+  background: #17201d;
+  padding: 1rem;
+  color: #d9eee1;
+}
+
+.emptyResponse {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  text-align: center;
+}
+
+.emptyResponse span {
+  color: rgba(23, 107, 77, 0.1);
+  font-family: Georgia, serif;
+  font-size: 8rem;
+  line-height: 0.9;
+}
+
+.emptyResponse h3 {
+  margin: 1rem 0 0.4rem;
+  font-family: Georgia, serif;
+  font-size: 1.5rem;
+  font-weight: 400;
+}
+
+.emptyResponse p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.historyPanel {
+  min-width: 0;
+  background: #eef2ed;
+}
+
+.historyTitle {
+  min-height: 4rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.historyPanel > button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 0.45rem;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  padding: 0.75rem;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.historyPanel > button:hover,
+.historyPanel > .activeHistory {
+  background: #dceae1;
+}
+
+.historyPanel code {
+  overflow: hidden;
+  font-size: 0.65rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyPanel strong,
+.historyPanel small {
+  font-family: monospace;
+  font-size: 0.65rem;
+}
+
+.historyPanel > p {
+  padding: 1rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.okDot,
+.badDot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.badDot {
+  background: #a3342b;
+}
+
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: minmax(20rem, 0.9fr) minmax(24rem, 1.1fr);
+  }
+
+  .responsePanel {
+    border-right: 0;
+  }
+
+  .historyPanel {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .shell {
+    padding: 1rem;
+  }
+
+  .header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .requestPanel {
+    border-right: 0;
+    border-bottom: 1px solid var(--ink);
+  }
+
+  .responseBody {
+    min-height: 18rem;
+  }
+}

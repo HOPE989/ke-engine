@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
+import { TestNav } from "./components/TestNav";
 
 type ApiResponse<T> = {
   code: number;
@@ -310,7 +311,9 @@ export default function Home() {
   return (
     <main className="min-h-screen px-5 py-8 sm:px-8 lg:px-12">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <header className="flex flex-col gap-2">
+        <header className="flex flex-col gap-4">
+          <TestNav current="document" />
+          <div className="flex flex-col gap-2">
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-sky-700">
             KE Engine
           </p>
@@ -324,6 +327,7 @@ export default function Home() {
             </code>{" "}
             请求会通过 Next.js rewrite 转发到本地 FastAPI。
           </p>
+          </div>
         </header>
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,460px)]">

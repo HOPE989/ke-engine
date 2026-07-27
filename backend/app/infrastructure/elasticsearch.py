@@ -11,7 +11,8 @@ from elasticsearch import Elasticsearch, NotFoundError
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_elasticsearch import DenseVectorStrategy, ElasticsearchStore
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, PrivateAttr
+from typing_extensions import override
 
 from app.domains.rag.graph.retrieval import (
     DocumentRetrievalOptions,
@@ -20,6 +21,13 @@ from app.domains.rag.graph.retrieval import (
 
 VECTOR_FIELD = "vector"
 TEXT_FIELD = "text"
+_TEXT_PREVIEW_LIMIT = 200
+
+
+@dataclass(frozen=True, slots=True)
+class _ScoredDocument:
+    document: Document
+    score: float | None
 
 
 class VectorStoreIdCountMismatch(Exception):
@@ -64,6 +72,11 @@ def create_elasticsearch_store(
         query_field=TEXT_FIELD,
         vector_query_field=VECTOR_FIELD,
         num_dimensions=settings.embedding_dimensions,
+        metadata_mappings={
+            "docId": {"type": "keyword"},
+            "chunkId": {"type": "keyword"},
+            "accessibleBy": {"type": "keyword"},
+        },
     )
 
 
@@ -118,6 +131,28 @@ def reciprocal_rank_fusion(
 ) -> list[Document]:
     """按稳定 chunkId 对多个排序列表执行确定性 RRF。"""
 
+    fused, _ = _reciprocal_rank_fusion_with_stages(
+        {
+            f"RANKING_{index}": [
+                _ScoredDocument(document=document, score=None)
+                for document in ranking
+            ]
+            for index, ranking in enumerate(ranked_documents)
+        },
+        rank_constant=rank_constant,
+        result_limit=result_limit,
+    )
+    return fused
+
+
+def _reciprocal_rank_fusion_with_stages(
+    ranked_documents: dict[str, Sequence[_ScoredDocument]],
+    *,
+    rank_constant: int,
+    result_limit: int,
+) -> tuple[list[Document], dict[str, Any]]:
+    """执行 RRF，并保留每个通道的原始排名、分数和融合贡献。"""
+
     if rank_constant < 1:
         raise ValueError("rank_constant must be positive")
     if result_limit < 1:
@@ -125,27 +160,66 @@ def reciprocal_rank_fusion(
 
     scores: dict[str, float] = {}
     documents: dict[str, Document] = {}
-    for ranking in ranked_documents:
+    contributions: dict[str, dict[str, dict[str, float | int | None]]] = {}
+    stages: dict[str, Any] = {}
+    for channel, ranking in ranked_documents.items():
+        stages[channel] = {
+            "resultCount": len(ranking),
+            "scoreType": (
+                "ELASTICSEARCH_BM25"
+                if channel == "BM25"
+                else "ELASTICSEARCH_KNN"
+                if channel == "VECTOR"
+                else "UNSPECIFIED"
+            ),
+            "ranking": [
+                _ranked_document_debug(item, rank)
+                for rank, item in enumerate(ranking, start=1)
+            ],
+        }
         seen: set[str] = set()
-        for rank, document in enumerate(ranking, start=1):
+        for rank, item in enumerate(ranking, start=1):
+            document = item.document
             chunk_id = _document_chunk_id(document)
             if chunk_id in seen:
                 continue
             seen.add(chunk_id)
             documents.setdefault(chunk_id, document)
-            scores[chunk_id] = (
-                scores.get(chunk_id, 0.0)
-                + 1.0 / (rank_constant + rank)
-            )
+            contribution = 1.0 / (rank_constant + rank)
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + contribution
+            contributions.setdefault(chunk_id, {})[channel] = {
+                "rank": rank,
+                "score": item.score,
+                "rrfContribution": contribution,
+            }
 
     ordered_chunk_ids = sorted(
         scores,
         key=lambda chunk_id: (-scores[chunk_id], chunk_id),
     )
-    return [
+    selected_chunk_ids = ordered_chunk_ids[:result_limit]
+    fused = [
         documents[chunk_id]
-        for chunk_id in ordered_chunk_ids[:result_limit]
+        for chunk_id in selected_chunk_ids
     ]
+    stages["RRF"] = {
+        "resultCount": len(fused),
+        "rankConstant": rank_constant,
+        "ranking": [
+            {
+                "rank": rank,
+                "chunkId": chunk_id,
+                "docId": _document_doc_id(documents[chunk_id]),
+                "rrfScore": scores[chunk_id],
+                "channels": contributions[chunk_id],
+                "textPreview": _text_preview(
+                    documents[chunk_id].page_content
+                ),
+            }
+            for rank, chunk_id in enumerate(selected_chunk_ids, start=1)
+        ],
+    }
+    return fused, stages
 
 
 class ElasticsearchHybridRetriever(BaseRetriever):
@@ -161,7 +235,15 @@ class ElasticsearchHybridRetriever(BaseRetriever):
     index_name: str
     scope: DocumentRetrievalScope
     options: DocumentRetrievalOptions
+    _retrieval_stages: dict[str, Any] | None = PrivateAttr(default=None)
 
+    @property
+    def retrieval_stages(self) -> dict[str, Any] | None:
+        """返回最近一次请求的两路召回与 RRF 排名诊断。"""
+
+        return self._retrieval_stages
+
+    @override
     def _get_relevant_documents(
         self,
         query: str,
@@ -173,6 +255,7 @@ class ElasticsearchHybridRetriever(BaseRetriever):
         vector_documents = self._vector_search(query)
         return self._fuse(full_text_documents, vector_documents)
 
+    @override
     async def _aget_relevant_documents(
         self,
         query: str,
@@ -186,7 +269,7 @@ class ElasticsearchHybridRetriever(BaseRetriever):
         )
         return self._fuse(full_text_documents, vector_documents)
 
-    def _full_text_search(self, query: str) -> list[Document]:
+    def _full_text_search(self, query: str) -> list[_ScoredDocument]:
         filters = build_document_retrieval_filters(self.scope)
         response = self.client.search(
             index=self.index_name,
@@ -207,21 +290,34 @@ class ElasticsearchHybridRetriever(BaseRetriever):
             },
         )
         return [
-            _document_from_hit(hit)
+            _ScoredDocument(
+                document=_document_from_hit(hit),
+                score=_elasticsearch_hit_score(hit),
+            )
             for hit in response["hits"]["hits"]
         ]
 
-    def _vector_search(self, query: str) -> list[Document]:
-        return self.store.similarity_search(
-            query,
-            **self._vector_search_kwargs(),
-        )
+    def _vector_search(self, query: str) -> list[_ScoredDocument]:
+        return [
+            _ScoredDocument(document=document, score=float(score))
+            for document, score in self.store.similarity_search_with_score(
+                query,
+                **self._vector_search_kwargs(),
+            )
+        ]
 
-    async def _avector_search(self, query: str) -> list[Document]:
-        return await self.store.asimilarity_search(
+    async def _avector_search(
+        self,
+        query: str,
+    ) -> list[_ScoredDocument]:
+        results = await self.store.asimilarity_search_with_score(
             query,
             **self._vector_search_kwargs(),
         )
+        return [
+            _ScoredDocument(document=document, score=float(score))
+            for document, score in results
+        ]
 
     def _vector_search_kwargs(self) -> dict[str, Any]:
         return {
@@ -232,14 +328,19 @@ class ElasticsearchHybridRetriever(BaseRetriever):
 
     def _fuse(
         self,
-        full_text_documents: Sequence[Document],
-        vector_documents: Sequence[Document],
+        full_text_documents: Sequence[_ScoredDocument],
+        vector_documents: Sequence[_ScoredDocument],
     ) -> list[Document]:
-        return reciprocal_rank_fusion(
-            [full_text_documents, vector_documents],
+        documents, stages = _reciprocal_rank_fusion_with_stages(
+            {
+                "BM25": full_text_documents,
+                "VECTOR": vector_documents,
+            },
             rank_constant=self.options.rank_constant,
             result_limit=self.options.result_limit,
         )
+        self._retrieval_stages = stages
+        return documents
 
 
 @dataclass(frozen=True, slots=True)
@@ -383,11 +484,45 @@ def _segment_metadata(segment: Any) -> dict[str, Any]:
     return dict(metadata)
 
 
+def _ranked_document_debug(
+    item: _ScoredDocument,
+    rank: int,
+) -> dict[str, Any]:
+    document = item.document
+    return {
+        "rank": rank,
+        "chunkId": _document_chunk_id(document),
+        "docId": _document_doc_id(document),
+        "score": item.score,
+        "textPreview": _text_preview(document.page_content),
+    }
+
+
+def _elasticsearch_hit_score(hit: dict[str, Any]) -> float | None:
+    score = hit.get("_score")
+    if score is None:
+        return None
+    if not isinstance(score, (int, float)):
+        raise ValueError("Elasticsearch hit has invalid _score")
+    return float(score)
+
+
+def _document_doc_id(document: Document) -> str:
+    doc_id = document.metadata.get("docId")
+    if not isinstance(doc_id, str) or not doc_id.strip():
+        raise ValueError("retrieved document missing docId")
+    return doc_id.strip()
+
+
 def _document_chunk_id(document: Document) -> str:
     chunk_id = document.metadata.get("chunkId")
     if not isinstance(chunk_id, str) or not chunk_id.strip():
         raise ValueError("retrieved document missing chunkId")
     return chunk_id.strip()
+
+
+def _text_preview(text: str) -> str:
+    return text[:_TEXT_PREVIEW_LIMIT]
 
 
 def _document_from_hit(hit: dict[str, Any]) -> Document:

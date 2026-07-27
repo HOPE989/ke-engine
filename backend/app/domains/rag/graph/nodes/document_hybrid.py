@@ -51,6 +51,7 @@ async def document_hybrid_node(
         retriever = retriever_factory.create(scope)
         async with asyncio.timeout(options.timeout_seconds):
             documents = await retriever.ainvoke(query.strip(), config=config)
+        stages = getattr(retriever, "retrieval_stages", None)
         candidates = tuple(
             _document_candidate(document) for document in documents
         )
@@ -60,6 +61,7 @@ async def document_hybrid_node(
             else RetrievalStatus.EMPTY
         )
     except Exception:
+        stages = None
         candidates = ()
         status = RetrievalStatus.FAILED
 
@@ -70,6 +72,7 @@ async def document_hybrid_node(
         diagnostics=RetrievalDiagnostics(
             duration_ms=_elapsed_ms(started),
             result_count=len(candidates),
+            stages=stages,
         ),
     )
     return {
@@ -77,6 +80,7 @@ async def document_hybrid_node(
             RetrieverKind.DOCUMENT_HYBRID.value: outcome.model_dump(
                 mode="json",
                 by_alias=True,
+                exclude_none=True,
             )
         }
     }

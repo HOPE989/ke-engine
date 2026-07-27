@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 
-def test_rag_studio_assembles_model_hybrid_store_and_registered_node(
+def test_rag_studio_assembles_without_probing_elasticsearch_index(
     monkeypatch,
 ):
     from app.entrypoints import rag_studio as studio
@@ -65,13 +65,6 @@ def test_rag_studio_assembles_model_hybrid_store_and_registered_node(
     )
     monkeypatch.setattr(
         studio,
-        "ensure_vector_index",
-        lambda value, **kwargs: calls.append(
-            ("mapping", value, kwargs)
-        ),
-    )
-    monkeypatch.setattr(
-        studio,
         "DocumentRetrievalOptions",
         lambda: options,
     )
@@ -97,14 +90,6 @@ def test_rag_studio_assembles_model_hybrid_store_and_registered_node(
     assert result is compiled
     assert ("model", [handler]) in calls
     assert ("embedding", settings) in calls
-    assert (
-        "mapping",
-        client,
-        {
-            "index_name": "rag-documents",
-            "embedding_dimensions": 1536,
-        },
-    ) in calls
     assert (
         "store",
         {
@@ -171,7 +156,6 @@ def test_rag_studio_runs_without_langfuse(monkeypatch):
         "create_elasticsearch_client",
         lambda value: SimpleNamespace(indices=SimpleNamespace()),
     )
-    monkeypatch.setattr(studio, "ensure_vector_index", lambda *a, **k: None)
     monkeypatch.setattr(
         studio,
         "create_document_retrieval_store",

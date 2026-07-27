@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { listConversations, listMessages, streamCompletion } from "./api";
 import { Composer, ConversationList, MessageBubble } from "./components";
+import { TestNav } from "../components/TestNav";
 import type { ChatMessage, Conversation } from "./types";
 import styles from "./chat.module.css";
 
@@ -160,6 +161,7 @@ export default function ChatPage() {
             <span className={styles.eyebrow}>STREAMING COMPLETION</span>
             <h1>{selectedId ? `会话 #${selectedId}` : "新会话"}</h1>
           </div>
+          <TestNav current="chat" />
           <form className={styles.identity} onSubmit={applyIdentity}>
             <label htmlFor="mock-user">模拟用户</label>
             <input

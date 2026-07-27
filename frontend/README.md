@@ -21,6 +21,16 @@ Chat 测试页：
 http://localhost:3000/chat
 ```
 
+通用接口实验室：
+
+```text
+http://localhost:3000/console
+```
+
+接口实验室提供文档/Chat 健康检查、会话与消息查询、文档状态、切分、向量入库和
+原始 SSE 等预设。也可以手动输入同源 API 路径、请求头与 JSON 请求体；页面会保留最近
+20 次请求，展示状态码、耗时、响应头/响应体，并生成可复制的 cURL。
+
 页面会请求同源 `/api/v1/document/*`，Next.js rewrite 默认转发到后端：
 
 ```text

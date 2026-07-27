@@ -111,6 +111,7 @@ class RetrievalDiagnostics(BaseModel):
 
     duration_ms: int = Field(ge=0, alias="durationMs")
     result_count: int = Field(ge=0, alias="resultCount")
+    stages: dict[str, JsonValue] | None = None
 
 
 class RetrievalOutcome(BaseModel):

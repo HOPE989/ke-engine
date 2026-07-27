@@ -21,6 +21,32 @@ body {
 }
 
 button,
-input {
+input,
+textarea,
+select {
   font: inherit;
+}
+
+.test-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.test-nav a {
+  border: 1px solid rgba(17, 24, 39, 0.25);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.55rem 0.75rem;
+  color: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.test-nav a:hover,
+.test-nav a[aria-current="page"] {
+  border-color: #176b4d;
+  background: #176b4d;
+  color: white;
 }
