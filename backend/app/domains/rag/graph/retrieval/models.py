@@ -58,8 +58,9 @@ class DocumentRetrievalOptions(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    result_limit: int = Field(default=10, ge=1)
-    candidate_limit: int = Field(default=50, ge=1)
+    result_limit: int = Field(default=5, ge=1)
+    candidate_limit: int = Field(default=10, ge=1)
+    vector_min_score: float = Field(default=0.5, ge=0, le=1)
     rank_constant: Literal[60] = 60
     timeout_seconds: float = Field(default=10, gt=0)
 

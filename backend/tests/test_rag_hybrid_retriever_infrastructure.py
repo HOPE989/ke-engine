@@ -241,6 +241,7 @@ def test_sync_hybrid_retriever_applies_identical_filters():
             return [
                 (_document("full-text"), 0.91),
                 (_document("vector"), 0.82),
+                (_document("below-threshold"), 0.49),
             ]
 
     client = FakeClient()
@@ -293,7 +294,6 @@ def test_sync_hybrid_retriever_applies_identical_filters():
             "合同付款周期",
             {
                 "k": 5,
-                "fetch_k": 5,
                 "filter": expected_filters,
             },
         )
@@ -315,6 +315,9 @@ def test_sync_hybrid_retriever_applies_identical_filters():
         "VECTOR": {
             "resultCount": 2,
             "scoreType": "ELASTICSEARCH_KNN",
+            "minScore": 0.5,
+            "fetchedCount": 3,
+            "filteredOutCount": 1,
             "ranking": [
                 {
                     "rank": 1,
@@ -419,6 +422,9 @@ async def test_async_hybrid_retriever_starts_bm25_and_knn_concurrently():
         "VECTOR": {
             "resultCount": 0,
             "scoreType": "ELASTICSEARCH_KNN",
+            "minScore": 0.5,
+            "fetchedCount": 0,
+            "filteredOutCount": 0,
             "ranking": [],
         },
         "RRF": {

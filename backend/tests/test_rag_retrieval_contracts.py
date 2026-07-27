@@ -80,14 +80,21 @@ def test_retrieval_contracts_are_serializable_and_do_not_require_scores():
 def test_retrieval_options_are_immutable_and_require_valid_budgets():
     from app.domains.rag.graph.retrieval import DocumentRetrievalOptions
 
+    defaults = DocumentRetrievalOptions()
+    assert defaults.result_limit == 5
+    assert defaults.candidate_limit == 10
+    assert defaults.vector_min_score == 0.5
+
     options = DocumentRetrievalOptions(
         result_limit=10,
         candidate_limit=50,
+        vector_min_score=0.6,
         timeout_seconds=8,
     )
 
     assert options.rank_constant == 60
     assert options.candidate_limit == 50
+    assert options.vector_min_score == 0.6
     with pytest.raises(ValidationError):
         options.result_limit = 20
     with pytest.raises(ValidationError):
@@ -98,6 +105,8 @@ def test_retrieval_options_are_immutable_and_require_valid_budgets():
         )
     with pytest.raises(ValidationError):
         DocumentRetrievalOptions(rank_constant=59)
+    with pytest.raises(ValidationError):
+        DocumentRetrievalOptions(vector_min_score=1.1)
 
 
 def test_retrieval_outcome_reducer_merges_distinct_ids_deterministically():

@@ -236,6 +236,7 @@ class ElasticsearchHybridRetriever(BaseRetriever):
     scope: DocumentRetrievalScope
     options: DocumentRetrievalOptions
     _retrieval_stages: dict[str, Any] | None = PrivateAttr(default=None)
+    _vector_fetched_count: int = PrivateAttr(default=0)
 
     @property
     def retrieval_stages(self) -> dict[str, Any] | None:
@@ -298,13 +299,11 @@ class ElasticsearchHybridRetriever(BaseRetriever):
         ]
 
     def _vector_search(self, query: str) -> list[_ScoredDocument]:
-        return [
-            _ScoredDocument(document=document, score=float(score))
-            for document, score in self.store.similarity_search_with_score(
-                query,
-                **self._vector_search_kwargs(),
-            )
-        ]
+        results = self.store.similarity_search_with_score(
+            query,
+            **self._vector_search_kwargs(),
+        )
+        return self._filter_vector_results(results)
 
     async def _avector_search(
         self,
@@ -314,15 +313,22 @@ class ElasticsearchHybridRetriever(BaseRetriever):
             query,
             **self._vector_search_kwargs(),
         )
+        return self._filter_vector_results(results)
+
+    def _filter_vector_results(
+        self,
+        results: Sequence[tuple[Document, float]],
+    ) -> list[_ScoredDocument]:
+        self._vector_fetched_count = len(results)
         return [
             _ScoredDocument(document=document, score=float(score))
             for document, score in results
+            if score >= self.options.vector_min_score
         ]
 
     def _vector_search_kwargs(self) -> dict[str, Any]:
         return {
             "k": self.options.candidate_limit,
-            "fetch_k": self.options.candidate_limit,
             "filter": build_document_retrieval_filters(self.scope),
         }
 
@@ -338,6 +344,11 @@ class ElasticsearchHybridRetriever(BaseRetriever):
             },
             rank_constant=self.options.rank_constant,
             result_limit=self.options.result_limit,
+        )
+        stages["VECTOR"]["minScore"] = self.options.vector_min_score
+        stages["VECTOR"]["fetchedCount"] = self._vector_fetched_count
+        stages["VECTOR"]["filteredOutCount"] = (
+            self._vector_fetched_count - len(vector_documents)
         )
         self._retrieval_stages = stages
         return documents
