@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -22,12 +23,19 @@ from app.domains.rag.graph.retrieval import (
 VECTOR_FIELD = "vector"
 TEXT_FIELD = "text"
 _TEXT_PREVIEW_LIMIT = 200
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class _ScoredDocument:
     document: Document
     score: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ParentExpansion:
+    rankings: dict[str, list[_ScoredDocument]]
+    stages: list[dict[str, Any]]
 
 
 class VectorStoreIdCountMismatch(Exception):
@@ -131,7 +139,7 @@ def reciprocal_rank_fusion(
 ) -> list[Document]:
     """按稳定 chunkId 对多个排序列表执行确定性 RRF。"""
 
-    fused, _ = _reciprocal_rank_fusion_with_stages(
+    fused, _ = _reciprocal_rank_fusion_with_diagnostics(
         {
             f"RANKING_{index}": [
                 _ScoredDocument(document=document, score=None)
@@ -145,13 +153,13 @@ def reciprocal_rank_fusion(
     return fused
 
 
-def _reciprocal_rank_fusion_with_stages(
+def _reciprocal_rank_fusion_with_diagnostics(
     ranked_documents: dict[str, Sequence[_ScoredDocument]],
     *,
     rank_constant: int,
     result_limit: int,
-) -> tuple[list[Document], dict[str, Any]]:
-    """执行 RRF，并保留每个通道的原始排名、分数和融合贡献。"""
+) -> tuple[list[Document], list[dict[str, Any]]]:
+    """执行 RRF，并返回最终排名及各通道的融合贡献。"""
 
     if rank_constant < 1:
         raise ValueError("rank_constant must be positive")
@@ -160,23 +168,11 @@ def _reciprocal_rank_fusion_with_stages(
 
     scores: dict[str, float] = {}
     documents: dict[str, Document] = {}
-    contributions: dict[str, dict[str, dict[str, float | int | None]]] = {}
-    stages: dict[str, Any] = {}
+    channel_contributions: dict[
+        str,
+        dict[str, dict[str, float | int | None]],
+    ] = {}
     for channel, ranking in ranked_documents.items():
-        stages[channel] = {
-            "resultCount": len(ranking),
-            "scoreType": (
-                "ELASTICSEARCH_BM25"
-                if channel == "BM25"
-                else "ELASTICSEARCH_KNN"
-                if channel == "VECTOR"
-                else "UNSPECIFIED"
-            ),
-            "ranking": [
-                _ranked_document_debug(item, rank)
-                for rank, item in enumerate(ranking, start=1)
-            ],
-        }
         seen: set[str] = set()
         for rank, item in enumerate(ranking, start=1):
             document = item.document
@@ -187,7 +183,7 @@ def _reciprocal_rank_fusion_with_stages(
             documents.setdefault(chunk_id, document)
             contribution = 1.0 / (rank_constant + rank)
             scores[chunk_id] = scores.get(chunk_id, 0.0) + contribution
-            contributions.setdefault(chunk_id, {})[channel] = {
+            channel_contributions.setdefault(chunk_id, {})[channel] = {
                 "rank": rank,
                 "score": item.score,
                 "rrfContribution": contribution,
@@ -202,24 +198,19 @@ def _reciprocal_rank_fusion_with_stages(
         documents[chunk_id]
         for chunk_id in selected_chunk_ids
     ]
-    stages["RRF"] = {
-        "resultCount": len(fused),
-        "rankConstant": rank_constant,
-        "ranking": [
-            {
-                "rank": rank,
-                "chunkId": chunk_id,
-                "docId": _document_doc_id(documents[chunk_id]),
-                "rrfScore": scores[chunk_id],
-                "channels": contributions[chunk_id],
-                "textPreview": _text_preview(
-                    documents[chunk_id].page_content
-                ),
-            }
-            for rank, chunk_id in enumerate(selected_chunk_ids, start=1)
-        ],
-    }
-    return fused, stages
+    diagnostics = [
+        {
+            "rank": rank,
+            "chunkId": chunk_id,
+            "rrfScore": scores[chunk_id],
+            "channels": channel_contributions[chunk_id],
+            "textPreview": _text_preview(
+                documents[chunk_id].page_content
+            ),
+        }
+        for rank, chunk_id in enumerate(selected_chunk_ids, start=1)
+    ]
+    return fused, diagnostics
 
 
 class ElasticsearchHybridRetriever(BaseRetriever):
@@ -235,12 +226,28 @@ class ElasticsearchHybridRetriever(BaseRetriever):
     index_name: str
     scope: DocumentRetrievalScope
     options: DocumentRetrievalOptions
+    parent_chunk_cache: Any | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+    )
     _retrieval_stages: dict[str, Any] | None = PrivateAttr(default=None)
-    _vector_fetched_count: int = PrivateAttr(default=0)
+    _full_text_recall_stage: list[dict[str, Any]] | None = PrivateAttr(
+        default=None
+    )
+    _vector_recall_stage: list[dict[str, Any]] | None = PrivateAttr(
+        default=None
+    )
+    _full_text_parent_stage: list[dict[str, Any]] | None = PrivateAttr(
+        default=None
+    )
+    _vector_parent_stage: list[dict[str, Any]] | None = PrivateAttr(
+        default=None
+    )
 
     @property
     def retrieval_stages(self) -> dict[str, Any] | None:
-        """返回最近一次请求的两路召回与 RRF 排名诊断。"""
+        """返回最近一次请求按执行阶段组织的检索诊断。"""
 
         return self._retrieval_stages
 
@@ -265,12 +272,31 @@ class ElasticsearchHybridRetriever(BaseRetriever):
     ) -> list[Document]:
         del run_manager
         full_text_documents, vector_documents = await asyncio.gather(
-            asyncio.to_thread(self._full_text_search, query),
+            self._afull_text_search(query),
             self._avector_search(query),
         )
         return self._fuse(full_text_documents, vector_documents)
 
     def _full_text_search(self, query: str) -> list[_ScoredDocument]:
+        return self._expand_parent_chunks(
+            "BM25",
+            self._raw_full_text_search(query),
+        )
+
+    async def _afull_text_search(
+        self,
+        query: str,
+    ) -> list[_ScoredDocument]:
+        documents = await asyncio.to_thread(
+            self._raw_full_text_search,
+            query,
+        )
+        return await self._aexpand_parent_chunks("BM25", documents)
+
+    def _raw_full_text_search(
+        self,
+        query: str,
+    ) -> list[_ScoredDocument]:
         filters = build_document_retrieval_filters(self.scope)
         response = self.client.search(
             index=self.index_name,
@@ -290,20 +316,27 @@ class ElasticsearchHybridRetriever(BaseRetriever):
                 }
             },
         )
-        return [
+        documents = [
             _ScoredDocument(
                 document=_document_from_hit(hit),
                 score=_elasticsearch_hit_score(hit),
             )
             for hit in response["hits"]["hits"]
         ]
+        self._full_text_recall_stage = _recall_channel_stage(
+            documents,
+        )
+        return documents
 
     def _vector_search(self, query: str) -> list[_ScoredDocument]:
         results = self.store.similarity_search_with_score(
             query,
             **self._vector_search_kwargs(),
         )
-        return self._filter_vector_results(results)
+        return self._expand_parent_chunks(
+            "VECTOR",
+            self._filter_vector_results(results),
+        )
 
     async def _avector_search(
         self,
@@ -313,18 +346,24 @@ class ElasticsearchHybridRetriever(BaseRetriever):
             query,
             **self._vector_search_kwargs(),
         )
-        return self._filter_vector_results(results)
+        return await self._aexpand_parent_chunks(
+            "VECTOR",
+            self._filter_vector_results(results),
+        )
 
     def _filter_vector_results(
         self,
         results: Sequence[tuple[Document, float]],
     ) -> list[_ScoredDocument]:
-        self._vector_fetched_count = len(results)
-        return [
+        filtered = [
             _ScoredDocument(document=document, score=float(score))
             for document, score in results
             if score >= self.options.vector_min_score
         ]
+        self._vector_recall_stage = _recall_channel_stage(
+            filtered,
+        )
+        return filtered
 
     def _vector_search_kwargs(self) -> dict[str, Any]:
         return {
@@ -337,7 +376,7 @@ class ElasticsearchHybridRetriever(BaseRetriever):
         full_text_documents: Sequence[_ScoredDocument],
         vector_documents: Sequence[_ScoredDocument],
     ) -> list[Document]:
-        documents, stages = _reciprocal_rank_fusion_with_stages(
+        documents, fusion_stage = _reciprocal_rank_fusion_with_diagnostics(
             {
                 "BM25": full_text_documents,
                 "VECTOR": vector_documents,
@@ -345,13 +384,100 @@ class ElasticsearchHybridRetriever(BaseRetriever):
             rank_constant=self.options.rank_constant,
             result_limit=self.options.result_limit,
         )
-        stages["VECTOR"]["minScore"] = self.options.vector_min_score
-        stages["VECTOR"]["fetchedCount"] = self._vector_fetched_count
-        stages["VECTOR"]["filteredOutCount"] = (
-            self._vector_fetched_count - len(vector_documents)
-        )
-        self._retrieval_stages = stages
+        self._retrieval_stages = {
+            "RECALL": {
+                "BM25": self._full_text_recall_stage or [],
+                "VECTOR": self._vector_recall_stage or [],
+            },
+            "PARENT_EXPANSION": {
+                "BM25": self._full_text_parent_stage
+                or _identity_parent_expansion_stage(
+                    full_text_documents
+                ),
+                "VECTOR": self._vector_parent_stage
+                or _identity_parent_expansion_stage(
+                    vector_documents
+                ),
+            },
+            "RRF": fusion_stage,
+        }
         return documents
+
+    def _expand_parent_chunks(
+        self,
+        channel: str,
+        documents: Sequence[_ScoredDocument],
+    ) -> list[_ScoredDocument]:
+        references = _ranked_parent_chunk_references(
+            {channel: documents}
+        )
+        if not references:
+            self._set_parent_stage(
+                channel,
+                _identity_parent_expansion_stage(documents),
+            )
+            return list(documents)
+        if self.parent_chunk_cache is None:
+            raise RuntimeError("parent chunk cache is not configured")
+        parent_texts = self.parent_chunk_cache.load(references)
+        if inspect.isawaitable(parent_texts):
+            parent_texts = asyncio.run(parent_texts)
+        return self._apply_parent_expansion(
+            channel,
+            documents,
+            parent_texts,
+        )
+
+    async def _aexpand_parent_chunks(
+        self,
+        channel: str,
+        documents: Sequence[_ScoredDocument],
+    ) -> list[_ScoredDocument]:
+        references = _ranked_parent_chunk_references(
+            {channel: documents}
+        )
+        if not references:
+            self._set_parent_stage(
+                channel,
+                _identity_parent_expansion_stage(documents),
+            )
+            return list(documents)
+        if self.parent_chunk_cache is None:
+            raise RuntimeError("parent chunk cache is not configured")
+        parent_texts = self.parent_chunk_cache.load(references)
+        if inspect.isawaitable(parent_texts):
+            parent_texts = await parent_texts
+        return self._apply_parent_expansion(
+            channel,
+            documents,
+            parent_texts,
+        )
+
+    def _apply_parent_expansion(
+        self,
+        channel: str,
+        documents: Sequence[_ScoredDocument],
+        parent_texts: Any,
+    ) -> list[_ScoredDocument]:
+        expansion = _replace_ranked_children_with_parents(
+            {channel: documents},
+            parent_texts=parent_texts,
+        )
+        self._set_parent_stage(channel, expansion.stages)
+        return expansion.rankings[channel]
+
+    def _set_parent_stage(
+        self,
+        channel: str,
+        stage: list[dict[str, Any]],
+    ) -> None:
+        if channel == "BM25":
+            self._full_text_parent_stage = stage
+            return
+        if channel == "VECTOR":
+            self._vector_parent_stage = stage
+            return
+        raise ValueError(f"unsupported retrieval channel: {channel}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -362,6 +488,7 @@ class DocumentHybridRetrieverFactory:
     store: Any
     index_name: str
     options: DocumentRetrievalOptions
+    parent_chunk_cache: Any | None = None
 
     def create(
         self,
@@ -373,6 +500,7 @@ class DocumentHybridRetrieverFactory:
             index_name=self.index_name,
             scope=scope,
             options=self.options,
+            parent_chunk_cache=self.parent_chunk_cache,
         )
 
 
@@ -495,18 +623,180 @@ def _segment_metadata(segment: Any) -> dict[str, Any]:
     return dict(metadata)
 
 
+def _parent_chunk_references(
+    documents: Sequence[Document],
+) -> tuple[tuple[str, str], ...]:
+    references: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for document in documents:
+        reference = _parent_chunk_reference(document)
+        if reference is None or reference in seen:
+            continue
+        seen.add(reference)
+        references.append(reference)
+    return tuple(references)
+
+
+def _ranked_parent_chunk_references(
+    rankings: dict[str, Sequence[_ScoredDocument]],
+) -> tuple[tuple[str, str], ...]:
+    return _parent_chunk_references(
+        [
+            item.document
+            for ranking in rankings.values()
+            for item in ranking
+        ]
+    )
+
+
+def _parent_chunk_reference(
+    document: Document,
+) -> tuple[str, str] | None:
+    parent_chunk_id = document.metadata.get("parentChunkId")
+    if parent_chunk_id is None:
+        return None
+    if (
+        not isinstance(parent_chunk_id, str)
+        or not parent_chunk_id.strip()
+    ):
+        raise ValueError("retrieved document has invalid parentChunkId")
+    return _document_doc_id(document), parent_chunk_id.strip()
+
+
+def _replace_ranked_children_with_parents(
+    rankings: dict[str, Sequence[_ScoredDocument]],
+    *,
+    parent_texts: Any,
+) -> _ParentExpansion:
+    if not isinstance(parent_texts, dict):
+        raise ValueError("parent chunk loader must return a mapping")
+
+    expanded_rankings: dict[str, list[_ScoredDocument]] = {}
+    results: list[dict[str, Any]] = []
+    missing_logged: set[tuple[str, str]] = set()
+
+    for channel, ranking in rankings.items():
+        expanded: list[_ScoredDocument] = []
+        seen_parents: set[tuple[str, str]] = set()
+        for original_rank, item in enumerate(ranking, start=1):
+            document = item.document
+            source_chunk_id = _document_chunk_id(document)
+            reference = _parent_chunk_reference(document)
+            if reference is None:
+                expanded.append(item)
+                results.append(
+                    _parent_expansion_result_debug(
+                        item,
+                        rank=len(expanded),
+                        source_rank=original_rank,
+                        source_chunk_id=source_chunk_id,
+                    )
+                )
+                continue
+
+            parent_text = parent_texts.get(reference)
+            if (
+                not isinstance(parent_text, str)
+                or not parent_text.strip()
+            ):
+                if reference not in missing_logged:
+                    missing_logged.add(reference)
+                    logger.warning(
+                        "parent chunk not found: doc_id=%s, "
+                        "parent_chunk_id=%s",
+                        reference[0],
+                        reference[1],
+                    )
+                continue
+            if reference in seen_parents:
+                continue
+            seen_parents.add(reference)
+
+            metadata = dict(document.metadata)
+            metadata["matchedChunkId"] = source_chunk_id
+            metadata["chunkId"] = reference[1]
+            expanded_item = _ScoredDocument(
+                document=Document(
+                    page_content=parent_text,
+                    metadata=metadata,
+                ),
+                score=item.score,
+            )
+            expanded.append(expanded_item)
+            results.append(
+                _parent_expansion_result_debug(
+                    expanded_item,
+                    rank=len(expanded),
+                    source_rank=original_rank,
+                    source_chunk_id=source_chunk_id,
+                )
+            )
+        expanded_rankings[channel] = expanded
+
+    return _ParentExpansion(
+        rankings=expanded_rankings,
+        stages=results,
+    )
+
+
+def _recall_channel_stage(
+    ranking: Sequence[_ScoredDocument],
+) -> list[dict[str, Any]]:
+    return [
+        _ranked_document_debug(item, rank)
+        for rank, item in enumerate(ranking, start=1)
+    ]
+
+
+def _identity_parent_expansion_stage(
+    ranking: Sequence[_ScoredDocument],
+) -> list[dict[str, Any]]:
+    return [
+        _parent_expansion_result_debug(
+            item,
+            rank=rank,
+            source_rank=rank,
+            source_chunk_id=_document_chunk_id(item.document),
+        )
+        for rank, item in enumerate(ranking, start=1)
+    ]
+
+
+def _parent_expansion_result_debug(
+    item: _ScoredDocument,
+    *,
+    rank: int,
+    source_rank: int,
+    source_chunk_id: str,
+) -> dict[str, Any]:
+    document = item.document
+    result = {
+        "rank": rank,
+        "sourceRank": source_rank,
+        "chunkId": _document_chunk_id(document),
+        "score": item.score,
+        "textPreview": _text_preview(document.page_content),
+    }
+    if source_chunk_id != result["chunkId"]:
+        result["fromChunkId"] = source_chunk_id
+    return result
+
+
 def _ranked_document_debug(
     item: _ScoredDocument,
     rank: int,
 ) -> dict[str, Any]:
     document = item.document
-    return {
+    result = {
         "rank": rank,
         "chunkId": _document_chunk_id(document),
-        "docId": _document_doc_id(document),
         "score": item.score,
         "textPreview": _text_preview(document.page_content),
     }
+    parent_chunk_id = document.metadata.get("parentChunkId")
+    if parent_chunk_id is not None:
+        result["parentChunkId"] = parent_chunk_id
+    return result
 
 
 def _elasticsearch_hit_score(hit: dict[str, Any]) -> float | None:

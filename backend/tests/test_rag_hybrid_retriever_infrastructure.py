@@ -169,6 +169,7 @@ def test_request_scoped_factory_creates_custom_base_retrievers():
 
     client = object()
     store = object()
+    parent_chunk_cache = object()
     options = DocumentRetrievalOptions(
         result_limit=12,
         candidate_limit=60,
@@ -178,6 +179,7 @@ def test_request_scoped_factory_creates_custom_base_retrievers():
         store=store,
         index_name="rag-documents",
         options=options,
+        parent_chunk_cache=parent_chunk_cache,
     )
 
     first_scope = DocumentRetrievalScope(
@@ -197,6 +199,7 @@ def test_request_scoped_factory_creates_custom_base_retrievers():
     assert first.index_name == "rag-documents"
     assert first.scope == first_scope
     assert first.options is options
+    assert first.parent_chunk_cache is parent_chunk_cache
     assert second.scope == second_scope
 
 
@@ -298,83 +301,15 @@ def test_sync_hybrid_retriever_applies_identical_filters():
             },
         )
     ]
-    assert retriever.retrieval_stages == {
-        "BM25": {
-            "resultCount": 1,
-            "scoreType": "ELASTICSEARCH_BM25",
-            "ranking": [
-                {
-                    "rank": 1,
-                    "chunkId": "full-text",
-                    "docId": "doc-full-text",
-                    "score": 8.5,
-                    "textPreview": "全文结果",
-                }
-            ],
-        },
-        "VECTOR": {
-            "resultCount": 2,
-            "scoreType": "ELASTICSEARCH_KNN",
-            "minScore": 0.5,
-            "fetchedCount": 3,
-            "filteredOutCount": 1,
-            "ranking": [
-                {
-                    "rank": 1,
-                    "chunkId": "full-text",
-                    "docId": "doc-full-text",
-                    "score": 0.91,
-                    "textPreview": "full-text",
-                },
-                {
-                    "rank": 2,
-                    "chunkId": "vector",
-                    "docId": "doc-vector",
-                    "score": 0.82,
-                    "textPreview": "vector",
-                }
-            ],
-        },
-        "RRF": {
-            "resultCount": 2,
-            "rankConstant": 60,
-            "ranking": [
-                {
-                    "rank": 1,
-                    "chunkId": "full-text",
-                    "docId": "doc-full-text",
-                    "rrfScore": 2 / 61,
-                    "channels": {
-                        "BM25": {
-                            "rank": 1,
-                            "score": 8.5,
-                            "rrfContribution": 1 / 61,
-                        },
-                        "VECTOR": {
-                            "rank": 1,
-                            "score": 0.91,
-                            "rrfContribution": 1 / 61,
-                        }
-                    },
-                    "textPreview": "全文结果",
-                },
-                {
-                    "rank": 2,
-                    "chunkId": "vector",
-                    "docId": "doc-vector",
-                    "rrfScore": 1 / 62,
-                    "channels": {
-                        "VECTOR": {
-                            "rank": 2,
-                            "score": 0.82,
-                            "rrfContribution": 1 / 62,
-                        }
-                    },
-                    "textPreview": "vector",
-                },
-            ],
-        },
-    }
+    stages = retriever.retrieval_stages
+    assert list(stages) == ["RECALL", "PARENT_EXPANSION", "RRF"]
+    assert [
+        item["chunkId"]
+        for item in stages["PARENT_EXPANSION"]["VECTOR"]
+    ] == ["full-text", "vector"]
+    assert [
+        item["chunkId"] for item in stages["RRF"]
+    ] == ["full-text", "vector"]
 
 
 @pytest.mark.asyncio
@@ -414,25 +349,231 @@ async def test_async_hybrid_retriever_starts_bm25_and_knn_concurrently():
 
     assert await retriever.ainvoke("合同") == []
     assert retriever.retrieval_stages == {
-        "BM25": {
-            "resultCount": 0,
-            "scoreType": "ELASTICSEARCH_BM25",
-            "ranking": [],
-        },
-        "VECTOR": {
-            "resultCount": 0,
-            "scoreType": "ELASTICSEARCH_KNN",
-            "minScore": 0.5,
-            "fetchedCount": 0,
-            "filteredOutCount": 0,
-            "ranking": [],
-        },
-        "RRF": {
-            "resultCount": 0,
-            "rankConstant": 60,
-            "ranking": [],
-        },
+        "RECALL": {"BM25": [], "VECTOR": []},
+        "PARENT_EXPANSION": {"BM25": [], "VECTOR": []},
+        "RRF": [],
     }
+
+
+@pytest.mark.asyncio
+async def test_async_hybrid_retriever_replaces_and_deduplicates_parent_chunks():
+    from app.domains.rag.graph.retrieval import (
+        DocumentRetrievalOptions,
+        DocumentRetrievalScope,
+    )
+    from app.infrastructure.elasticsearch import (
+        ElasticsearchHybridRetriever,
+    )
+
+    def child(chunk_id: str) -> Document:
+        return Document(
+            page_content=f"子分段 {chunk_id}",
+            metadata={
+                "chunkId": chunk_id,
+                "docId": "1001",
+                "parentChunkId": "parent-1",
+                "fileName": "合同.md",
+            },
+        )
+
+    normal = Document(
+        page_content="独立分段",
+        metadata={
+            "chunkId": "normal",
+            "docId": "1001",
+            "parentChunkId": None,
+        },
+    )
+
+    class FakeClient:
+        def search(self, **kwargs):
+            del kwargs
+            return {
+                "hits": {
+                    "hits": [
+                        {
+                            "_score": 9.0,
+                            "_source": {
+                                "text": child("child-a").page_content,
+                                "metadata": child("child-a").metadata,
+                            },
+                        },
+                        {
+                            "_score": 8.0,
+                            "_source": {
+                                "text": child("child-b").page_content,
+                                "metadata": child("child-b").metadata,
+                            },
+                        },
+                        {
+                            "_score": 7.0,
+                            "_source": {
+                                "text": normal.page_content,
+                                "metadata": normal.metadata,
+                            },
+                        },
+                    ]
+                }
+            }
+
+    class FakeStore:
+        async def asimilarity_search_with_score(self, query, **kwargs):
+            del query, kwargs
+            return [(child("child-c"), 0.9)]
+
+    class FakeParentChunkCache:
+        def __init__(self):
+            self.calls = []
+
+        async def load(self, references):
+            self.calls.append(references)
+            return {("1001", "parent-1"): "父分段完整正文"}
+
+    parent_chunk_cache = FakeParentChunkCache()
+
+    retriever = ElasticsearchHybridRetriever(
+        client=FakeClient(),
+        store=FakeStore(),
+        index_name="rag-documents",
+        scope=DocumentRetrievalScope(accessibleBy=["team-a"]),
+        options=DocumentRetrievalOptions(
+            result_limit=2,
+            candidate_limit=4,
+        ),
+        parent_chunk_cache=parent_chunk_cache,
+    )
+
+    documents = await retriever.ainvoke("合同")
+
+    assert parent_chunk_cache.calls == [
+        (("1001", "parent-1"),),
+        (("1001", "parent-1"),),
+    ]
+    assert [document.page_content for document in documents] == [
+        "父分段完整正文",
+        "独立分段",
+    ]
+    assert documents[0].metadata == {
+        **child("child-a").metadata,
+        "chunkId": "parent-1",
+        "matchedChunkId": "child-a",
+    }
+    assert [
+        item["chunkId"]
+        for item in retriever.retrieval_stages["RECALL"]["BM25"]
+    ] == ["child-a", "child-b", "normal"]
+    assert retriever.retrieval_stages["PARENT_EXPANSION"] == {
+        "BM25": [
+            {
+                "rank": 1,
+                "sourceRank": 1,
+                "chunkId": "parent-1",
+                "score": 9.0,
+                "textPreview": "父分段完整正文",
+                "fromChunkId": "child-a",
+            },
+            {
+                "rank": 2,
+                "sourceRank": 3,
+                "chunkId": "normal",
+                "score": 7.0,
+                "textPreview": "独立分段",
+            },
+        ],
+        "VECTOR": [
+            {
+                "rank": 1,
+                "sourceRank": 1,
+                "chunkId": "parent-1",
+                "score": 0.9,
+                "textPreview": "父分段完整正文",
+                "fromChunkId": "child-c",
+            }
+        ],
+    }
+    assert retriever.retrieval_stages["RRF"] == [
+        {
+            "rank": 1,
+            "chunkId": "parent-1",
+            "rrfScore": 2 / 61,
+            "channels": {
+                "BM25": {
+                    "rank": 1,
+                    "score": 9.0,
+                    "rrfContribution": 1 / 61,
+                },
+                "VECTOR": {
+                    "rank": 1,
+                    "score": 0.9,
+                    "rrfContribution": 1 / 61,
+                },
+            },
+            "textPreview": "父分段完整正文",
+        },
+        {
+            "rank": 2,
+            "chunkId": "normal",
+            "rrfScore": 1 / 62,
+            "channels": {
+                "BM25": {
+                    "rank": 2,
+                    "score": 7.0,
+                    "rrfContribution": 1 / 62,
+                }
+            },
+            "textPreview": "独立分段",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_segment_repository_batches_parent_reads_by_document_and_chunk():
+    from app.domains.document.repositories.segment_repository import (
+        SegmentRepository,
+    )
+
+    class FakeResult:
+        def all(self):
+            return [
+                (1001, "parent-a", "父分段 A"),
+                (1002, "parent-b", "父分段 B"),
+            ]
+
+    class FakeSession:
+        def __init__(self):
+            self.statement = None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            del exc_type, exc, tb
+
+        async def execute(self, statement):
+            self.statement = statement
+            return FakeResult()
+
+    session = FakeSession()
+    repository = SegmentRepository(lambda: session)
+
+    texts = await repository.get_parent_texts(
+        [
+            ("1001", "parent-a"),
+            ("1001", "parent-a"),
+            ("1002", "parent-b"),
+        ]
+    )
+
+    assert texts == {
+        ("1001", "parent-a"): "父分段 A",
+        ("1002", "parent-b"): "父分段 B",
+    }
+    assert session.statement is not None
+    compiled_params = session.statement.compile().params
+    assert sorted(compiled_params["param_1"]) == [
+        (1001, "parent-a"),
+        (1002, "parent-b"),
+    ]
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ def test_rag_studio_assembles_without_probing_elasticsearch_index(
     store = object()
     options = object()
     factory = object()
+    parent_chunk_cache = object()
     compiled = object()
     calls = []
 
@@ -75,6 +76,12 @@ def test_rag_studio_assembles_without_probing_elasticsearch_index(
     )
     monkeypatch.setattr(
         studio,
+        "create_parent_chunk_cache",
+        lambda value: calls.append(("parent-cache", value))
+        or parent_chunk_cache,
+    )
+    monkeypatch.setattr(
+        studio,
         "DocumentHybridRetrieverFactory",
         lambda **kwargs: calls.append(("factory", kwargs)) or factory,
     )
@@ -105,6 +112,7 @@ def test_rag_studio_assembles_without_probing_elasticsearch_index(
             "store": store,
             "index_name": "rag-documents",
             "options": options,
+            "parent_chunk_cache": parent_chunk_cache,
         },
     ) in calls
     assert (
@@ -163,6 +171,11 @@ def test_rag_studio_runs_without_langfuse(monkeypatch):
     )
     monkeypatch.setattr(
         studio,
+        "create_parent_chunk_cache",
+        lambda value: object(),
+    )
+    monkeypatch.setattr(
+        studio,
         "build_rag_graph",
         lambda **kwargs: SimpleNamespace(compile=lambda: object()),
     )
@@ -170,3 +183,68 @@ def test_rag_studio_runs_without_langfuse(monkeypatch):
     studio.create_rag_studio_graph()
 
     assert callbacks_seen == [None]
+
+
+def test_parent_chunk_cache_disables_local_postgres_ssl_probe(
+    monkeypatch,
+):
+    from app.entrypoints import rag_studio as studio
+
+    settings = SimpleNamespace(
+        database_url="postgresql+asyncpg://user:pass@db/app",
+        redis_url="redis://redis.example:6379/0",
+    )
+    engine = object()
+    session_factory = object()
+    repository = object()
+    redis_client = object()
+    captured = {}
+
+    def fake_create_async_engine(database_url, **kwargs):
+        captured["engine"] = (database_url, kwargs)
+        return engine
+
+    def fake_session_factory(**kwargs):
+        captured["session"] = kwargs
+        return session_factory
+
+    def fake_repository(value):
+        captured["repository"] = value
+        return repository
+
+    def fake_redis_client(value):
+        captured["redis"] = value
+        return redis_client
+
+    monkeypatch.setattr(
+        studio,
+        "create_async_engine",
+        fake_create_async_engine,
+    )
+    monkeypatch.setattr(
+        studio,
+        "async_sessionmaker",
+        fake_session_factory,
+    )
+    monkeypatch.setattr(
+        studio,
+        "SegmentRepository",
+        fake_repository,
+    )
+    monkeypatch.setattr(
+        studio,
+        "create_redis_client",
+        fake_redis_client,
+    )
+
+    cache = studio.create_parent_chunk_cache(settings)
+
+    assert captured["engine"] == (
+        settings.database_url,
+        {
+            "pool_pre_ping": True,
+            "connect_args": {"ssl": False},
+        },
+    )
+    assert cache.repository is repository
+    assert cache.redis_client is redis_client

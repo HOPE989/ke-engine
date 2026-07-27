@@ -39,18 +39,15 @@ async def test_document_hybrid_node_invokes_scoped_retriever_and_converts_docs()
             )
         ],
         retrieval_stages={
-            "BM25": {
-                "resultCount": 1,
-                "scoreType": "ELASTICSEARCH_BM25",
-                "ranking": [
+            "RECALL": {
+                "BM25": [
                     {
                         "rank": 1,
                         "chunkId": "chunk-1",
-                        "docId": "doc-1",
                         "score": 8.5,
                         "textPreview": "合同付款周期为三十天。",
                     }
-                ],
+                ]
             }
         },
     )
@@ -74,10 +71,9 @@ async def test_document_hybrid_node_invokes_scoped_retriever_and_converts_docs()
     outcome = update["retrieval_outcomes"]["DOCUMENT_HYBRID"]
     assert outcome["status"] == "SUCCESS"
     assert outcome["diagnostics"]["resultCount"] == 1
-    assert outcome["diagnostics"]["stages"]["BM25"]["ranking"][0] == {
+    assert outcome["diagnostics"]["stages"]["RECALL"]["BM25"][0] == {
         "rank": 1,
         "chunkId": "chunk-1",
-        "docId": "doc-1",
         "score": 8.5,
         "textPreview": "合同付款周期为三十天。",
     }
