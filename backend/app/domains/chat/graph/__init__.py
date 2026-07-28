@@ -11,6 +11,8 @@ from app.domains.chat.graph.routing import (
     BUSINESS_BOUNDARY_NODE,
     BUSINESS_UNDERSTANDING_NODE,
     CLARIFY_NODE,
+    GROUNDED_ANSWER_NODE,
+    KNOWLEDGE_RAG_NODE,
 )
 from app.domains.chat.graph.state import ChatState
 
@@ -20,6 +22,8 @@ __all__ = [
     "BUSINESS_BOUNDARY_NODE",
     "BUSINESS_UNDERSTANDING_NODE",
     "CLARIFY_NODE",
+    "GROUNDED_ANSWER_NODE",
+    "KNOWLEDGE_RAG_NODE",
     "LLM_NODE",
     "build_chat_graph",
     "business_boundary_node",

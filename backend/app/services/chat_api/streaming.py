@@ -13,7 +13,11 @@ from pydantic import BaseModel, ValidationError
 from app.contracts.chat.stream import ContentDeltaPayload
 from app.domains.chat.graph.business_understanding import ClarificationInterruptPayload
 from app.domains.chat.graph.nodes.business_boundary import BUSINESS_BOUNDARY_MESSAGE
-from app.domains.chat.graph.routing import BUSINESS_BOUNDARY_NODE
+from app.domains.chat.graph.nodes.grounded_answer import EMPTY_EVIDENCE_ANSWER
+from app.domains.chat.graph.routing import (
+    BUSINESS_BOUNDARY_NODE,
+    GROUNDED_ANSWER_NODE,
+)
 
 
 def encode_sse(event: str, payload: BaseModel) -> bytes:
@@ -74,6 +78,29 @@ def project_business_boundary_event(
     if type(message) is not AIMessage or message.content != BUSINESS_BOUNDARY_MESSAGE:
         raise ValueError("unsupported business boundary event")
     return ContentDeltaPayload(content=BUSINESS_BOUNDARY_MESSAGE)
+
+
+def project_empty_evidence_event(
+    event: dict[str, object],
+) -> ContentDeltaPayload | None:
+    """只投影 grounded_answer 的确定性空证据消息。"""
+
+    metadata = event.get("metadata")
+    if (
+        event.get("event") != "on_chain_stream"
+        or not isinstance(metadata, dict)
+        or metadata.get("langgraph_node") != GROUNDED_ANSWER_NODE
+    ):
+        return None
+    data = event.get("data")
+    chunk = data.get("chunk") if isinstance(data, dict) else None
+    messages = chunk.get("messages") if isinstance(chunk, dict) else None
+    if not isinstance(messages, list) or len(messages) != 1:
+        return None
+    message = messages[0]
+    if type(message) is not AIMessage or message.content != EMPTY_EVIDENCE_ANSWER:
+        return None
+    return ContentDeltaPayload(content=EMPTY_EVIDENCE_ANSWER)
 
 
 def project_clarification_interrupt(

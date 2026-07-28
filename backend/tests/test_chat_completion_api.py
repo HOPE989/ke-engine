@@ -337,7 +337,10 @@ async def test_completion_metadata_reuses_owned_conversation():
         "user_message_id": "2002",
     }
     assert calls.index("transaction_commit") < calls.index("aget_state")
-    assert graph.state_configs == [{"configurable": {"thread_id": "42"}}]
+    assert graph.state_configs == [
+        {"configurable": {"thread_id": "42"}},
+        {"configurable": {"thread_id": "42"}},
+    ]
 
 
 @pytest.mark.asyncio

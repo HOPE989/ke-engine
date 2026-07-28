@@ -6,6 +6,7 @@ from app.core.config import create_settings, validate_chat_startup_settings
 from app.domains.chat.graph import build_chat_graph
 from app.infrastructure.langfuse import create_langfuse_resources
 from app.infrastructure.llm import create_chat_model
+from app.infrastructure.rag_mcp_client import McpRagClient
 
 
 def create_studio_graph(config: RunnableConfig | None = None):
@@ -20,4 +21,8 @@ def create_studio_graph(config: RunnableConfig | None = None):
         model=settings.openai_model,
         callbacks=callbacks,
     )
-    return build_chat_graph(bound_model=model).compile()
+    return build_chat_graph(
+        bound_model=model,
+        bound_rag_client=McpRagClient(settings.rag_mcp_url),
+        bound_user_id="mock-user",
+    ).compile()

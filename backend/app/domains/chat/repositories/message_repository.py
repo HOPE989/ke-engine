@@ -65,6 +65,7 @@ class MessageRepository:
         conversation_id: int,
         parent_message_id: int,
         content: str,
+        rag_references: list[dict[str, object]] | None = None,
     ) -> Message:
         """把完整 ASSISTANT 回答加入当前业务事务。
 
@@ -77,6 +78,7 @@ class MessageRepository:
             parent_message_id=parent_message_id,
             role="ASSISTANT",
             content=content,
+            rag_references=rag_references or [],
         )
         self._session.add(message)
         return message

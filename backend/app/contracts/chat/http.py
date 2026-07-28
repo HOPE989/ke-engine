@@ -50,6 +50,7 @@ class MessageSummary(BaseModel):
     parent_message_id: ResponseId | None
     role: str
     content: str
+    rag_references: list[dict] = Field(default_factory=list)
     created_at: datetime
 
 

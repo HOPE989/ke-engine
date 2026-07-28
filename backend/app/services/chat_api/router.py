@@ -110,6 +110,7 @@ async def create_completion(
                 id_generator=chat_deps.id_generator,
                 publisher=publisher,
                 langfuse=chat_deps.langfuse,
+                rag_client=getattr(chat_deps, "rag_client", None),
             ),
             turn=accepted.turn,
             completion_lock=accepted.lock,
@@ -225,6 +226,7 @@ async def list_messages(
                     parent_message_id=item.parent_message_id,
                     role=item.role,
                     content=item.content,
+                    rag_references=item.rag_references or [],
                     created_at=item.created_at,
                 )
                 for item in items

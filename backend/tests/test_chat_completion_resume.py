@@ -162,7 +162,7 @@ async def test_no_pending_checkpoint_starts_normal_human_message_turn():
 
     invocation = graph.stream_invocations[0]
     assert invocation["input"] == {"messages": [HumanMessage(content="hello")]}
-    assert graph.state_configs == [CONFIG]
+    assert graph.state_configs == [CONFIG, CONFIG]
     assert invocation["config"] == CONFIG
     assert graph.state_configs[0] is invocation["config"]
     assert calls.index("publish_metadata") < calls.index("aget_state")
@@ -188,7 +188,7 @@ async def test_pending_clarification_resumes_with_content_on_same_thread():
     graph_input = invocation["input"]
     assert isinstance(graph_input, Command)
     assert graph_input.resume == "YD2026001"
-    assert graph.state_configs == [CONFIG]
+    assert graph.state_configs == [CONFIG, CONFIG]
     assert invocation["config"] == CONFIG
     assert graph.state_configs[0] is invocation["config"]
     assert calls.index("aget_state") < calls.index("astream_events")

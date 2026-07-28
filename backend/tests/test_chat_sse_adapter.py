@@ -110,6 +110,28 @@ def test_project_business_boundary_event_accepts_only_boundary_node_message_upda
     assert project_business_boundary_event(classifier_event) is None
 
 
+def test_project_empty_evidence_event_uses_existing_content_delta_payload():
+    from app.domains.chat.graph.nodes.grounded_answer import (
+        EMPTY_EVIDENCE_ANSWER,
+    )
+    from app.services.chat_api.streaming import project_empty_evidence_event
+
+    event = {
+        "event": "on_chain_stream",
+        "metadata": {"langgraph_node": "grounded_answer"},
+        "data": {
+            "chunk": {
+                "messages": [AIMessage(content=EMPTY_EVIDENCE_ANSWER)]
+            }
+        },
+    }
+
+    payload = project_empty_evidence_event(event)
+
+    assert payload == ContentDeltaPayload(content=EMPTY_EVIDENCE_ANSWER)
+    assert "mcp" not in payload.model_dump_json().lower()
+
+
 @pytest.mark.parametrize(
     "messages",
     [

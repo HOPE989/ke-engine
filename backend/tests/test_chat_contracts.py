@@ -78,6 +78,7 @@ def test_chat_http_response_identifiers_serialize_as_strings():
         "parent_message_id": "2036854775806",
         "role": "ASSISTANT",
         "content": "world",
+        "rag_references": [],
         "created_at": "2026-07-14T00:00:00Z",
     }
 

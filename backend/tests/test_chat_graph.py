@@ -67,15 +67,20 @@ def test_chat_graph_has_business_understanding_routes_and_no_retry_policy():
         ("business_understanding", "business_boundary"),
         ("business_understanding", "clarify"),
         ("business_understanding", "llm"),
+        ("business_understanding", "knowledge_rag"),
         ("business_boundary", END),
         ("clarify", "business_understanding"),
         ("llm", END),
+        ("knowledge_rag", "grounded_answer"),
+        ("grounded_answer", END),
     }
     assert set(builder.nodes) == {
         "business_understanding",
         "business_boundary",
         "clarify",
         "llm",
+        "knowledge_rag",
+        "grounded_answer",
     }
     assert all(node.retry_policy is None for node in builder.nodes.values())
 

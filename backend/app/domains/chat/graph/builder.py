@@ -13,16 +13,32 @@ from app.domains.chat.graph.nodes.business_understanding import (
 )
 from app.domains.chat.graph.nodes.clarify import clarify_node
 from app.domains.chat.graph.nodes.llm import invoke_llm, llm_node
+from app.domains.chat.graph.nodes.grounded_answer import (
+    grounded_answer_node,
+    invoke_grounded_answer,
+)
+from app.domains.chat.graph.nodes.knowledge_rag import (
+    invoke_knowledge_rag,
+    knowledge_rag_node,
+)
 from app.domains.chat.graph.routing import (
     BUSINESS_BOUNDARY_NODE,
     BUSINESS_UNDERSTANDING_NODE,
     CLARIFY_NODE,
+    GROUNDED_ANSWER_NODE,
+    KNOWLEDGE_RAG_NODE,
     LLM_NODE,
 )
+from app.domains.chat.services.rag import RagClient
 from app.domains.chat.graph.state import ChatState
 
 
-def build_chat_graph(*, bound_model: BaseChatModel | None = None) -> StateGraph:
+def build_chat_graph(
+    *,
+    bound_model: BaseChatModel | None = None,
+    bound_rag_client: RagClient | None = None,
+    bound_user_id: str | None = None,
+) -> StateGraph:
     """声明业务理解三路拓扑，但不在领域层编译 Graph。
 
     编译需要生命周期内就绪的 PostgreSQL saver，因此由 Chat API 装配层完成。builder
@@ -40,12 +56,30 @@ def build_chat_graph(*, bound_model: BaseChatModel | None = None) -> StateGraph:
     response = (
         llm_node if bound_model is None else partial(invoke_llm, model=bound_model)
     )
+    knowledge = (
+        knowledge_rag_node
+        if bound_model is None
+        else partial(
+            invoke_knowledge_rag,
+            rag_client=bound_rag_client,
+            user_id=bound_user_id,
+        )
+    )
+    grounded = (
+        grounded_answer_node
+        if bound_model is None
+        else partial(invoke_grounded_answer, model=bound_model)
+    )
     graph = StateGraph(ChatState, context_schema=context_schema)
     graph.add_node(BUSINESS_UNDERSTANDING_NODE, understanding)
     graph.add_node(LLM_NODE, response)
     graph.add_node(BUSINESS_BOUNDARY_NODE, business_boundary_node)
     graph.add_node(CLARIFY_NODE, clarify_node)
+    graph.add_node(KNOWLEDGE_RAG_NODE, knowledge)
+    graph.add_node(GROUNDED_ANSWER_NODE, grounded)
     graph.add_edge(START, BUSINESS_UNDERSTANDING_NODE)
     graph.add_edge(LLM_NODE, END)
     graph.add_edge(BUSINESS_BOUNDARY_NODE, END)
+    graph.add_edge(KNOWLEDGE_RAG_NODE, GROUNDED_ANSWER_NODE)
+    graph.add_edge(GROUNDED_ANSWER_NODE, END)
     return graph

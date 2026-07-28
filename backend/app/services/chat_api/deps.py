@@ -25,6 +25,7 @@ from app.infrastructure.llm import create_chat_model
 from app.infrastructure.redis import create_redis_client
 from app.infrastructure.snowflake import SnowflakeIdGenerator
 from app.services.document_api.deps import initialize_database_deps
+from app.infrastructure.rag_mcp_client import McpRagClient
 
 
 class ChatResourceStack:
@@ -79,6 +80,7 @@ class ChatApiDeps:
     completion_lock_expire_seconds: int
     producer_registry: Any
     langfuse: LangfuseResources | None
+    rag_client: Any
 
 
 def get_chat_deps(request: Request) -> ChatApiDeps:
@@ -124,6 +126,7 @@ async def application_lifespan_resources(
 
         # 步骤 4：只有 saver 完成 setup 后才编译生产 Graph，确保首次请求即可持久化 state。
         graph = build_chat_graph().compile(checkpointer=saver)
+        rag_client = McpRagClient(settings.rag_mcp_url)
         producer_registry = create_producer_registry()
         stack.push_cleanup(producer_registry.shutdown)
 
@@ -138,6 +141,7 @@ async def application_lifespan_resources(
             completion_lock_expire_seconds=settings.chat_completion_lock_expire_seconds,
             producer_registry=producer_registry,
             langfuse=langfuse,
+            rag_client=rag_client,
         )
         stack.push_cleanup(_discard_app_state_attr, application, "chat_deps")
         yield

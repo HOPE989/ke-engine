@@ -12,3 +12,5 @@ class ChatState(MessagesState):
     """
 
     business_understanding: BusinessUnderstandingResult
+    evidence_package: dict[str, object] | None
+    rag_references: list[dict[str, object]]

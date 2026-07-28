@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from app.domains.chat.services.rag import RagClient
+
 
 @dataclass(frozen=True, slots=True)
 class ChatRuntimeContext:
@@ -14,3 +16,5 @@ class ChatRuntimeContext:
     """
 
     model: BaseChatModel
+    rag_client: RagClient | None = None
+    user_id: str | None = None

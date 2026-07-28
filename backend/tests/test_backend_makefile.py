@@ -42,6 +42,17 @@ def test_root_makefile_exposes_chat_api_target():
     ) in content
 
 
+def test_root_makefile_exposes_rag_mcp_target():
+    makefile = Path(__file__).resolve().parents[2] / "Makefile"
+
+    content = makefile.read_text(encoding="utf-8")
+
+    assert "RAG_MCP_PORT" not in content
+    assert "dev-rag-mcp:" in content
+    assert "make dev-rag-mcp" in content
+    assert "$(UV) run python -m app.entrypoints.rag_mcp" in content
+
+
 def test_root_makefile_exposes_database_init_target():
     makefile = Path(__file__).resolve().parents[2] / "Makefile"
 

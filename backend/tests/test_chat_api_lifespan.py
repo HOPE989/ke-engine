@@ -16,6 +16,7 @@ def _settings():
         chat_completion_lock_expire_seconds=120,
         openai_model="gpt-test",
         snowflake_worker_id=7,
+        rag_mcp_url="http://127.0.0.1:8002/mcp",
     )
 
 
@@ -32,6 +33,7 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
     saver = object()
     graph = object()
     langfuse = object()
+    rag_client = object()
     class FakeRedis:
         def close(self):
             calls.append("redis_close")
@@ -121,6 +123,11 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
     )
     monkeypatch.setattr(
         deps,
+        "McpRagClient",
+        lambda url: calls.append(f"rag_client:{url}") or rag_client,
+    )
+    monkeypatch.setattr(
+        deps,
         "create_producer_registry",
         lambda: calls.append("registry_create") or registry,
     )
@@ -136,6 +143,7 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
             "langfuse_open",
             "build_graph",
             "compile_graph",
+            "rag_client:http://127.0.0.1:8002/mcp",
             "registry_create",
         ]
         assert application.state.chat_deps == deps.ChatApiDeps(
@@ -148,6 +156,7 @@ async def test_chat_lifespan_compiles_after_model_and_saver_and_closes_in_order(
             completion_lock_expire_seconds=120,
             producer_registry=registry,
             langfuse=langfuse,
+            rag_client=rag_client,
         )
 
     assert calls[-5:] == [

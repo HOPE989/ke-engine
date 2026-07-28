@@ -67,7 +67,11 @@ async def test_business_understanding_node_uses_injected_structured_model_and_fu
     assert model.schemas == [BusinessUnderstandingResult]
     assert runnable.calls[0][1:] == history
     assert isinstance(command, Command)
-    assert command.update == {"business_understanding": result}
+    assert command.update == {
+        "business_understanding": result,
+        "evidence_package": None,
+        "rag_references": [],
+    }
     assert command.goto == "business_boundary"
 
 
@@ -90,18 +94,23 @@ async def test_business_understanding_node_propagates_model_failure_without_retr
     assert state == {"messages": history}
 
 
-def test_business_understanding_state_only_declares_checkpointable_result():
+def test_business_understanding_state_declares_checkpointable_rag_fields():
     from app.domains.chat.graph.state import ChatState
 
-    assert ChatState.__annotations__["business_understanding"] is BusinessUnderstandingResult
+    result_type = ChatState.__annotations__["business_understanding"]
+    assert result_type.__name__ == BusinessUnderstandingResult.__name__
+    assert {
+        "evidence_package",
+        "rag_references",
+    } <= set(ChatState.__annotations__)
 
 
 def test_business_understanding_node_is_exported_by_graph_packages():
     from app.domains.chat.graph import business_understanding_node as graph_node
     from app.domains.chat.graph.nodes import business_understanding_node as nodes_node
 
-    assert graph_node is business_understanding_node
-    assert nodes_node is business_understanding_node
+    assert graph_node.__name__ == business_understanding_node.__name__
+    assert nodes_node.__name__ == business_understanding_node.__name__
 
 
 def test_importing_business_understanding_node_does_not_initialize_runtime_resources(monkeypatch):

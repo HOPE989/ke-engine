@@ -127,6 +127,11 @@ class Settings(BaseSettings):
             "completion lock."
         ),
     )
+    rag_mcp_url: str = Field(
+        default="http://127.0.0.1:8002/mcp",
+        validation_alias="RAG_MCP_URL",
+        description="startup-only: Chat uses this internal MCP endpoint for document RAG.",
+    )
     langfuse_public_key: str | None = Field(
         default=None,
         validation_alias="LANGFUSE_PUBLIC_KEY",
@@ -241,6 +246,7 @@ STARTUP_ONLY_SETTINGS = {
     "kafka_bootstrap_servers",
     "document_convert_lock_expire_seconds",
     "chat_completion_lock_expire_seconds",
+    "rag_mcp_url",
     "langfuse_public_key",
     "langfuse_secret_key",
     "langfuse_base_url",

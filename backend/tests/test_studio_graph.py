@@ -9,11 +9,15 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 def test_studio_graph_binds_one_model_to_existing_builder(monkeypatch):
     from app.entrypoints import studio_graph as studio
 
-    settings = SimpleNamespace(openai_model="gpt-test")
+    settings = SimpleNamespace(
+        openai_model="gpt-test",
+        rag_mcp_url="http://127.0.0.1:8002/mcp",
+    )
     handler = object()
     resources = SimpleNamespace(handler=handler)
     bound_model = object()
     compiled = object()
+    rag_client = object()
     calls = []
 
     class FakeBuilder:
@@ -45,6 +49,11 @@ def test_studio_graph_binds_one_model_to_existing_builder(monkeypatch):
     monkeypatch.setattr(studio, "create_chat_model", fake_create_chat_model)
     monkeypatch.setattr(
         studio,
+        "McpRagClient",
+        lambda url: calls.append(("rag-client", url)) or rag_client,
+    )
+    monkeypatch.setattr(
+        studio,
         "build_chat_graph",
         lambda **kwargs: calls.append(("builder", kwargs)) or FakeBuilder(),
     )
@@ -61,7 +70,15 @@ def test_studio_graph_binds_one_model_to_existing_builder(monkeypatch):
                 "callbacks": [handler],
             },
         ),
-        ("builder", {"bound_model": bound_model}),
+        ("rag-client", "http://127.0.0.1:8002/mcp"),
+        (
+            "builder",
+            {
+                "bound_model": bound_model,
+                "bound_rag_client": rag_client,
+                "bound_user_id": "mock-user",
+            },
+        ),
         ("compile", {}),
     ]
 
@@ -69,7 +86,10 @@ def test_studio_graph_binds_one_model_to_existing_builder(monkeypatch):
 def test_studio_graph_is_fail_open_when_langfuse_is_unavailable(monkeypatch):
     from app.entrypoints import studio_graph as studio
 
-    settings = SimpleNamespace(openai_model="gpt-test")
+    settings = SimpleNamespace(
+        openai_model="gpt-test",
+        rag_mcp_url="http://127.0.0.1:8002/mcp",
+    )
     callbacks_seen = []
     monkeypatch.setattr(studio, "create_settings", lambda: settings)
     monkeypatch.setattr(studio, "validate_chat_startup_settings", lambda value: value)
@@ -85,6 +105,7 @@ def test_studio_graph_is_fail_open_when_langfuse_is_unavailable(monkeypatch):
         "build_chat_graph",
         lambda **kwargs: SimpleNamespace(compile=lambda: object()),
     )
+    monkeypatch.setattr(studio, "McpRagClient", lambda url: object())
 
     studio.create_studio_graph()
 

@@ -46,6 +46,45 @@ def _sql(statement):
     return str(statement.compile(dialect=postgresql.dialect())).lower()
 
 
+def test_add_assistant_persists_references_and_defaults_non_rag_to_empty():
+    from app.domains.chat.repositories import MessageRepository
+
+    class AddSession:
+        def __init__(self):
+            self.added = []
+
+        def add(self, value):
+            self.added.append(value)
+
+    session = AddSession()
+    repository = MessageRepository(session)
+    references = [
+        {
+            "citationId": "doc-1:chunk-1",
+            "docId": "doc-1",
+            "chunkId": "chunk-1",
+            "fileName": "规程.md",
+        }
+    ]
+
+    grounded = repository.add_assistant(
+        message_id=1,
+        conversation_id=10,
+        parent_message_id=9,
+        content="有依据的回答。[1]",
+        rag_references=references,
+    )
+    ordinary = repository.add_assistant(
+        message_id=2,
+        conversation_id=10,
+        parent_message_id=9,
+        content="普通回答",
+    )
+
+    assert grounded.rag_references == references
+    assert ordinary.rag_references == []
+
+
 @pytest.mark.asyncio
 async def test_conversations_use_owned_newest_first_keyset_pages_without_duplicates():
     from app.domains.chat.repositories import ConversationCursor, ConversationRepository

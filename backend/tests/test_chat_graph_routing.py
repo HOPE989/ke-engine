@@ -36,7 +36,7 @@ def make_result(route: BusinessRoute) -> BusinessUnderstandingResult:
 @pytest.mark.parametrize(
     ("route", "expected_node"),
     [
-        (BusinessRoute.BUSINESS, "business_boundary"),
+        (BusinessRoute.BUSINESS, "knowledge_rag"),
         (BusinessRoute.NON_BUSINESS, "llm"),
         (BusinessRoute.CLARIFY, "clarify"),
     ],
@@ -54,7 +54,11 @@ async def test_business_understanding_command_maps_each_route_to_one_node(
     )
 
     assert isinstance(command, Command)
-    assert command.update == {"business_understanding": result}
+    assert command.update == {
+        "business_understanding": result,
+        "evidence_package": None,
+        "rag_references": [],
+    }
     assert command.goto == expected_node
 
 
@@ -134,7 +138,14 @@ async def test_business_graph_ends_at_boundary_without_ordinary_model_call():
     from app.domains.chat.graph.context import ChatRuntimeContext
     from app.domains.chat.graph.nodes.business_boundary import BUSINESS_BOUNDARY_MESSAGE
 
-    classification = make_result(BusinessRoute.BUSINESS)
+    classification = BusinessUnderstandingResult.model_validate(
+        {
+            "reasoning": "业务数据查询暂未接入",
+            "route": "BUSINESS",
+            "intent": "BUSINESS_DATA_QUERY",
+            "entities": {},
+        }
+    )
     model = FakeSequentialChatModel([classification], ordinary_response=None)
     user_message = HumanMessage(content="铁路货运规程是什么？")
 

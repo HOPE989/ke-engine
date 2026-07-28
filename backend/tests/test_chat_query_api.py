@@ -111,6 +111,14 @@ async def test_chat_message_query_is_chronological_with_string_ids_and_no_checkp
             parent_message_id=101,
             role="ASSISTANT",
             content="two",
+            rag_references=[
+                {
+                    "citationId": "doc-1:chunk-1",
+                    "docId": "doc-1",
+                    "chunkId": "chunk-1",
+                    "fileName": "规程.md",
+                }
+            ],
             created_at=now + timedelta(seconds=1),
         ),
     ]
@@ -129,6 +137,15 @@ async def test_chat_message_query_is_chronological_with_string_ids_and_no_checkp
         ("102", "42", "101"),
     ]
     assert [item["content"] for item in items] == ["one", "two"]
+    assert items[0]["rag_references"] == []
+    assert items[1]["rag_references"] == [
+        {
+            "citationId": "doc-1:chunk-1",
+            "docId": "doc-1",
+            "chunkId": "chunk-1",
+            "fileName": "规程.md",
+        }
+    ]
 
 
 @pytest.mark.asyncio

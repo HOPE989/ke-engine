@@ -42,7 +42,11 @@ from app.domains.chat.graph import ChatRuntimeContext
 from app.domains.chat.graph.business_understanding import (
     ClarificationInterruptPayload,
 )
-from app.domains.chat.graph.routing import CLARIFY_NODE, LLM_NODE
+from app.domains.chat.graph.routing import (
+    CLARIFY_NODE,
+    GROUNDED_ANSWER_NODE,
+    LLM_NODE,
+)
 from app.domains.chat.repositories import MessageRepository
 from app.domains.chat.services.conversation import AcceptedUserTurn
 from app.domains.chat.services.completion_lock import release_completion_lock
@@ -54,6 +58,7 @@ from app.infrastructure.langfuse import (
 from app.services.chat_api.streaming import (
     project_business_boundary_event,
     project_clarification_interrupt,
+    project_empty_evidence_event,
     project_graph_event,
 )
 
@@ -64,6 +69,7 @@ class GraphCompletion:
 
     content: str
     finish_reason: CompletionFinishReason
+    rag_references: tuple[dict[str, object], ...] = ()
 
 
 async def resolve_graph_input(
@@ -311,6 +317,7 @@ class CompletionProducer:
         id_generator: Any,
         publisher: Any,
         langfuse: LangfuseResources | None = None,
+        rag_client: Any | None = None,
     ) -> None:
         self._graph = graph
         self._model = model
@@ -318,6 +325,7 @@ class CompletionProducer:
         self._id_generator = id_generator
         self._publisher = publisher
         self._langfuse = langfuse
+        self._rag_client = rag_client
 
     async def run(self, *, turn: AcceptedUserTurn, user_id: str) -> None:
         """运行已接受的用户轮次，并发布且仅发布一个终态事件。
@@ -345,9 +353,19 @@ class CompletionProducer:
             },
             tags=["chat", "langgraph", "source:chat-api"],
         ) as trace:
-            await self._run_traced(turn=turn, trace=trace)
+            await self._run_traced(
+                turn=turn,
+                user_id=user_id,
+                trace=trace,
+            )
 
-    async def _run_traced(self, *, turn: AcceptedUserTurn, trace: Any | None) -> None:
+    async def _run_traced(
+        self,
+        *,
+        turn: AcceptedUserTurn,
+        user_id: str,
+        trace: Any | None,
+    ) -> None:
         """执行原有 completion 语义，并尽力补全根 trace 的输入模式和终态。"""
 
         # 步骤 1：先发布 metadata。此时 USER 消息已经在 Router 前置事务中提交，所以
@@ -362,10 +380,18 @@ class CompletionProducer:
 
         try:
             # 步骤 2：消费 Graph 流并在内存中拼接最终回答；每个 delta 同时实时发布。
-            completion = await self._consume_graph_events(turn, trace=trace)
+            completion = await self._consume_graph_events(
+                turn,
+                user_id=user_id,
+                trace=trace,
+            )
             # 步骤 3：完整回答必须先提交业务表。completed 的语义不是“模型流结束”，
             # 而是“模型流结束且 ASSISTANT 消息已经成功落库”。
-            assistant_message_id = await self._commit_assistant(turn, completion.content)
+            assistant_message_id = await self._commit_assistant(
+                turn,
+                completion.content,
+                rag_references=list(completion.rag_references),
+            )
         except Exception:
             # 不把原始异常文本发送给客户端，避免数据库地址、密钥或内部栈信息泄露。
             # 已经发出的 delta 无法收回，但失败时不会保存不完整的 ASSISTANT 消息。
@@ -406,6 +432,7 @@ class CompletionProducer:
         self,
         turn: AcceptedUserTurn,
         *,
+        user_id: str,
         trace: Any | None = None,
     ) -> GraphCompletion:
         """运行指定会话的 Graph，发布公开增量并收集可持久化结果。
@@ -432,7 +459,11 @@ class CompletionProducer:
         async for event in self._graph.astream_events(
             graph_input,
             config,
-            context=ChatRuntimeContext(model=self._model),
+            context=ChatRuntimeContext(
+                model=self._model,
+                rag_client=self._rag_client,
+                user_id=user_id,
+            ),
             version="v2",
         ):
             # Graph 会产生节点、链、模型等多类底层事件。这里只保留 API 协议认可的文本
@@ -441,7 +472,8 @@ class CompletionProducer:
             delta = (
                 project_graph_event(event)
                 if isinstance(metadata, dict)
-                and metadata.get("langgraph_node") == LLM_NODE
+                and metadata.get("langgraph_node")
+                in {LLM_NODE, GROUNDED_ANSWER_NODE}
                 else None
             )
             if delta is not None:
@@ -453,6 +485,11 @@ class CompletionProducer:
                 answer_parts.append(boundary_delta.content)
                 await self._publisher.publish("content_delta", boundary_delta)
 
+            empty_delta = project_empty_evidence_event(event)
+            if empty_delta is not None:
+                answer_parts.append(empty_delta.content)
+                await self._publisher.publish("content_delta", empty_delta)
+
             clarification = project_clarification_interrupt(event)
             if clarification is not None:
                 question_delta = ContentDeltaPayload(content=clarification.question)
@@ -462,9 +499,23 @@ class CompletionProducer:
                     finish_reason="interrupt",
                 )
 
-        return GraphCompletion(content="".join(answer_parts), finish_reason="stop")
+        final_snapshot = await self._graph.aget_state(config)
+        references = _validate_rag_references(
+            final_snapshot.values.get("rag_references", [])
+        )
+        return GraphCompletion(
+            content="".join(answer_parts),
+            finish_reason="stop",
+            rag_references=tuple(references),
+        )
 
-    async def _commit_assistant(self, turn: AcceptedUserTurn, answer: str) -> int:
+    async def _commit_assistant(
+        self,
+        turn: AcceptedUserTurn,
+        answer: str,
+        *,
+        rag_references: list[dict[str, object]],
+    ) -> int:
         """在独立业务事务中保存完整 ASSISTANT 消息并返回其 Snowflake ID。
 
         ASSISTANT 以本轮 USER 消息作为 parent，从而在业务消息表中保留本轮问答关系。
@@ -481,6 +532,7 @@ class CompletionProducer:
                     conversation_id=turn.conversation_id,
                     parent_message_id=turn.user_message_id,
                     content=answer,
+                    rag_references=rag_references,
                 )
         return assistant_message_id
 
@@ -493,3 +545,26 @@ def _model_name(model: Any) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return type(model).__name__
+
+
+def _validate_rag_references(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise ValueError("rag_references must be a list")
+    references: list[dict[str, object]] = []
+    required = ("citationId", "docId", "chunkId")
+    allowed = {
+        *required,
+        "fileName",
+        "url",
+        "rerankScore",
+    }
+    for item in value:
+        if not isinstance(item, dict) or not all(
+            isinstance(item.get(key), str) and item[key].strip()
+            for key in required
+        ):
+            raise ValueError("invalid RAG reference")
+        references.append(
+            {key: item[key] for key in item if key in allowed}
+        )
+    return references

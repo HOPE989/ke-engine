@@ -26,3 +26,15 @@ def test_chat_startup_validation_requires_configured_model():
     settings = config.Settings(openai_model="gpt-test")
 
     assert config.validate_chat_startup_settings(settings) is settings
+
+
+def test_chat_has_one_rag_mcp_url_startup_setting():
+    settings = config.Settings()
+
+    assert settings.rag_mcp_url == "http://127.0.0.1:8002/mcp"
+    assert "rag_mcp_url" in config.STARTUP_ONLY_SETTINGS
+    assert [
+        name
+        for name in config.Settings.model_fields
+        if name.startswith("rag_mcp")
+    ] == ["rag_mcp_url"]
