@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.domains.chat.graph import build_chat_graph
 from app.domains.chat.graph.business_understanding import BusinessUnderstandingResult
-from app.domains.chat.graph.nodes.business_boundary import BUSINESS_BOUNDARY_MESSAGE
+from app.domains.chat.graph.nodes.grounded_answer import EMPTY_EVIDENCE_ANSWER
+from app.domains.chat.graph.query_contextualization import QueryContextResult
+from app.domains.rag.services import EvidencePackage
 from app.domains.chat.services.conversation import AcceptedUserTurn
 from app.domains.chat.services.runtime import CompletionProducer
 from app.domains.chat.shared.models import Conversation, Message
@@ -59,6 +61,18 @@ def non_business_result() -> BusinessUnderstandingResult:
             "clarification_question": None,
         }
     )
+
+
+class EmptyRagClient:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def retrieve_evidence(self, request):
+        self.calls.append(request)
+        return EvidencePackage(
+            query=request.query,
+            selected_retrievers=("DOCUMENT_HYBRID",),
+        )
 
 
 class SequenceIdGenerator:
@@ -212,7 +226,7 @@ async def test_non_business_streams_general_answer_and_persists_before_completed
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_business_persists_only_boundary_message_without_ordinary_model_call():
+async def test_business_enters_rag_and_persists_empty_evidence_answer():
     content = "查一下运单YD2026001现在到哪了"
     async with isolated_schema() as (schema, saver_url):
         engine = create_business_engine(schema)
@@ -225,9 +239,13 @@ async def test_business_persists_only_boundary_message_without_ordinary_model_ca
                 compiled = build_chat_graph().compile(checkpointer=saver)
                 graph = RecordingCompiledGraph(compiled)
                 model = ScriptedChatModel(
-                    structured_outputs=[business_result()],
+                    structured_outputs=[
+                        business_result(),
+                        QueryContextResult(standalone_query=content),
+                    ],
                     ordinary_outputs=[],
                 )
+                rag_client = EmptyRagClient()
                 publisher = PersistenceObservingPublisher(session_factory)
                 producer = CompletionProducer(
                     graph=graph,
@@ -235,6 +253,7 @@ async def test_business_persists_only_boundary_message_without_ordinary_model_ca
                     session_factory=session_factory,
                     id_generator=SequenceIdGenerator([3001]),
                     publisher=publisher,
+                    rag_client=rag_client,
                 )
 
                 await producer.run(
@@ -242,21 +261,23 @@ async def test_business_persists_only_boundary_message_without_ordinary_model_ca
                     user_id="alice",
                 )
 
-                assert [event for event, _ in publisher.events] == [
-                    "metadata",
-                    "content_delta",
-                    "completed",
-                ]
-                assert publisher.events[1][1].content == BUSINESS_BOUNDARY_MESSAGE
+                assert publisher.events[0][0] == "metadata"
+                assert publisher.events[-1][0] == "completed"
+                assert [
+                    payload.content
+                    for event, payload in publisher.events
+                    if event == "content_delta"
+                ] == [EMPTY_EVIDENCE_ANSWER]
                 assert publisher.events[-1][1].finish_reason == "stop"
                 assert publisher.persisted_at_completed == [
-                    ("ASSISTANT", BUSINESS_BOUNDARY_MESSAGE)
+                    ("ASSISTANT", EMPTY_EVIDENCE_ANSWER)
                 ]
                 assert model.ordinary_calls == []
+                assert rag_client.calls[0].query == content
                 assert any(
                     event.get("event") == "on_chain_stream"
                     and event.get("metadata", {}).get("langgraph_node")
-                    == "business_boundary"
+                    == "business_rag"
                     for event in graph.stream_events
                 )
                 snapshot = await compiled.aget_state(
@@ -268,7 +289,7 @@ async def test_business_persists_only_boundary_message_without_ordinary_model_ca
             messages = await persisted_messages(session_factory)
             assert [(message.role, message.content) for message in messages] == [
                 ("USER", content),
-                ("ASSISTANT", BUSINESS_BOUNDARY_MESSAGE),
+                ("ASSISTANT", EMPTY_EVIDENCE_ANSWER),
             ]
             assert messages[-1].parent_message_id == 2001
             public_payloads = " ".join(
@@ -310,9 +331,16 @@ async def test_clarification_persists_resumes_and_reclassifies_on_same_thread(ca
                 compiled = build_chat_graph().compile(checkpointer=saver)
                 graph = RecordingCompiledGraph(compiled)
                 model = ScriptedChatModel(
-                    structured_outputs=[clarify_result(), business_result()],
+                    structured_outputs=[
+                        clarify_result(),
+                        business_result(),
+                        QueryContextResult(
+                            standalone_query="查询运单 YD2026001 当前状态"
+                        ),
+                    ],
                     ordinary_outputs=[],
                 )
+                rag_client = EmptyRagClient()
                 id_generator = SequenceIdGenerator([3001, 3002])
 
                 first_publisher = PersistenceObservingPublisher(session_factory)
@@ -322,18 +350,20 @@ async def test_clarification_persists_resumes_and_reclassifies_on_same_thread(ca
                     session_factory=session_factory,
                     id_generator=id_generator,
                     publisher=first_publisher,
+                    rag_client=rag_client,
                 )
                 await first_producer.run(
                     turn=AcceptedUserTurn(1001, 2001, "查一下我的运单"),
                     user_id="alice",
                 )
 
-                assert [event for event, _ in first_publisher.events] == [
-                    "metadata",
-                    "content_delta",
-                    "completed",
-                ]
-                assert first_publisher.events[1][1].content == "请提供运单号"
+                assert first_publisher.events[0][0] == "metadata"
+                assert first_publisher.events[-1][0] == "completed"
+                assert [
+                    payload.content
+                    for event, payload in first_publisher.events
+                    if event == "content_delta"
+                ] == ["请提供运单号"]
                 assert first_publisher.events[-1][1].finish_reason == "interrupt"
                 assert first_publisher.persisted_at_completed == [
                     ("ASSISTANT", "请提供运单号")
@@ -360,6 +390,7 @@ async def test_clarification_persists_resumes_and_reclassifies_on_same_thread(ca
                     session_factory=session_factory,
                     id_generator=id_generator,
                     publisher=second_publisher,
+                    rag_client=rag_client,
                 )
                 await second_producer.run(
                     turn=AcceptedUserTurn(1001, 2002, "YD2026001"),
@@ -373,15 +404,16 @@ async def test_clarification_persists_resumes_and_reclassifies_on_same_thread(ca
                 assert second_history[-2].content == "请提供运单号"
                 assert isinstance(second_history[-1], HumanMessage)
                 assert second_history[-1].content == "YD2026001"
-                assert [event for event, _ in second_publisher.events] == [
-                    "metadata",
-                    "content_delta",
-                    "completed",
-                ]
-                assert second_publisher.events[1][1].content == BUSINESS_BOUNDARY_MESSAGE
+                assert second_publisher.events[0][0] == "metadata"
+                assert second_publisher.events[-1][0] == "completed"
+                assert [
+                    payload.content
+                    for event, payload in second_publisher.events
+                    if event == "content_delta"
+                ] == [EMPTY_EVIDENCE_ANSWER]
                 assert second_publisher.events[-1][1].finish_reason == "stop"
                 assert second_publisher.persisted_at_completed == [
-                    ("ASSISTANT", BUSINESS_BOUNDARY_MESSAGE)
+                    ("ASSISTANT", EMPTY_EVIDENCE_ANSWER)
                 ]
                 completed = await compiled.aget_state(config)
                 assert completed.next == ()
@@ -392,7 +424,7 @@ async def test_clarification_persists_resumes_and_reclassifies_on_same_thread(ca
                 ("USER", "查一下我的运单"),
                 ("USER", "YD2026001"),
                 ("ASSISTANT", "请提供运单号"),
-                ("ASSISTANT", BUSINESS_BOUNDARY_MESSAGE),
+                ("ASSISTANT", EMPTY_EVIDENCE_ANSWER),
             ]
             assert model.ordinary_calls == []
             assert not [

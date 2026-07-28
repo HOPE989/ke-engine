@@ -1,10 +1,10 @@
-"""文档 RAG 服务边界使用的最小请求与证据契约。"""
+"""RAG 服务边界使用的最小请求与可扩展证据契约。"""
+
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.domains.rag.graph.query_rewrite.models import (
-    ConversationContextMessage,
-)
+from app.domains.rag.graph.query_router import RetrieverKind
 from app.domains.rag.graph.retrieval.models import (
     _normalized_nonblank_values,
 )
@@ -22,16 +22,6 @@ class RetrieveEvidenceRequest(BaseModel):
     query: str = Field(min_length=1, pattern=r"\S")
     accessible_by: tuple[str, ...] = Field(alias="accessibleBy")
     doc_ids: tuple[str, ...] = Field(default=(), alias="docIds")
-    conversation_context: tuple[ConversationContextMessage, ...] = Field(
-        default=(),
-        alias="conversationContext",
-    )
-    business_intent: str | None = Field(
-        default=None,
-        pattern=r"\S",
-        alias="businessIntent",
-    )
-
     @field_validator("query")
     @classmethod
     def normalize_query(cls, value: str) -> str:
@@ -59,6 +49,10 @@ class EvidenceItem(BaseModel):
         populate_by_name=True,
     )
 
+    source_type: Literal["DOCUMENT"] = Field(
+        default="DOCUMENT",
+        alias="sourceType",
+    )
     citation_id: str = Field(
         min_length=1,
         pattern=r"\S",
@@ -92,10 +86,9 @@ class EvidencePackage(BaseModel):
     )
 
     query: str = Field(min_length=1, pattern=r"\S")
-    standalone_query: str = Field(
+    selected_retrievers: tuple[RetrieverKind, ...] = Field(
         min_length=1,
-        pattern=r"\S",
-        alias="standaloneQuery",
+        alias="selectedRetrievers",
     )
     evidence_items: tuple[EvidenceItem, ...] = Field(
         default=(),

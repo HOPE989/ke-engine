@@ -12,9 +12,6 @@ from langfuse.api.commons.errors import NotFoundError
 
 from app.core.config import Settings, create_settings
 from app.domains.rag.graph.nodes.query_router import query_router_node
-from app.domains.rag.graph.query_rewrite.prompt import (
-    QUERY_REWRITE_PROMPT_VERSION,
-)
 from app.domains.rag.graph.query_router import RetrieverKind
 from app.domains.rag.graph.query_router.evaluation import (
     QueryRouterEvaluationCase,
@@ -175,9 +172,6 @@ def run_experiment(
             metadata={
                 "model": settings.openai_model,
                 "query_router_prompt_version": QUERY_ROUTER_PROMPT_VERSION,
-                "query_rewrite_prompt_version": (
-                    QUERY_REWRITE_PROMPT_VERSION
-                ),
                 "app_version": settings.app_version,
                 "live_model": "true",
                 "route_scoring": "objective-set-match",

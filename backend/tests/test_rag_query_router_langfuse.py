@@ -212,7 +212,6 @@ def test_router_run_experiment_is_explicit_and_serial(monkeypatch, capsys):
     assert call["metadata"] == {
         "model": "deepseek-test",
         "query_router_prompt_version": "v1",
-        "query_rewrite_prompt_version": "v2",
         "app_version": "0.1.0",
         "live_model": "true",
         "route_scoring": "objective-set-match",

@@ -249,11 +249,223 @@
 }
 
 .messageArea {
+  min-width: 0;
   overflow-y: auto;
   background-image:
     linear-gradient(rgba(25, 26, 28, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(25, 26, 28, 0.035) 1px, transparent 1px);
   background-size: 2rem 2rem;
+}
+
+.mainArea {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 23rem;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inspector {
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: #202123;
+  color: #f6f3ea;
+}
+
+.inspector > header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  padding: 1rem;
+  border-bottom: 1px solid #3c3d3f;
+  background: #202123;
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+}
+
+.inspector > header span {
+  color: #989a9d;
+}
+
+.inspector > header strong {
+  color: var(--accent);
+}
+
+.inspector section {
+  padding: 1rem;
+  border-bottom: 1px solid #3c3d3f;
+}
+
+.inspector h2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 0.85rem;
+  font-family: Georgia, serif;
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.inspector h2 span {
+  display: grid;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  place-items: center;
+  background: var(--accent);
+  color: #171719;
+  font: 700 0.65rem "Courier New", monospace;
+}
+
+.inspector label {
+  display: block;
+  margin: 0.8rem 0 0.35rem;
+  color: #989a9d;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.inspectorEmpty {
+  margin: 0;
+  color: #898b8f;
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.traceList {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.traceList li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.traceList li > span {
+  width: 0.55rem;
+  height: 0.55rem;
+  border: 1px solid #777a7e;
+  border-radius: 50%;
+}
+
+.traceList li[data-status="completed"] > span {
+  border-color: #2c9b5e;
+  background: #2c9b5e;
+}
+
+.traceList div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.traceList strong {
+  font-size: 0.72rem;
+}
+
+.traceList code,
+.traceList em {
+  color: #898b8f;
+  font-size: 0.6rem;
+  font-style: normal;
+}
+
+.standaloneQuery {
+  margin: 0;
+  padding: 0.7rem;
+  border-left: 2px solid var(--accent);
+  background: #2c2d2f;
+  font-family: Georgia, serif;
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.retrieverTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.retrieverTags span {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #5c5e62;
+  color: #d8d5cc;
+  font-size: 0.6rem;
+}
+
+.evidenceSection {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.evidenceCard {
+  padding: 0.75rem;
+  border: 1px solid #47494d;
+  background: #28292b;
+}
+
+.evidenceCard > div,
+.evidenceCard footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.evidenceCard strong {
+  overflow: hidden;
+  font-family: Georgia, serif;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidenceCard > div span {
+  color: var(--accent);
+  font-size: 0.55rem;
+}
+
+.evidenceCard p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0.65rem 0;
+  color: #d2cfc7;
+  font-family: Georgia, serif;
+  font-size: 0.74rem;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+}
+
+.evidenceCard footer {
+  color: #898b8f;
+  font-size: 0.56rem;
+}
+
+.evidenceCard footer code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.messageReferences {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+
+.messageReferences span {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.62rem;
 }
 
 .messages {
@@ -521,6 +733,21 @@
     flex-direction: column;
     gap: 0.75rem;
     padding: 0.8rem 1rem;
+  }
+
+  .mainArea {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .messageArea {
+    overflow: visible;
+  }
+
+  .inspector {
+    max-height: 45vh;
+    border-top: 1px solid var(--line);
+    border-left: 0;
   }
 
   .topbar :global(.test-nav) {

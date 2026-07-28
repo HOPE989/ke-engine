@@ -21,8 +21,8 @@
 - [x] 3.1 定义与 MCP SDK 解耦的 `RagClient` 协议，并为生产 MCP Client 适配器编写请求序列化、Tool 结果解析和调用失败测试
 - [x] 3.2 实现 Chat 侧 MCP Client 适配器，只新增 `rag_mcp_url` Settings 字段并在 Chat lifespan 中装配客户端
 - [x] 3.3 扩展 `ChatRuntimeContext` 和 `ChatState`，通过 runtime 注入 `rag_client`、当前 user ID，并只在 state 保存可序列化 evidence package 与 references
-- [x] 3.4 为 Business Understanding intent 路由编写 Graph 测试，证明四类文档知识 intent 进入 `knowledge_rag`，`BUSINESS_DATA_QUERY` 与 `OTHER_BUSINESS` 保持边界响应
-- [x] 3.5 实现 `knowledge_rag` 节点，提取当前问题、最近十条历史消息、业务 intent 和 `accessibleBy=[user_id]` 后调用 RagClient
+- [x] 3.4 （初版，已由 5.3 替代）为 Business Understanding intent 路由编写 Graph 测试
+- [x] 3.5 （初版，已由 5.2-5.4 替代）实现 Chat 调用 RagClient 的节点
 - [x] 3.6 为 Grounded Answer Prompt 和节点编写测试，覆盖编号证据、只基于证据回答、空证据固定文本和 MCP 失败传播
 - [x] 3.7 实现 `grounded_answer` 节点与目标 Chat Graph 拓扑，并同步更新 Studio 的显式 RagClient 注入方式
 - [x] 3.8 扩展 completion 事件投影，使 `grounded_answer` 的模型流和空证据固定文本继续使用现有 `content_delta`，且不暴露 MCP/LangGraph 原始事件
@@ -37,3 +37,14 @@
 - [x] 4.3 更新服务入口、配置和演示文档，给出启动基础设施、RAG MCP、Chat API 和发起文档知识问题的最短命令序列
 - [x] 4.4 运行 RAG、Chat、服务入口和配置聚焦测试，修复回归后运行 backend 默认非集成测试
 - [x] 4.5 运行 `openspec validate complete-document-rag-mcp-integration --strict`，确认 proposal、design、五份 delta spec 和任务状态一致且 apply-ready
+
+## 5. 子 Change：纠正 Chat 与 RAG 职责边界
+
+- [x] 5.1 修订 proposal、design 和 delta specs，明确所有 BUSINESS 进入 RAG、Intent 只路由 Prompt、会话上下文化属于 Chat
+- [x] 5.2 将 Query Rewrite 模型、Prompt、节点和评测迁移为 Chat `contextualize_query`，并让 Chat state 保存 standalone query
+- [x] 5.3 重构 Chat Graph，使所有 BUSINESS intent 执行 `contextualize_query -> business_rag -> grounded_answer`，并按 Intent 选择领域 Prompt
+- [x] 5.4 简化 MCP 请求为 standalone query 与 scope，移除 conversation context/business intent；RAG Graph 从 Query Router 开始
+- [x] 5.5 为 EvidencePackage 增加 `sourceType` 与 `selectedRetrievers`，保持当前 DOCUMENT 投影并更新 MCP/客户端契约
+- [x] 5.6 增加稳定 `trace_step` 与 `rag_evidence` SSE 投影，前端实验室展示实际链路、Retriever、Standalone Query、召回正文和引用
+- [x] 5.7 更新纵向测试、smoke 文档和架构说明，覆盖“集团有多少家煤炭生产企业？”进入文档 RAG
+- [x] 5.8 运行 backend/frontend 聚焦与默认测试、前端 lint/build、OpenSpec strict validation，并提交本次重构

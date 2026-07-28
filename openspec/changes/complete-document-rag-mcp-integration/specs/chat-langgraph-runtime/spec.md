@@ -7,17 +7,17 @@ The system SHALL define the Business Understanding Chat Graph as a `StateGraph` 
 - **WHEN** the Chat Graph builder is inspected or tested
 - **THEN** the NON_BUSINESS execution path SHALL be `START -> business_understanding -> llm -> END`
 
-#### Scenario: Document knowledge topology is compiled
-- **WHEN** Business Understanding returns `route=BUSINESS` with intent `POLICY_RULE_QA`, `TRANSPORT_OPERATION_QA`, `COAL_SALES_QA`, or `PROFESSIONAL_KNOWLEDGE_QA`
-- **THEN** the Graph SHALL route to `knowledge_rag`
-- **AND** `knowledge_rag` SHALL route to `grounded_answer`
+#### Scenario: Business topology is compiled
+- **WHEN** Business Understanding returns `route=BUSINESS` with any supported business intent
+- **THEN** the Graph SHALL route to `contextualize_query`
+- **AND** `contextualize_query` SHALL route to `business_rag`
+- **AND** `business_rag` SHALL route to `grounded_answer`
 - **AND** `grounded_answer` SHALL then reach `END`
 
-#### Scenario: Unsupported business topology is compiled
+#### Scenario: Intent does not gate RAG
 - **WHEN** Business Understanding returns `route=BUSINESS` with intent `BUSINESS_DATA_QUERY` or `OTHER_BUSINESS`
-- **THEN** the Graph SHALL route to an explicit business-boundary node
-- **AND** that node SHALL return a deterministic development-stage answer without invoking MCP, RAG, SQL, GraphDB, or an additional LLM
-- **AND** the Graph SHALL then reach `END`
+- **THEN** the Graph SHALL follow the same BUSINESS topology
+- **AND** Chat MUST NOT infer a Retriever or return an unsupported boundary from the Intent
 
 #### Scenario: Clarification topology is compiled
 - **WHEN** Business Understanding returns `route=CLARIFY`
@@ -30,7 +30,7 @@ The system SHALL define the Business Understanding Chat Graph as a `StateGraph` 
 - **WHEN** `business_understanding` produces a valid structured result
 - **THEN** that node SHALL return LangGraph `Command(update=..., goto=...)`
 - **AND** the Command update SHALL persist the result in `business_understanding` state
-- **AND** the Command destination SHALL be exactly the node selected by route and supported intent
+- **AND** the Command destination SHALL be exactly the node selected by route
 - **AND** the Graph builder MUST NOT install a separate conditional-edge router for that decision
 
 #### Scenario: Resumed clarification owns its return transfer
@@ -44,12 +44,24 @@ The system SHALL define the Business Understanding Chat Graph as a `StateGraph` 
 
 ## ADDED Requirements
 
-### Requirement: Knowledge RAG uses an injected MCP Client
+### Requirement: Chat contextualizes business queries before MCP
+The Chat Graph SHALL produce a standalone query from caller-owned conversation state before invoking RAG.
+
+#### Scenario: Multi-turn business query is contextualized
+- **WHEN** a BUSINESS request contains a uniquely resolvable reference or ellipsis
+- **THEN** `contextualize_query` SHALL use the current query, up to ten preceding USER/ASSISTANT messages, and Business Understanding context
+- **AND** it SHALL store one standalone query that preserves all explicit constraints
+
+#### Scenario: Clarification is required
+- **WHEN** Business Understanding cannot uniquely resolve the request
+- **THEN** Chat SHALL clarify before executing `contextualize_query`
+
+### Requirement: Business RAG uses an injected MCP Client
 The Chat Graph SHALL obtain document evidence through a runtime-injected `RagClient` and SHALL NOT import or invoke the RAG Graph directly.
 
-#### Scenario: Knowledge request calls RAG
-- **WHEN** `knowledge_rag` executes
-- **THEN** it SHALL send the current user query, up to ten preceding USER or ASSISTANT messages, the selected business intent, and `accessibleBy` containing the current user ID to `RagClient.retrieve_evidence`
+#### Scenario: Business request calls RAG
+- **WHEN** `business_rag` executes
+- **THEN** it SHALL send only the standalone query and `accessibleBy` containing the current user ID to `RagClient.retrieve_evidence`
 - **AND** it SHALL write the returned serializable EvidencePackage and minimal references into Chat state
 
 #### Scenario: Runtime dependencies are not checkpointed
@@ -59,7 +71,7 @@ The Chat Graph SHALL obtain document evidence through a runtime-injected `RagCli
 
 #### Scenario: RAG invocation fails
 - **WHEN** the MCP Tool call raises or returns an invalid EvidencePackage
-- **THEN** `knowledge_rag` SHALL fail the Graph run
+- **THEN** `business_rag` SHALL fail the Graph run
 - **AND** it MUST NOT invoke a local RAG fallback or fabricate evidence
 
 ### Requirement: Grounded Answer uses only returned evidence
@@ -71,6 +83,11 @@ The `grounded_answer` node SHALL generate document knowledge answers from the cu
 - **AND** the prompt SHALL require factual claims to use only supplied evidence
 - **AND** it SHALL require numbered citations such as `[1]` that correspond to evidence item order
 
+#### Scenario: Intent selects answer policy
+- **WHEN** grounded answer executes for a BUSINESS request
+- **THEN** it SHALL select the domain answer Prompt from the stored business Intent
+- **AND** the selected Prompt MUST NOT choose or override a Retriever
+
 #### Scenario: Evidence is empty
 - **WHEN** the EvidencePackage contains no evidence items
 - **THEN** `grounded_answer` SHALL return the deterministic text `未检索到相关依据。`
@@ -79,4 +96,3 @@ The `grounded_answer` node SHALL generate document knowledge answers from the cu
 #### Scenario: Grounded Answer constructs no infrastructure
 - **WHEN** the node is imported or invoked
 - **THEN** it MUST NOT create an MCP Client, model client, database session, Elasticsearch client, or settings object
-

@@ -1,4 +1,4 @@
-"""Query Rewrite 的本地评测样例与客观输出契约。"""
+"""Chat Query Contextualization 的本地评测样例与客观输出契约。"""
 
 import json
 from collections.abc import Mapping
@@ -8,19 +8,17 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.domains.rag.graph.query_rewrite.models import (
-    QueryRewriteInput,
-    QueryRewriteResult,
+from app.domains.chat.graph.query_contextualization.models import (
+    QueryContextInput,
+    QueryContextResult,
 )
 
 
 @dataclass(frozen=True)
-class QueryRewriteEvaluationCase:
-    """保留人工语义评审信息，但不将其用于代码自动打分。"""
-
+class QueryContextEvaluationCase:
     id: str
     category: str
-    request: QueryRewriteInput
+    request: QueryContextInput
     expected_standalone_query: str
     expected_preserved_terms: tuple[str, ...]
     expected_required_term_groups: tuple[tuple[str, ...], ...]
@@ -28,23 +26,23 @@ class QueryRewriteEvaluationCase:
 
 
 @dataclass(frozen=True)
-class QueryRewriteContractScore:
+class QueryContextContractScore:
     output_contract: tuple[int, int]
 
 
-def load_query_rewrite_evaluation_cases() -> list[QueryRewriteEvaluationCase]:
+def load_query_context_evaluation_cases() -> list[QueryContextEvaluationCase]:
     fixture_path = (
         Path(__file__).resolve().parents[5]
         / "tests"
         / "fixtures"
-        / "query_rewrite_cases.json"
+        / "query_contextualization_cases.json"
     )
     raw_cases = json.loads(fixture_path.read_text(encoding="utf-8"))
     return [
-        QueryRewriteEvaluationCase(
+        QueryContextEvaluationCase(
             id=case["id"],
             category=case["category"],
-            request=QueryRewriteInput.model_validate(
+            request=QueryContextInput.model_validate(
                 {
                     "original_query": case["original_query"],
                     "conversation_context": case["conversation_context"],
@@ -63,21 +61,19 @@ def load_query_rewrite_evaluation_cases() -> list[QueryRewriteEvaluationCase]:
     ]
 
 
-def score_query_rewrite_output(
-    actual: Mapping[str, Any] | QueryRewriteResult,
-) -> QueryRewriteContractScore:
-    """只验证可客观确定的单字段输出形状，不判断语义质量。"""
-
+def score_query_context_output(
+    actual: Mapping[str, Any] | QueryContextResult,
+) -> QueryContextContractScore:
     actual_payload = (
         actual.model_dump(mode="json")
-        if isinstance(actual, QueryRewriteResult)
+        if isinstance(actual, QueryContextResult)
         else dict(actual)
     )
     try:
-        QueryRewriteResult.model_validate(actual_payload)
+        QueryContextResult.model_validate(actual_payload)
         output_valid = True
     except ValidationError:
         output_valid = False
-    return QueryRewriteContractScore(
+    return QueryContextContractScore(
         output_contract=(int(output_valid), 1)
     )

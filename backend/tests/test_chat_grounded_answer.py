@@ -17,12 +17,18 @@ def _state(items):
     from app.domains.rag.services import EvidencePackage
 
     package = EvidencePackage(
-        query="如何编组？",
-        standalone_query="超限货物列车编组要求",
+        query="超限货物列车编组要求",
+        selected_retrievers=("DOCUMENT_HYBRID",),
         evidence_items=items,
     )
     return {
         "messages": [HumanMessage(content="如何编组？")],
+        "business_understanding": {
+            "reasoning": "运输知识问题",
+            "route": "BUSINESS",
+            "intent": "TRANSPORT_OPERATION_QA",
+            "entities": {},
+        },
         "evidence_package": package.model_dump(
             mode="json",
             by_alias=True,

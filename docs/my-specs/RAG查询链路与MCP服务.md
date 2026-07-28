@@ -1,9 +1,32 @@
 # RAG 查询链路与 MCP 服务设计草稿
 
-> 状态：总体架构讨论中；Query Rewrite 首个 OpenSpec change 已完成
-> 最后更新：2026-07-24
+> 状态：文档 RAG 链路已实施；DB/GraphDB Retriever 待后续阶段
+> 最后更新：2026-07-28
 > 用途：持续记录 RAG 查询服务、检索编排和 MCP 暴露方式的阶段性结论。
 > 说明：本文是 `docs/my-specs` 下的探索草稿，不是已进入实施阶段的 OpenSpec change。标记为“已确认”的内容表示当前讨论基线；标记为“待讨论”的内容仍可能调整。
+
+## 0. 2026-07-28 当前实施基线
+
+本节覆盖文中较早的 Query Rewrite 输入和 Chat Intent 路由讨论：
+
+```text
+Chat
+  business_understanding: NON_BUSINESS / BUSINESS / CLARIFY
+  BUSINESS
+    -> contextualize_query（使用 Chat 历史产出 standalone query）
+    -> RAG MCP retrieve_evidence
+         -> query_router
+         -> document_hybrid
+         -> collect_retrieval_outcomes
+    -> grounded_answer（Intent 只选择回答 Prompt）
+```
+
+- 所有 BUSINESS Intent 都调用 RAG；`BUSINESS_DATA_QUERY` 不等于 SQL 路由。
+- 文档、SQL、Graph Retriever 的选择属于 RAG Query Router。当前只注册文档 Retriever，
+  DB 与 GraphDB 链路以后增加，不需要再修改 Chat 路由。
+- 依赖会话的指代消解和省略补全属于 Chat `contextualize_query`。
+- RAG MCP 无会话，只接收 standalone query 与检索 scope。
+- 文档 Query Expansion、Text2SQL Schema Linking 和 Text2Cypher 属于各 Retriever 内部。
 
 ## 1. 讨论目标
 
@@ -114,11 +137,11 @@ RAG MCP Service 的能力范围因此包括：
 - 结构化 SQL 检索；
 - 后续可能增加的图知识检索。
 
-当前确认采用同一 RAG 进程、两个 MCP Endpoint：
+未来可以在同一 RAG 进程扩展专家入口，但当前面试版本只实现一个标准 MCP Endpoint：
 
-- 标准 Endpoint 暴露完整召回管线 Tool；
-- 专家 Endpoint 暴露文档、SQL 和 Graph 原子 Tool；
-- 两者复用同一组 domain services 和运行资源。
+- 标准 Endpoint 只暴露完整召回管线 Tool `retrieve_evidence`；
+- 不暴露 SQL、Graph 或专家原子 Tool；
+- 后续是否增加专家入口，等 DB/GraphDB 链路实施时再决定。
 
 ## 4. 已确认的框架选择
 
@@ -458,7 +481,7 @@ backend/app/
 
 该目录只是当前设计方向，尚未进入代码实施。
 
-## 11. Query Rewrite：下一步讨论草稿
+## 11. Query Rewrite：历史讨论（由第 0 节覆盖）
 
 ### 11.1 已确认的适用入口
 
@@ -687,7 +710,7 @@ Query Rewrite 是生成式任务，可能存在多种同样正确的表达。因
 - `single_query_compliance`：只输出一条查询，不回答问题，也不生成 SQL、Cypher 或执行计划。
 
 实验数据已先在本地以
-`backend/tests/fixtures/query_rewrite_cases.json` 起草。当前共 28 条、13 个
+`backend/tests/fixtures/query_contextualization_cases.json` 起草。当前共 28 条、13 个
 易错或典型类别。每条 case 包含真实输入、人工参考改写以及 case-specific
 annotations。参考答案和 annotations 是人工复核或 Judge 的上下文，不进入生产
 Rewrite task，也不作为代码关键词匹配规则。
@@ -718,11 +741,11 @@ Rewrite task，也不作为代码关键词匹配规则。
 
 ```powershell
 cd backend
-uv run python -m app.evaluation.rag_query_rewrite
+uv run python -m app.evaluation.chat_query_contextualization
 ```
 
 该命令会把本地 28 条 fixture 以稳定 item ID 幂等同步到
-`ke-engine/rag-query-rewrite-v1`，再使用当前配置模型串行执行生产 RAG Graph，
+`ke-engine/chat-query-contextualization-v1`，再使用当前配置模型串行执行 Chat 上下文化能力，
 创建 Langfuse Dataset Run。当前只生成 `output_contract` 客观分数。
 
 2026-07-24 使用 `deepseek-v4-pro` 完成首轮真实实验，Run name 为
@@ -918,7 +941,7 @@ RAG Service
 - 长任务和人工中断恢复；
 - 立即实现代码。
 
-## 14. 本轮交接检查点
+## 14. 2026-07-24 历史交接检查点
 
 当前开发状态：
 
@@ -932,7 +955,8 @@ RAG Service
 - 全量非集成验证记录：654 passed、3 skipped、6 deselected；
 - 第二轮真实模型 Experiment `rag-query-rewrite-20260723-170605` 的人工结果为 27 PASS、1 PARTIAL、0 FAIL。
 
-`backend/tests/fixtures/query_rewrite_cases.json` 的 28 条样例仍是仓库事实源。
+当前样例已迁移为
+`backend/tests/fixtures/query_contextualization_cases.json`，仍保留原 28 条语义基线。
 不要把其中的参考查询或 annotations 改造成确定性关键词 scorer；它们只服务于
 人工评审和未来经校准的 LLM Judge。代码 scorer 只检查输出协议和单查询边界。
 

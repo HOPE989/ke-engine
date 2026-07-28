@@ -3,9 +3,19 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { listConversations, listMessages, streamCompletion } from "./api";
-import { Composer, ConversationList, MessageBubble } from "./components";
+import {
+  Composer,
+  ConversationList,
+  MessageBubble,
+  TraceInspector
+} from "./components";
 import { TestNav } from "../components/TestNav";
-import type { ChatMessage, Conversation } from "./types";
+import type {
+  ChatMessage,
+  Conversation,
+  RagEvidence,
+  TraceStep
+} from "./types";
 import styles from "./chat.module.css";
 
 export default function ChatPage() {
@@ -19,6 +29,8 @@ export default function ChatPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
+  const [ragEvidence, setRagEvidence] = useState<RagEvidence | null>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
 
   const refreshConversations = useCallback(async () => {
@@ -68,6 +80,8 @@ export default function ChatPage() {
     setSelectedId(null);
     setMessages([]);
     setError(null);
+    setTraceSteps([]);
+    setRagEvidence(null);
   }
 
   async function sendMessage() {
@@ -95,6 +109,8 @@ export default function ChatPage() {
     setDraft("");
     setSending(true);
     setError(null);
+    setTraceSteps([]);
+    setRagEvidence(null);
 
     try {
       await streamCompletion({
@@ -113,7 +129,11 @@ export default function ChatPage() {
                 : item
             )
           );
-        }
+        },
+        onTraceStep: (step) => {
+          setTraceSteps((current) => [...current, step]);
+        },
+        onRagEvidence: setRagEvidence
       });
       if (resolvedConversationId) {
         await openConversation(resolvedConversationId);
@@ -183,6 +203,7 @@ export default function ChatPage() {
           {sending ? "SSE 流接收中" : "等待请求"}
         </div>
 
+        <div className={styles.mainArea}>
         <div className={styles.messageArea} aria-live="polite">
           {loadingMessages ? (
             <div className={styles.loadingState}>正在读取消息历史…</div>
@@ -191,11 +212,11 @@ export default function ChatPage() {
               <span className={styles.welcomeIndex}>01</span>
               <h2>连接后端，开始一轮真实对话。</h2>
               <p>
-                页面会消费 <code>metadata</code>、<code>content_delta</code> 和终态事件，
-                并在完成后重新读取服务端消息记录。
+                页面会实时展示 Chat 节点、RAG Retriever、独立问题和召回证据，
+                并在完成后重新读取服务端消息与引用。
               </p>
               <div className={styles.suggestions}>
-                {["介绍一下这个知识引擎", "给我一个简短的测试回答", "解释当前 Chat 链路"].map(
+                {["集团有多少家煤炭生产企业？", "介绍一下这个知识引擎", "解释当前 Chat 链路"].map(
                   (text) => (
                     <button type="button" key={text} onClick={() => setDraft(text)}>
                       {text} <span aria-hidden="true">→</span>
@@ -212,6 +233,12 @@ export default function ChatPage() {
               <div ref={messageEndRef} />
             </div>
           )}
+        </div>
+        <TraceInspector
+          steps={traceSteps}
+          evidence={ragEvidence}
+          active={sending}
+        />
         </div>
 
         {error ? (

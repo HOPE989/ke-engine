@@ -40,7 +40,6 @@ def test_rag_graph_compiles_only_registered_document_retriever():
     from app.domains.rag.graph import (
         COLLECT_RETRIEVAL_OUTCOMES_NODE,
         DOCUMENT_HYBRID_NODE,
-        QUERY_REWRITE_NODE,
         build_rag_graph,
     )
 
@@ -51,19 +50,16 @@ def test_rag_graph_compiles_only_registered_document_retriever():
     compiled = builder.compile()
 
     assert set(builder.nodes) == {
-        "query_rewrite",
         "query_router",
         "document_hybrid",
         "collect_retrieval_outcomes",
     }
-    assert builder.nodes[QUERY_REWRITE_NODE].retry_policy is None
     assert builder.nodes[DOCUMENT_HYBRID_NODE].retry_policy is None
     assert {
         (edge.source, edge.target)
         for edge in compiled.get_graph().edges
     } == {
-        (START, "query_rewrite"),
-        ("query_rewrite", "query_router"),
+        (START, "query_router"),
         ("query_router", "document_hybrid"),
         (
             "document_hybrid",
@@ -90,7 +86,6 @@ def test_rag_graph_rejects_assembly_without_registered_retriever():
 @pytest.mark.asyncio
 async def test_rag_graph_returns_serializable_document_outcome():
     from app.domains.rag.graph import build_rag_graph
-    from app.domains.rag.graph.query_rewrite import QueryRewriteResult
     from app.domains.rag.graph.query_router import (
         QueryRouteResult,
         RetrieverKind,
@@ -98,9 +93,6 @@ async def test_rag_graph_returns_serializable_document_outcome():
 
     runnable = RecordingStructuredRunnable(
         [
-            QueryRewriteResult(
-                standalone_query="查询合同付款周期"
-            ),
             QueryRouteResult(
                 selected_retrievers=[
                     RetrieverKind.DOCUMENT_HYBRID
@@ -118,7 +110,7 @@ async def test_rag_graph_returns_serializable_document_outcome():
 
     result = await graph.ainvoke(
         {
-            "original_query": "付款周期呢",
+            "standalone_query": "查询合同付款周期",
             "document_retrieval_scope": {
                 "accessibleBy": ["team-a"]
             },
@@ -135,4 +127,4 @@ async def test_rag_graph_returns_serializable_document_outcome():
         == "SUCCESS"
     )
     assert json.loads(json.dumps(result, ensure_ascii=False)) == result
-    assert len(runnable.calls) == 2
+    assert len(runnable.calls) == 1

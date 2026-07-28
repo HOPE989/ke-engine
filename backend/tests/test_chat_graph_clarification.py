@@ -4,7 +4,17 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from app.domains.chat.graph.business_understanding import BusinessUnderstandingResult
+from app.domains.chat.graph.query_contextualization import QueryContextResult
+from app.domains.rag.services import EvidencePackage
 from chat_graph_test_support import FakeSequentialChatModel
+
+
+class EmptyRagClient:
+    async def retrieve_evidence(self, request):
+        return EvidencePackage(
+            query=request.query,
+            selected_retrievers=("DOCUMENT_HYBRID",),
+        )
 
 
 def make_clarify_result() -> BusinessUnderstandingResult:
@@ -80,12 +90,24 @@ async def test_clarify_route_suspends_with_typed_payload():
 async def test_clarify_resume_adds_question_and_answer_before_reclassification():
     from app.domains.chat.graph.builder import build_chat_graph
     from app.domains.chat.graph.context import ChatRuntimeContext
-    from app.domains.chat.graph.nodes.business_boundary import BUSINESS_BOUNDARY_MESSAGE
+    from app.domains.chat.graph.nodes.grounded_answer import EMPTY_EVIDENCE_ANSWER
 
-    model = FakeSequentialChatModel([make_clarify_result(), make_business_result()])
+    model = FakeSequentialChatModel(
+        [
+            make_clarify_result(),
+            make_business_result(),
+            QueryContextResult(
+                standalone_query="查询运单 YD2026001 当前状态"
+            ),
+        ]
+    )
     graph = build_chat_graph().compile(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "clarify-resume-thread"}}
-    context = ChatRuntimeContext(model=model)
+    context = ChatRuntimeContext(
+        model=model,
+        rag_client=EmptyRagClient(),
+        user_id="alice",
+    )
 
     await graph.ainvoke(
         {"messages": [HumanMessage(content="查一下我的运单")]},
@@ -103,7 +125,7 @@ async def test_clarify_resume_adds_question_and_answer_before_reclassification()
     assert second_history[-2].content == "请提供运单号"
     assert isinstance(second_history[-1], HumanMessage)
     assert second_history[-1].content == "YD2026001"
-    assert result["messages"][-1].content == BUSINESS_BOUNDARY_MESSAGE
+    assert result["messages"][-1].content == EMPTY_EVIDENCE_ANSWER
     assert model.ordinary_calls == []
 
 

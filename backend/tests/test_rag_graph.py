@@ -28,9 +28,6 @@ def test_rag_state_is_request_scoped_and_serializable():
     from app.domains.rag.graph.state import RagState
 
     expected_fields = {
-        "original_query",
-        "conversation_context",
-        "business_context",
         "standalone_query",
         "retrieval_plan",
         "document_retrieval_scope",
@@ -39,7 +36,6 @@ def test_rag_state_is_request_scoped_and_serializable():
     assert expected_fields <= set(RagState.__annotations__)
 
     state: RagState = {
-        "original_query": "查询合同",
         "standalone_query": "查询合同付款周期",
         "document_retrieval_scope": {
             "accessibleBy": ["team-a"]
@@ -69,7 +65,6 @@ def test_rag_graph_does_not_define_runtime_dependency_context():
 @pytest.mark.asyncio
 async def test_assembled_rag_graph_keeps_requests_isolated():
     from app.domains.rag.graph import build_rag_graph
-    from app.domains.rag.graph.query_rewrite import QueryRewriteResult
     from app.domains.rag.graph.query_router import (
         QueryRouteResult,
         RetrieverKind,
@@ -77,14 +72,12 @@ async def test_assembled_rag_graph_keeps_requests_isolated():
 
     runnable = RecordingStructuredRunnable(
         [
-            QueryRewriteResult(standalone_query="查询第一份合同"),
             QueryRouteResult(
                 selected_retrievers=[
                     RetrieverKind.DOCUMENT_HYBRID
                 ],
                 routing_reason="需要第一份文档",
             ),
-            QueryRewriteResult(standalone_query="查询第二份合同"),
             QueryRouteResult(
                 selected_retrievers=[
                     RetrieverKind.DOCUMENT_HYBRID
@@ -101,7 +94,7 @@ async def test_assembled_rag_graph_keeps_requests_isolated():
 
     first = await graph.ainvoke(
         {
-            "original_query": "第一份呢",
+            "standalone_query": "查询第一份合同",
             "document_retrieval_scope": {
                 "accessibleBy": ["team-a"]
             },
@@ -109,7 +102,7 @@ async def test_assembled_rag_graph_keeps_requests_isolated():
     )
     second = await graph.ainvoke(
         {
-            "original_query": "第二份呢",
+            "standalone_query": "查询第二份合同",
             "document_retrieval_scope": {
                 "accessibleBy": ["team-b"]
             },
@@ -135,7 +128,7 @@ async def test_assembled_rag_graph_returns_fallback_document_outcome():
         document_retriever_factory=RecordingRetrieverFactory(),
     ).compile().ainvoke(
         {
-            "original_query": "查询合同",
+            "standalone_query": "查询合同",
             "document_retrieval_scope": {
                 "accessibleBy": ["team-a"]
             },
@@ -147,13 +140,12 @@ async def test_assembled_rag_graph_returns_fallback_document_outcome():
         result["retrieval_outcomes"]["DOCUMENT_HYBRID"]["status"]
         == "EMPTY"
     )
-    assert len(runnable.calls) == 2
+    assert len(runnable.calls) == 1
 
 
 @pytest.mark.asyncio
 async def test_assembled_rag_graph_passes_config_to_models_and_retriever():
     from app.domains.rag.graph import build_rag_graph
-    from app.domains.rag.graph.query_rewrite import QueryRewriteResult
     from app.domains.rag.graph.query_router import (
         QueryRouteResult,
         RetrieverKind,
@@ -161,7 +153,6 @@ async def test_assembled_rag_graph_passes_config_to_models_and_retriever():
 
     runnable = RecordingStructuredRunnable(
         [
-            QueryRewriteResult(standalone_query="查询合同"),
             QueryRouteResult(
                 selected_retrievers=[
                     RetrieverKind.DOCUMENT_HYBRID
@@ -179,7 +170,7 @@ async def test_assembled_rag_graph_passes_config_to_models_and_retriever():
 
     await graph.ainvoke(
         {
-            "original_query": "查合同",
+            "standalone_query": "查询合同",
             "document_retrieval_scope": {
                 "accessibleBy": ["team-a"]
             },
@@ -199,6 +190,6 @@ async def test_assembled_rag_graph_passes_config_to_models_and_retriever():
     assert retriever_config["metadata"]["request_id"] == "request-graph-1"
     assert any(
         isinstance(value, dict)
-        and value.get("original_query") == "查合同"
+        and value.get("standalone_query") == "查询合同"
         for value in handler.chain_inputs
     )

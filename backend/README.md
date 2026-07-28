@@ -52,10 +52,10 @@ Chat API 和 Studio 的 Langfuse 接入是 fail-open：配置缺失或追踪失�
 
    ```powershell
    cd backend
-   uv run python scripts/smoke_chat_rag.py "调度规程对超限货物列车编组有什么要求？"
+   uv run python scripts/smoke_chat_rag.py "集团有多少家煤炭生产企业？"
    ```
 
-知识类 intent 会执行
-`Chat -> retrieve_evidence MCP -> Query Rewrite -> Hybrid Retrieval -> Rerank -> Grounded Answer`。
-`BUSINESS_DATA_QUERY` 和 `OTHER_BUSINESS` 仍返回未接入边界提示。MCP 服务没有额外
-健康检查、鉴权、重试或熔断配置。
+所有 BUSINESS intent（包括 `BUSINESS_DATA_QUERY`）都会执行
+`Chat Contextualize Query -> retrieve_evidence MCP -> Query Router -> Hybrid Retrieval -> Rerank -> Intent Prompt Grounded Answer`。
+打开 `/chat` 后，右侧面板会显示实际节点、Standalone Query、RAG 选择的 Retriever、
+召回正文、来源和 Rerank 分数。MCP 服务没有额外健康检查、鉴权、重试或熔断配置。

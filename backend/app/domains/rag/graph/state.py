@@ -10,10 +10,7 @@ from app.domains.rag.graph.retrieval.reducer import (
 class RagState(TypedDict, total=False):
     """按已落地阶段增量扩展的请求级 RAG 状态。"""
 
-    original_query: Required[str]
-    conversation_context: NotRequired[list[dict[str, str]]]
-    business_context: NotRequired[dict[str, object] | None]
-    standalone_query: NotRequired[str]
+    standalone_query: Required[str]
     retrieval_plan: NotRequired[dict[str, object]]
     document_retrieval_scope: NotRequired[dict[str, object]]
     retrieval_outcomes: Annotated[

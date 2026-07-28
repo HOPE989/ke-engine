@@ -69,10 +69,11 @@ async def test_business_understanding_node_uses_injected_structured_model_and_fu
     assert isinstance(command, Command)
     assert command.update == {
         "business_understanding": result,
+        "standalone_query": None,
         "evidence_package": None,
         "rag_references": [],
     }
-    assert command.goto == "business_boundary"
+    assert command.goto == "contextualize_query"
 
 
 @pytest.mark.asyncio

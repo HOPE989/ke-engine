@@ -14,7 +14,7 @@ The completion runtime SHALL stream grounded document answers through the existi
 - **AND** the successful stream SHALL finish through the existing `completed` event
 
 #### Scenario: MCP retrieval fails
-- **WHEN** `knowledge_rag` fails before a complete grounded answer is produced
+- **WHEN** `business_rag` fails before a complete grounded answer is produced
 - **THEN** the completion SHALL emit the existing `error` terminal event
 - **AND** it MUST NOT persist a partial ASSISTANT message or emit `completed`
 
@@ -28,6 +28,21 @@ The completion runtime SHALL persist the final grounded answer and its RAG refer
 - **AND** it SHALL emit `completed` only after that transaction commits
 
 #### Scenario: Non-RAG completion succeeds
-- **WHEN** a NON_BUSINESS, unsupported BUSINESS, clarification, or empty-evidence completion is persisted
+- **WHEN** a NON_BUSINESS, clarification, or empty-evidence completion is persisted
 - **THEN** the ASSISTANT message SHALL use an empty `rag_references` array unless the current Graph run produced non-empty document evidence
+
+### Requirement: Local clients can inspect stable Chat and RAG debug events
+The completion runtime SHALL expose application-owned debug events without forwarding raw framework events.
+
+#### Scenario: Chat nodes execute
+- **WHEN** a supported Chat node starts or completes
+- **THEN** the stream SHALL emit a deduplicated `trace_step` containing only its stable node name and status
+
+#### Scenario: RAG evidence returns
+- **WHEN** `business_rag` receives an EvidencePackage
+- **THEN** the stream SHALL emit one `rag_evidence` containing the standalone query, selected Retrievers, and ordered evidence items
+
+#### Scenario: Internal metadata exists
+- **WHEN** LangGraph or MCP events contain run IDs, tags, checkpoint metadata, sessions, callbacks, credentials, or raw exceptions
+- **THEN** none of those values SHALL appear in either debug event
 

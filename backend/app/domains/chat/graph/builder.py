@@ -6,27 +6,30 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
 
 from app.domains.chat.graph.context import ChatRuntimeContext
-from app.domains.chat.graph.nodes.business_boundary import business_boundary_node
 from app.domains.chat.graph.nodes.business_understanding import (
     business_understanding_node,
     invoke_business_understanding,
 )
 from app.domains.chat.graph.nodes.clarify import clarify_node
+from app.domains.chat.graph.nodes.contextualize_query import (
+    contextualize_query_node,
+    invoke_contextualize_query,
+)
 from app.domains.chat.graph.nodes.llm import invoke_llm, llm_node
 from app.domains.chat.graph.nodes.grounded_answer import (
     grounded_answer_node,
     invoke_grounded_answer,
 )
-from app.domains.chat.graph.nodes.knowledge_rag import (
-    invoke_knowledge_rag,
-    knowledge_rag_node,
+from app.domains.chat.graph.nodes.business_rag import (
+    business_rag_node,
+    invoke_business_rag,
 )
 from app.domains.chat.graph.routing import (
-    BUSINESS_BOUNDARY_NODE,
+    BUSINESS_RAG_NODE,
     BUSINESS_UNDERSTANDING_NODE,
     CLARIFY_NODE,
+    CONTEXTUALIZE_QUERY_NODE,
     GROUNDED_ANSWER_NODE,
-    KNOWLEDGE_RAG_NODE,
     LLM_NODE,
 )
 from app.domains.chat.services.rag import RagClient
@@ -56,11 +59,16 @@ def build_chat_graph(
     response = (
         llm_node if bound_model is None else partial(invoke_llm, model=bound_model)
     )
-    knowledge = (
-        knowledge_rag_node
+    contextualize = (
+        contextualize_query_node
+        if bound_model is None
+        else partial(invoke_contextualize_query, model=bound_model)
+    )
+    business_rag = (
+        business_rag_node
         if bound_model is None
         else partial(
-            invoke_knowledge_rag,
+            invoke_business_rag,
             rag_client=bound_rag_client,
             user_id=bound_user_id,
         )
@@ -73,13 +81,13 @@ def build_chat_graph(
     graph = StateGraph(ChatState, context_schema=context_schema)
     graph.add_node(BUSINESS_UNDERSTANDING_NODE, understanding)
     graph.add_node(LLM_NODE, response)
-    graph.add_node(BUSINESS_BOUNDARY_NODE, business_boundary_node)
     graph.add_node(CLARIFY_NODE, clarify_node)
-    graph.add_node(KNOWLEDGE_RAG_NODE, knowledge)
+    graph.add_node(CONTEXTUALIZE_QUERY_NODE, contextualize)
+    graph.add_node(BUSINESS_RAG_NODE, business_rag)
     graph.add_node(GROUNDED_ANSWER_NODE, grounded)
     graph.add_edge(START, BUSINESS_UNDERSTANDING_NODE)
     graph.add_edge(LLM_NODE, END)
-    graph.add_edge(BUSINESS_BOUNDARY_NODE, END)
-    graph.add_edge(KNOWLEDGE_RAG_NODE, GROUNDED_ANSWER_NODE)
+    graph.add_edge(CONTEXTUALIZE_QUERY_NODE, BUSINESS_RAG_NODE)
+    graph.add_edge(BUSINESS_RAG_NODE, GROUNDED_ANSWER_NODE)
     graph.add_edge(GROUNDED_ANSWER_NODE, END)
     return graph

@@ -40,16 +40,12 @@ def create_rag_mcp_server(service: EvidenceService) -> FastMCP:
         query: str,
         accessibleBy: list[str],
         docIds: list[str] | None = None,
-        conversationContext: list[dict[str, str]] | None = None,
-        businessIntent: str | None = None,
     ) -> EvidencePackage:
         request = RetrieveEvidenceRequest.model_validate(
             {
                 "query": query,
                 "accessibleBy": accessibleBy,
                 "docIds": docIds or [],
-                "conversationContext": conversationContext or [],
-                "businessIntent": businessIntent,
             }
         )
         return await service.retrieve_evidence(request)

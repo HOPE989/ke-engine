@@ -105,6 +105,34 @@ test("保留 metadata 和 content_delta 的流处理", async () => {
   assert.deepEqual(deltas, ["你好"]);
 });
 
+test("消费实际链路与 RAG 证据调试事件", async () => {
+  const steps: unknown[] = [];
+  const evidence: unknown[] = [];
+  const response = sseResponse(
+    'event: trace_step\ndata: {"node":"business_rag","status":"started"}\n\n',
+    'event: rag_evidence\ndata: {"standalone_query":"集团有多少家煤炭生产企业？","selected_retrievers":["DOCUMENT_HYBRID"],"evidence_items":[{"source_type":"DOCUMENT","citation_id":"doc-1:chunk-1","content":"集团共有12家煤炭生产企业。","doc_id":"doc-1","chunk_id":"chunk-1","rerank_score":0.96}]}\n\n',
+    'event: completed\ndata: {"assistant_message_id":"3001","finish_reason":"stop"}\n\n'
+  );
+
+  await withSseResponse(response, () =>
+    streamCompletion({
+      userId: "tester",
+      conversationId: "42",
+      content: "集团有多少家煤炭生产企业？",
+      onMetadata: () => {},
+      onDelta: () => {},
+      onTraceStep: (step) => steps.push(step),
+      onRagEvidence: (item) => evidence.push(item)
+    })
+  );
+
+  assert.deepEqual(steps, [{ node: "business_rag", status: "started" }]);
+  assert.equal(
+    (evidence[0] as { standalone_query: string }).standalone_query,
+    "集团有多少家煤炭生产企业？"
+  );
+});
+
 test("未知 completed finish reason 被拒绝", async () => {
   await assert.rejects(
     () =>

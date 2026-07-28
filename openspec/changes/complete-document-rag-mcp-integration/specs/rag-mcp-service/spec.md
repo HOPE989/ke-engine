@@ -14,12 +14,17 @@ The system SHALL expose the existing document RAG pipeline through one internal 
 - **AND** it SHALL treat the provided document scope as trusted internal request data
 
 ### Requirement: Retrieve evidence has a minimal validated request
-The `retrieve_evidence` Tool SHALL accept one non-blank query, optional conversation context, optional business intent, and a document retrieval scope.
+The `retrieve_evidence` Tool SHALL accept one non-blank standalone query and a document retrieval scope.
 
 #### Scenario: Valid document request is accepted
 - **WHEN** the request contains a non-blank `query` and at least one non-blank `accessibleBy` value
 - **THEN** the application SHALL construct a RAG Graph input using that query and immutable request-level scope
-- **AND** it SHALL include optional `docIds`, conversation context, and business intent when supplied
+- **AND** it SHALL include optional `docIds` when supplied
+
+#### Scenario: Chat-owned context is rejected
+- **WHEN** the request contains conversation context or business intent
+- **THEN** validation SHALL reject those fields
+- **AND** RAG MUST NOT load Chat history or classify a business Intent
 
 #### Scenario: Invalid request is rejected before retrieval
 - **WHEN** `query` is blank or `accessibleBy` is absent, empty, or malformed
@@ -31,8 +36,9 @@ The RAG MCP application service SHALL execute the compiled, checkpointer-free RA
 
 #### Scenario: Evidence retrieval executes
 - **WHEN** a valid `retrieve_evidence` request is called
-- **THEN** the application service SHALL invoke the Graph with `original_query`, optional context, business context, and `document_retrieval_scope`
-- **AND** the Graph SHALL execute its existing Query Rewrite, Query Router, Hybrid Document Retrieval, and outcome collection topology
+- **THEN** the application service SHALL invoke the Graph with `standalone_query` and `document_retrieval_scope`
+- **AND** the Graph SHALL execute Query Router, Hybrid Document Retrieval, and outcome collection
+- **AND** it MUST NOT execute conversation-dependent Query Rewrite
 
 #### Scenario: MCP adapter remains transport-only
 - **WHEN** the MCP server module is inspected
@@ -40,14 +46,15 @@ The RAG MCP application service SHALL execute the compiled, checkpointer-free RA
 - **AND** `domains.rag` MUST NOT import MCP SDK server, session, Tool, or transport types
 
 ### Requirement: RAG returns a minimal document EvidencePackage
-The system SHALL project a completed document retrieval outcome into an EvidencePackage containing `query`, `standaloneQuery`, and ordered `evidenceItems`.
+The system SHALL project a completed document retrieval outcome into an EvidencePackage containing `query`, `selectedRetrievers`, and ordered `evidenceItems`.
 
 #### Scenario: Successful candidates become evidence
 - **WHEN** `DOCUMENT_HYBRID` returns `SUCCESS`
-- **THEN** each retained candidate SHALL produce one evidence item containing `citationId`, `content`, `docId`, and `chunkId`
+- **THEN** each retained candidate SHALL produce one evidence item containing `citationId`, `sourceType=DOCUMENT`, `content`, `docId`, and `chunkId`
 - **AND** it SHALL preserve available `fileName`, `url`, and `rerankScore`
 - **AND** `citationId` SHALL equal `<docId>:<chunkId>`
 - **AND** evidence item order SHALL equal the final reranked candidate order
+- **AND** `selectedRetrievers` SHALL contain `DOCUMENT_HYBRID`
 
 #### Scenario: Empty retrieval returns an empty package
 - **WHEN** `DOCUMENT_HYBRID` returns `EMPTY`
@@ -74,4 +81,3 @@ The RAG MCP entrypoint SHALL reuse the existing model and retrieval infrastructu
 - **WHEN** the change configuration and service routes are inspected
 - **THEN** the system MUST NOT add health, readiness, or liveness endpoints
 - **AND** it MUST NOT add settings for authentication, retries, circuit breaking, rate limiting, Tool visibility, retrieval thresholds, or cross-service trace propagation
-

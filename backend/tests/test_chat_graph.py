@@ -64,22 +64,21 @@ def test_chat_graph_has_business_understanding_routes_and_no_retry_policy():
 
     assert {(edge.source, edge.target) for edge in compiled.get_graph().edges} == {
         (START, "business_understanding"),
-        ("business_understanding", "business_boundary"),
+        ("business_understanding", "contextualize_query"),
         ("business_understanding", "clarify"),
         ("business_understanding", "llm"),
-        ("business_understanding", "knowledge_rag"),
-        ("business_boundary", END),
         ("clarify", "business_understanding"),
         ("llm", END),
-        ("knowledge_rag", "grounded_answer"),
+        ("contextualize_query", "business_rag"),
+        ("business_rag", "grounded_answer"),
         ("grounded_answer", END),
     }
     assert set(builder.nodes) == {
         "business_understanding",
-        "business_boundary",
         "clarify",
         "llm",
-        "knowledge_rag",
+        "contextualize_query",
+        "business_rag",
         "grounded_answer",
     }
     assert all(node.retry_policy is None for node in builder.nodes.values())

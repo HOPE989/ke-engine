@@ -102,6 +102,9 @@ async def test_aborted_run_does_not_checkpoint_partial_ai_message_or_retry_model
             ]
             await asyncio.sleep(0)
             assert model.calls == 1
-            assert [event for event, _ in publisher.events] == ["metadata"]
+            assert publisher.events[0][0] == "metadata"
+            assert {
+                event for event, _ in publisher.events[1:]
+            } <= {"trace_step"}
         finally:
             await engine.dispose()

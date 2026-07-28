@@ -37,6 +37,8 @@ from app.contracts.chat import (
     ContentDeltaPayload,
     ErrorPayload,
     MetadataPayload,
+    RagEvidencePayload,
+    TraceStepPayload,
 )
 from app.domains.chat.graph import ChatRuntimeContext
 from app.domains.chat.graph.business_understanding import (
@@ -56,10 +58,11 @@ from app.infrastructure.langfuse import (
     safe_update_trace,
 )
 from app.services.chat_api.streaming import (
-    project_business_boundary_event,
     project_clarification_interrupt,
     project_empty_evidence_event,
     project_graph_event,
+    project_rag_evidence,
+    project_trace_step,
 )
 
 
@@ -444,6 +447,8 @@ class CompletionProducer:
         """
 
         answer_parts: list[str] = []
+        emitted_trace_steps: set[tuple[str, str]] = set()
+        emitted_rag_evidence = False
         config = {"configurable": {"thread_id": str(turn.conversation_id)}}
         if self._langfuse is not None:
             config["callbacks"] = [self._langfuse.handler]
@@ -466,6 +471,18 @@ class CompletionProducer:
             ),
             version="v2",
         ):
+            trace_step = project_trace_step(event)
+            if trace_step is not None:
+                key = (trace_step.node, trace_step.status)
+                if key not in emitted_trace_steps:
+                    emitted_trace_steps.add(key)
+                    await self._publisher.publish("trace_step", trace_step)
+
+            rag_evidence = project_rag_evidence(event)
+            if rag_evidence is not None and not emitted_rag_evidence:
+                emitted_rag_evidence = True
+                await self._publisher.publish("rag_evidence", rag_evidence)
+
             # Graph 会产生节点、链、模型等多类底层事件。这里只保留 API 协议认可的文本
             # 增量，并转换成稳定的应用层 payload，避免 transport 依赖 LangGraph 内部格式。
             metadata = event.get("metadata")
@@ -479,11 +496,6 @@ class CompletionProducer:
             if delta is not None:
                 answer_parts.append(delta.content)
                 await self._publisher.publish("content_delta", delta)
-
-            boundary_delta = project_business_boundary_event(event)
-            if boundary_delta is not None:
-                answer_parts.append(boundary_delta.content)
-                await self._publisher.publish("content_delta", boundary_delta)
 
             empty_delta = project_empty_evidence_event(event)
             if empty_delta is not None:
@@ -554,6 +566,7 @@ def _validate_rag_references(value: object) -> list[dict[str, object]]:
     required = ("citationId", "docId", "chunkId")
     allowed = {
         *required,
+        "sourceType",
         "fileName",
         "url",
         "rerankScore",

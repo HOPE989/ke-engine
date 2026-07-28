@@ -14,15 +14,15 @@ class StructuredRunnable:
     def __init__(self, result):
         self.result = result
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, config=None):
         return self.result
 
 
 class BusinessAndAnswerModel(GenericFakeChatModel):
-    structured_result: Any
+    structured_results: Any
 
     def with_structured_output(self, schema, **kwargs):
-        return StructuredRunnable(self.structured_result)
+        return StructuredRunnable(next(self.structured_results))
 
 
 class RecordingRagClient:
@@ -79,31 +79,41 @@ async def test_chat_rag_vertical_calls_client_answers_streams_and_persists():
     from app.domains.chat.graph.business_understanding import (
         BusinessUnderstandingResult,
     )
+    from app.domains.chat.graph.query_contextualization import (
+        QueryContextResult,
+    )
     from app.domains.chat.services.runtime import CompletionProducer
     from app.domains.rag.services import EvidenceItem, EvidencePackage
 
     classification = BusinessUnderstandingResult.model_validate(
         {
-            "reasoning": "制度文档问答",
+            "reasoning": "业务数据问题，但答案存在文档知识中",
             "route": "BUSINESS",
-            "intent": "POLICY_RULE_QA",
+            "intent": "BUSINESS_DATA_QUERY",
             "entities": {},
         }
     )
     model = BusinessAndAnswerModel(
-        messages=iter([AIMessage(content="应按调度规程执行。[1]")]),
-        structured_result=classification,
+        messages=iter([AIMessage(content="集团共有 12 家煤炭生产企业。[1]")]),
+        structured_results=iter(
+            [
+                classification,
+                QueryContextResult(
+                    standalone_query="集团有多少家煤炭生产企业？"
+                ),
+            ]
+        ),
     )
     package = EvidencePackage(
-        query="超限货物列车如何编组？",
-        standalone_query="超限货物列车编组要求",
+        query="集团有多少家煤炭生产企业？",
+        selected_retrievers=("DOCUMENT_HYBRID",),
         evidence_items=(
             EvidenceItem(
                 citation_id="doc-1:chunk-1",
-                content="超限货物列车应按调度规程编组。",
+                content="集团共有 12 家煤炭生产企业。",
                 doc_id="doc-1",
                 chunk_id="chunk-1",
-                file_name="调度规程.md",
+                file_name="集团简介.md",
                 rerank_score=0.95,
             ),
         ),
@@ -125,29 +135,37 @@ async def test_chat_rag_vertical_calls_client_answers_streams_and_persists():
         turn=AcceptedUserTurn(
             conversation_id=1001,
             user_message_id=2001,
-            content="超限货物列车如何编组？",
+            content="集团有多少家煤炭生产企业？",
         ),
         user_id="mock-user",
     )
 
     assert len(rag_client.calls) == 1
     assert rag_client.calls[0].accessible_by == ("mock-user",)
-    assert rag_client.calls[0].business_intent == "POLICY_RULE_QA"
+    assert rag_client.calls[0].query == "集团有多少家煤炭生产企业？"
     assert publisher.events[-1][0] == "completed"
     deltas = [
         payload.content
         for event, payload in publisher.events
         if event == "content_delta"
     ]
-    assert "".join(deltas) == "应按调度规程执行。[1]"
+    assert "".join(deltas) == "集团共有 12 家煤炭生产企业。[1]"
+    trace_steps = [
+        (payload.node, payload.status)
+        for event, payload in publisher.events
+        if event == "trace_step"
+    ]
+    assert len(trace_steps) == len(set(trace_steps))
+    assert [event for event, _ in publisher.events].count("rag_evidence") == 1
     assistant = session.added[0]
-    assert assistant.content == "应按调度规程执行。[1]"
+    assert assistant.content == "集团共有 12 家煤炭生产企业。[1]"
     assert assistant.rag_references == [
         {
+            "sourceType": "DOCUMENT",
             "citationId": "doc-1:chunk-1",
             "docId": "doc-1",
             "chunkId": "chunk-1",
-            "fileName": "调度规程.md",
+            "fileName": "集团简介.md",
             "rerankScore": 0.95,
         }
     ]

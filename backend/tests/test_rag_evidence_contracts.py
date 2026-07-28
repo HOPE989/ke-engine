@@ -12,11 +12,6 @@ def test_retrieve_evidence_request_normalizes_aliases_and_is_serializable():
             "query": "  调度规程有哪些要求？ ",
             "accessibleBy": ["mock-user", " mock-user "],
             "docIds": ["doc-2", "doc-1"],
-            "conversationContext": [
-                {"role": "user", "content": "我们讨论调度规程"},
-                {"role": "assistant", "content": "请问具体章节？"},
-            ],
-            "businessIntent": "POLICY_RULE_QA",
         }
     )
 
@@ -24,7 +19,7 @@ def test_retrieve_evidence_request_normalizes_aliases_and_is_serializable():
     assert request.accessible_by == ("mock-user",)
     assert request.doc_ids == ("doc-1", "doc-2")
     dumped = request.model_dump(mode="json", by_alias=True)
-    assert dumped["conversationContext"][0]["role"] == "user"
+    assert set(dumped) == {"query", "accessibleBy", "docIds"}
     assert json.loads(json.dumps(dumped, ensure_ascii=False)) == dumped
 
 
@@ -50,7 +45,7 @@ def test_evidence_package_uses_minimal_alias_contract():
 
     package = EvidencePackage(
         query="合同付款周期？",
-        standalone_query="合同付款周期",
+        selected_retrievers=("DOCUMENT_HYBRID",),
         evidence_items=(
             EvidenceItem(
                 citation_id="doc-1:chunk-2",
@@ -70,9 +65,10 @@ def test_evidence_package_uses_minimal_alias_contract():
     )
     assert dumped == {
         "query": "合同付款周期？",
-        "standaloneQuery": "合同付款周期",
+        "selectedRetrievers": ["DOCUMENT_HYBRID"],
         "evidenceItems": [
             {
+                "sourceType": "DOCUMENT",
                 "citationId": "doc-1:chunk-2",
                 "content": "付款周期为三十天。",
                 "docId": "doc-1",
@@ -90,11 +86,12 @@ def test_evidence_contract_does_not_expose_internal_fields():
 
     public_fields = {
         "query",
-        "standaloneQuery",
+        "selectedRetrievers",
         "evidenceItems",
     }
     item_fields = {
         "citationId",
+        "sourceType",
         "content",
         "docId",
         "chunkId",

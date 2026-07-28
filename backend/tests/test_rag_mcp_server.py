@@ -12,7 +12,7 @@ class RecordingEvidenceService:
         self.calls.append(request)
         return EvidencePackage(
             query=request.query,
-            standalone_query="调度规程超限货物列车编组要求",
+            selected_retrievers=("DOCUMENT_HYBRID",),
             evidence_items=(
                 EvidenceItem(
                     citation_id="doc-1:chunk-1",
@@ -39,8 +39,6 @@ async def test_rag_mcp_discovers_only_retrieve_evidence():
         "query",
         "accessibleBy",
         "docIds",
-        "conversationContext",
-        "businessIntent",
     }
 
 
@@ -54,12 +52,12 @@ async def test_rag_mcp_returns_structured_evidence():
         {
             "query": "超限货物列车如何编组？",
             "accessibleBy": ["mock-user"],
-            "businessIntent": "TRANSPORT_OPERATION_QA",
         },
     )
 
     structured = result[1]
     assert structured["query"] == "超限货物列车如何编组？"
+    assert structured["selectedRetrievers"] == ["DOCUMENT_HYBRID"]
     assert structured["evidenceItems"][0]["citationId"] == "doc-1:chunk-1"
     assert service.calls[0].accessible_by == ("mock-user",)
 

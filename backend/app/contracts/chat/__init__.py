@@ -13,6 +13,8 @@ from app.contracts.chat.stream import (
     ContentDeltaPayload,
     ErrorPayload,
     MetadataPayload,
+    RagEvidencePayload,
+    TraceStepPayload,
 )
 
 __all__ = [
@@ -26,4 +28,6 @@ __all__ = [
     "MessagePage",
     "MessageSummary",
     "MetadataPayload",
+    "RagEvidencePayload",
+    "TraceStepPayload",
 ]

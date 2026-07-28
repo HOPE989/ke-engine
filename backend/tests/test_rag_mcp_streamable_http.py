@@ -10,7 +10,7 @@ class FakeEvidenceService:
 
         return EvidencePackage(
             query=request.query,
-            standalone_query="煤炭销售合同审批要求",
+            selected_retrievers=("DOCUMENT_HYBRID",),
             evidence_items=(
                 EvidenceItem(
                     citation_id="doc-live:chunk-3",
@@ -59,12 +59,12 @@ async def test_streamable_http_initializes_discovers_and_calls_tool():
     assert [tool.name for tool in tools.tools] == ["retrieve_evidence"]
     assert result.isError is False
     assert result.structuredContent["query"] == "合同审批要求是什么？"
-    assert (
-        result.structuredContent["standaloneQuery"]
-        == "煤炭销售合同审批要求"
-    )
+    assert result.structuredContent["selectedRetrievers"] == [
+        "DOCUMENT_HYBRID"
+    ]
     item = result.structuredContent["evidenceItems"][0]
     assert item["citationId"] == "doc-live:chunk-3"
+    assert item["sourceType"] == "DOCUMENT"
     assert item["content"] == "合同审批须经过业务部门复核。"
     assert item["docId"] == "doc-live"
     assert item["chunkId"] == "chunk-3"

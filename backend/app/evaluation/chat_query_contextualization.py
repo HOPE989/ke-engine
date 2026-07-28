@@ -1,4 +1,4 @@
-"""RAG Query Rewrite 的 Langfuse Dataset Experiment 入口。"""
+"""Chat Query Contextualization 的 Langfuse Dataset Experiment 入口。"""
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -11,14 +11,18 @@ from langfuse import Evaluation
 from langfuse.api.commons.errors import NotFoundError
 
 from app.core.config import Settings, create_settings
-from app.domains.rag.graph import build_rag_graph
-from app.domains.rag.graph.query_rewrite.evaluation import (
-    QueryRewriteEvaluationCase,
-    load_query_rewrite_evaluation_cases,
-    score_query_rewrite_output,
+from app.domains.chat.graph.query_contextualization import (
+    QueryContextInput,
+    QueryContextResult,
 )
-from app.domains.rag.graph.query_rewrite.prompt import (
-    QUERY_REWRITE_PROMPT_VERSION,
+from app.domains.chat.graph.query_contextualization.evaluation import (
+    QueryContextEvaluationCase,
+    load_query_context_evaluation_cases,
+    score_query_context_output,
+)
+from app.domains.chat.graph.query_contextualization.prompt import (
+    QUERY_CONTEXTUALIZATION_PROMPT_VERSION,
+    build_query_contextualization_messages,
 )
 from app.infrastructure.langfuse import (
     LangfuseResources,
@@ -27,23 +31,11 @@ from app.infrastructure.langfuse import (
 from app.infrastructure.llm import create_chat_model
 
 
-DATASET_NAME = "ke-engine/rag-query-rewrite-v1"
+DATASET_NAME = "ke-engine/chat-query-contextualization-v1"
 DATASET_ITEM_NAMESPACE = UUID("90c7a3fb-7dd7-4a9f-a1f5-0d3a0ab2702e")
 
 
-class _EmptyRetriever:
-    async def ainvoke(self, query: str, config: Any = None) -> list[Any]:
-        return []
-
-
-class _EmptyRetrieverFactory:
-    def create(self, scope: Any) -> _EmptyRetriever:
-        return _EmptyRetriever()
-
-
-def dataset_item_id(case: QueryRewriteEvaluationCase) -> str:
-    """为 fixture case 生成可跨重复上传稳定复用的 Dataset item ID。"""
-
+def dataset_item_id(case: QueryContextEvaluationCase) -> str:
     return uuid5(
         DATASET_ITEM_NAMESPACE,
         f"{DATASET_NAME}:{case.id}",
@@ -51,10 +43,8 @@ def dataset_item_id(case: QueryRewriteEvaluationCase) -> str:
 
 
 def dataset_item_payload(
-    case: QueryRewriteEvaluationCase,
+    case: QueryContextEvaluationCase,
 ) -> dict[str, Any]:
-    """映射 Dataset item，同时保留人工语义评审所需的信息。"""
-
     return {
         "id": dataset_item_id(case),
         "input": case.request.model_dump(mode="json"),
@@ -81,9 +71,7 @@ def langfuse_evaluator(
     output: Mapping[str, Any],
     **_: Any,
 ) -> list[Evaluation]:
-    """只记录客观输出契约；语义质量留给人工或校准后的 Judge。"""
-
-    score = score_query_rewrite_output(output)
+    score = score_query_context_output(output)
     hits, total = score.output_contract
     return [
         Evaluation(
@@ -95,36 +83,37 @@ def langfuse_evaluator(
     ]
 
 
-async def run_query_rewrite_case(
+async def run_query_context_case(
     *,
     item: Any,
-    graph: Any,
+    model: Any,
 ) -> dict[str, str]:
-    """使用生产 RAG Graph 执行一个 Dataset item。"""
-
-    request = dict(item.input)
-    request.setdefault(
-        "document_retrieval_scope",
-        {"accessibleBy": ["evaluation"]},
+    request = load_request(item.input)
+    structured_model = model.with_structured_output(
+        QueryContextResult,
+        method="json_mode",
     )
-    result = await graph.ainvoke(request)
-    return {"standalone_query": result["standalone_query"]}
+    result = await structured_model.ainvoke(
+        build_query_contextualization_messages(request)
+    )
+    validated = QueryContextResult.model_validate(result)
+    return {"standalone_query": validated.standalone_query}
+
+
+def load_request(value: object) -> QueryContextInput:
+    return QueryContextInput.model_validate(value)
 
 
 def sync_dataset(
     client: Any,
-    cases: Sequence[QueryRewriteEvaluationCase],
+    cases: Sequence[QueryContextEvaluationCase],
 ) -> Any:
-    """创建或复用固定 Dataset，并以稳定 ID 幂等写入本地样例。"""
-
     try:
         client.get_dataset(DATASET_NAME)
     except NotFoundError:
         client.create_dataset(
             name=DATASET_NAME,
-            description=(
-                "28 labeled RAG Query Rewrite semantic review cases"
-            ),
+            description="Chat query contextualization semantic review cases",
             metadata={
                 "source": "ke-engine",
                 "semantic_scoring": "human-or-calibrated-llm-judge",
@@ -143,8 +132,6 @@ def run_experiment(
     *,
     resources: LangfuseResources | None = None,
 ) -> Any:
-    """同步 Dataset 后串行运行真实模型实验；远端失败显式传播。"""
-
     active_resources = resources or create_langfuse_resources(settings)
     if active_resources is None:
         raise RuntimeError(
@@ -157,29 +144,23 @@ def run_experiment(
     try:
         if not client.auth_check():
             raise RuntimeError("Langfuse authentication failed")
-        cases = load_query_rewrite_evaluation_cases()
+        cases = load_query_context_evaluation_cases()
         dataset = sync_dataset(client, cases)
         model = create_chat_model(
             settings,
             model=settings.openai_model,
             callbacks=[active_resources.handler],
         )
-        graph = build_rag_graph(
-            model=model,
-            document_retriever_factory=_EmptyRetrieverFactory(),
-        ).compile()
         result = dataset.run_experiment(
-            name="rag-query-rewrite-live-model",
+            name="chat-query-contextualization-live-model",
             run_name=_default_run_name(),
-            description=(
-                "Production RAG Graph Query Rewrite against 28 labeled cases"
-            ),
-            task=partial(run_query_rewrite_case, graph=graph),
+            description="Chat contextualization against labeled cases",
+            task=partial(run_query_context_case, model=model),
             evaluators=[langfuse_evaluator],
             max_concurrency=1,
             metadata={
                 "model": settings.openai_model,
-                "prompt_version": QUERY_REWRITE_PROMPT_VERSION,
+                "prompt_version": QUERY_CONTEXTUALIZATION_PROMPT_VERSION,
                 "app_version": settings.app_version,
                 "live_model": "true",
                 "semantic_scoring": "not_automated",
@@ -198,8 +179,6 @@ def run_experiment(
 
 
 def main() -> int:
-    """显式 CLI；失败返回非零，避免误认为 Dataset Run 已生成。"""
-
     try:
         run_experiment(create_settings())
     except Exception as exc:
@@ -210,7 +189,7 @@ def main() -> int:
 
 def _default_run_name() -> str:
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    return f"rag-query-rewrite-{timestamp}"
+    return f"chat-query-contextualization-{timestamp}"
 
 
 if __name__ == "__main__":

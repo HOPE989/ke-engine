@@ -10,7 +10,6 @@ from app.contracts.chat.stream import (
     ErrorPayload,
     MetadataPayload,
 )
-from app.domains.chat.graph.nodes.business_boundary import BUSINESS_BOUNDARY_MESSAGE
 
 
 def _decode_frame(frame):
@@ -85,31 +84,6 @@ def test_project_graph_event_ignores_empty_and_non_public_events():
     assert [project_graph_event(event) for event in events] == [None, None, None, None]
 
 
-def test_project_business_boundary_event_accepts_only_boundary_node_message_update():
-    from app.domains.chat.graph.nodes.business_boundary import BUSINESS_BOUNDARY_MESSAGE
-    from app.services.chat_api.streaming import project_business_boundary_event
-
-    boundary_event = {
-        "event": "on_chain_stream",
-        "metadata": {"langgraph_node": "business_boundary"},
-        "data": {
-            "chunk": {
-                "messages": [AIMessage(content=BUSINESS_BOUNDARY_MESSAGE)]
-            }
-        },
-    }
-    classifier_event = {
-        **boundary_event,
-        "metadata": {"langgraph_node": "business_understanding"},
-    }
-
-    payload = project_business_boundary_event(boundary_event)
-
-    assert payload is not None
-    assert payload.model_dump() == {"content": BUSINESS_BOUNDARY_MESSAGE}
-    assert project_business_boundary_event(classifier_event) is None
-
-
 def test_project_empty_evidence_event_uses_existing_content_delta_payload():
     from app.domains.chat.graph.nodes.grounded_answer import (
         EMPTY_EVIDENCE_ANSWER,
@@ -132,33 +106,65 @@ def test_project_empty_evidence_event_uses_existing_content_delta_payload():
     assert "mcp" not in payload.model_dump_json().lower()
 
 
-@pytest.mark.parametrize(
-    "messages",
-    [
-        [AIMessageChunk(content=BUSINESS_BOUNDARY_MESSAGE)],
-        [HumanMessage(content=BUSINESS_BOUNDARY_MESSAGE)],
-        [],
-        [
-            AIMessage(content=BUSINESS_BOUNDARY_MESSAGE),
-            AIMessage(content=BUSINESS_BOUNDARY_MESSAGE),
-        ],
-        [AIMessage(content="错误的边界提示")],
-    ],
-    ids=["ai-message-chunk", "human-message", "empty", "multiple", "wrong-content"],
-)
-def test_project_business_boundary_event_rejects_invalid_matching_boundary_shape(
-    messages,
-):
-    from app.services.chat_api.streaming import project_business_boundary_event
+def test_trace_step_exposes_only_stable_node_and_status():
+    from app.services.chat_api.streaming import project_trace_step
 
-    event = {
-        "event": "on_chain_stream",
-        "metadata": {"langgraph_node": "business_boundary"},
-        "data": {"chunk": {"messages": messages}},
+    payload = project_trace_step(
+        {
+            "event": "on_chain_start",
+            "run_id": "internal-run",
+            "tags": ["secret"],
+            "metadata": {
+                "langgraph_node": "business_rag",
+                "checkpoint_ns": "internal",
+            },
+        }
+    )
+
+    assert payload is not None
+    assert payload.model_dump() == {
+        "node": "business_rag",
+        "status": "started",
     }
+    assert "internal" not in payload.model_dump_json()
 
-    with pytest.raises(ValueError, match="unsupported business boundary event"):
-        project_business_boundary_event(event)
+
+def test_rag_evidence_projects_query_router_and_ordered_document_content():
+    from app.services.chat_api.streaming import project_rag_evidence
+
+    payload = project_rag_evidence(
+        {
+            "event": "on_chain_stream",
+            "metadata": {
+                "langgraph_node": "business_rag",
+                "checkpoint_ns": "internal",
+            },
+            "data": {
+                "chunk": {
+                    "evidence_package": {
+                        "query": "集团有多少家煤炭生产企业？",
+                        "selectedRetrievers": ["DOCUMENT_HYBRID"],
+                        "evidenceItems": [
+                            {
+                                "sourceType": "DOCUMENT",
+                                "citationId": "doc-1:chunk-1",
+                                "content": "集团共有 12 家煤炭生产企业。",
+                                "docId": "doc-1",
+                                "chunkId": "chunk-1",
+                                "rerankScore": 0.96,
+                            }
+                        ],
+                    }
+                }
+            },
+        }
+    )
+
+    assert payload is not None
+    assert payload.standalone_query == "集团有多少家煤炭生产企业？"
+    assert payload.selected_retrievers == ("DOCUMENT_HYBRID",)
+    assert payload.evidence_items[0].content == "集团共有 12 家煤炭生产企业。"
+    assert payload.evidence_items[0].rerank_score == 0.96
 
 
 def test_project_clarification_interrupt_projects_real_langgraph_interrupt_value():

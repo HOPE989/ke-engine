@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.domains.rag.graph.query_router import RetrieverKind
+from app.domains.rag.graph.query_router import RetrievalPlan, RetrieverKind
 from app.domains.rag.graph.retrieval import (
     RetrievalOutcome,
     RetrievalStatus,
@@ -29,16 +29,7 @@ class RetrieveEvidenceService:
         request: RetrieveEvidenceRequest,
     ) -> EvidencePackage:
         graph_input: dict[str, object] = {
-            "original_query": request.query,
-            "conversation_context": [
-                message.model_dump(mode="json")
-                for message in request.conversation_context
-            ],
-            "business_context": (
-                {"intent": request.business_intent}
-                if request.business_intent is not None
-                else None
-            ),
+            "standalone_query": request.query,
             "document_retrieval_scope": {
                 "accessibleBy": list(request.accessible_by),
                 "docIds": list(request.doc_ids),
@@ -74,9 +65,12 @@ def _project_evidence(
     if outcome.status is RetrievalStatus.FAILED:
         raise EvidenceRetrievalFailed("document evidence retrieval failed")
 
-    standalone_query = state.get("standalone_query")
-    if not isinstance(standalone_query, str) or not standalone_query.strip():
-        raise EvidenceRetrievalFailed("document evidence retrieval failed")
+    try:
+        plan = RetrievalPlan.model_validate(state.get("retrieval_plan"))
+    except Exception as exc:
+        raise EvidenceRetrievalFailed(
+            "document evidence retrieval failed"
+        ) from exc
 
     items = tuple(
         EvidenceItem(
@@ -92,7 +86,7 @@ def _project_evidence(
     )
     return EvidencePackage(
         query=request.query,
-        standalone_query=standalone_query.strip(),
+        selected_retrievers=tuple(plan.selected_retrievers),
         evidence_items=items,
     )
 

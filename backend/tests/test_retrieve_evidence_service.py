@@ -22,10 +22,6 @@ def _request():
             "query": "付款周期？",
             "accessibleBy": ["mock-user"],
             "docIds": ["doc-1"],
-            "conversationContext": [
-                {"role": "assistant", "content": "正在讨论合同。"}
-            ],
-            "businessIntent": "COAL_SALES_QA",
         }
     )
 
@@ -50,7 +46,11 @@ async def test_retrieve_evidence_projects_success_in_reranked_order():
     graph = FakeCompiledGraph(
         {
             "standalone_query": "煤炭销售合同付款周期",
-            "retrieval_plan": {"internal": True},
+            "retrieval_plan": {
+                "selected_retrievers": ["DOCUMENT_HYBRID"],
+                "routing_reason": "文档检索",
+                "decision_source": "MODEL",
+            },
             "retrieval_outcomes": {
                 "DOCUMENT_HYBRID": _outcome(
                     "SUCCESS",
@@ -91,11 +91,7 @@ async def test_retrieve_evidence_projects_success_in_reranked_order():
     ][0]["content"] == "付款周期为三十天。"
     assert graph.calls == [
         {
-            "original_query": "付款周期？",
-            "conversation_context": [
-                {"role": "assistant", "content": "正在讨论合同。"}
-            ],
-            "business_context": {"intent": "COAL_SALES_QA"},
+            "standalone_query": "付款周期？",
             "document_retrieval_scope": {
                 "accessibleBy": ["mock-user"],
                 "docIds": ["doc-1"],
@@ -111,6 +107,11 @@ async def test_retrieve_evidence_returns_empty_package_for_empty_outcome():
     graph = FakeCompiledGraph(
         {
             "standalone_query": "没有匹配的制度",
+            "retrieval_plan": {
+                "selected_retrievers": ["DOCUMENT_HYBRID"],
+                "routing_reason": "文档检索",
+                "decision_source": "MODEL",
+            },
             "retrieval_outcomes": {
                 "DOCUMENT_HYBRID": _outcome("EMPTY")
             },
@@ -131,6 +132,11 @@ async def test_retrieve_evidence_returns_empty_package_for_empty_outcome():
         FakeCompiledGraph(
             {
                 "standalone_query": "失败",
+                "retrieval_plan": {
+                    "selected_retrievers": ["DOCUMENT_HYBRID"],
+                    "routing_reason": "文档检索",
+                    "decision_source": "MODEL",
+                },
                 "retrieval_outcomes": {
                     "DOCUMENT_HYBRID": _outcome("FAILED")
                 },

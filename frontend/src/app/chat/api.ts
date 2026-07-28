@@ -3,7 +3,9 @@ import type {
   ApiResponse,
   CompletionFinishReason,
   ConversationPage,
-  MessagePage
+  MessagePage,
+  RagEvidence,
+  TraceStep
 } from "./types";
 
 const chatEndpoint = "/api/v1/chat";
@@ -51,6 +53,8 @@ export async function streamCompletion(options: {
   content: string;
   onMetadata: (conversationId: string) => void;
   onDelta: (content: string) => void;
+  onTraceStep?: (step: TraceStep) => void;
+  onRagEvidence?: (evidence: RagEvidence) => void;
 }): Promise<CompletionFinishReason> {
   const response = await fetch(`${chatEndpoint}/completions`, {
     method: "POST",
@@ -96,6 +100,10 @@ export async function streamCompletion(options: {
           options.onMetadata(String(item.data.conversation_id));
         } else if (item.event === "content_delta") {
           options.onDelta(String(item.data.content ?? ""));
+        } else if (item.event === "trace_step") {
+          options.onTraceStep?.(item.data as TraceStep);
+        } else if (item.event === "rag_evidence") {
+          options.onRagEvidence?.(item.data as RagEvidence);
         } else if (item.event === "completed") {
           if (!isFinishReason(item.data.finish_reason)) {
             throw new Error("completed 事件包含未知的 finish reason。");

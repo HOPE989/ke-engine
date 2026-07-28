@@ -17,7 +17,9 @@ class BusinessContext(BaseModel):
     entities: dict[str, str] = Field(default_factory=dict)
 
 
-class QueryRewriteInput(BaseModel):
+class QueryContextInput(BaseModel):
+    """Chat 将当前轮问题还原为脱离会话也能理解的独立问题。"""
+
     model_config = ConfigDict(extra="forbid")
 
     original_query: str = Field(min_length=1, pattern=r"\S")
@@ -40,18 +42,15 @@ class QueryRewriteInput(BaseModel):
         return self
 
 
-class QueryRewriteResult(BaseModel):
+class QueryContextResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     standalone_query: str = Field(
         min_length=2,
         pattern=r"\S",
-        description=(
-            "一条语义完整、脱离上下文也能理解的检索查询；"
-            "不得是单个汉字、标点或被截断的查询片段"
-        ),
+        description="一条脱离会话历史也能完整理解的问题",
     )
 
 
-class QueryRewriteUpdate(TypedDict):
+class QueryContextUpdate(TypedDict):
     standalone_query: str
