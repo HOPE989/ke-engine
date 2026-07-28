@@ -21,6 +21,10 @@ from app.infrastructure.llm import (
 )
 from app.infrastructure.parent_chunks import CachedParentChunkLoader
 from app.infrastructure.redis import create_redis_client
+from app.infrastructure.rerank import (
+    BailianQwen3Reranker,
+    get_shared_rerank_http_client,
+)
 
 
 def create_rag_studio_graph(
@@ -40,6 +44,12 @@ def create_rag_studio_graph(
     embedding_model = create_embedding_model(settings)
     client = create_elasticsearch_client(settings)
     options = DocumentRetrievalOptions()
+    reranker = BailianQwen3Reranker(
+        http_client=get_shared_rerank_http_client(),
+        openai_base_url=settings.openai_base_url,
+        api_key=settings.openai_api_key,
+        timeout_seconds=options.timeout_seconds,
+    )
     store = create_document_retrieval_store(
         settings=settings,
         embedding_model=embedding_model,
@@ -51,6 +61,7 @@ def create_rag_studio_graph(
         store=store,
         index_name=settings.elasticsearch_index,
         options=options,
+        reranker=reranker,
         parent_chunk_cache=parent_chunk_cache,
     )
     return build_rag_graph(

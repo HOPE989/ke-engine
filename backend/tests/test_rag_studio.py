@@ -8,6 +8,10 @@ def test_rag_studio_assembles_without_probing_elasticsearch_index(
 
     settings = SimpleNamespace(
         openai_model="gpt-test",
+        openai_api_key="existing-key",
+        openai_base_url=(
+            "https://workspace.example.com/compatible-mode/v1"
+        ),
         elasticsearch_index="rag-documents",
         embedding_dimensions=1536,
     )
@@ -16,7 +20,9 @@ def test_rag_studio_assembles_without_probing_elasticsearch_index(
     embedding_model = object()
     client = object()
     store = object()
-    options = object()
+    options = SimpleNamespace(timeout_seconds=10)
+    http_client = object()
+    reranker = object()
     factory = object()
     parent_chunk_cache = object()
     compiled = object()
@@ -71,6 +77,17 @@ def test_rag_studio_assembles_without_probing_elasticsearch_index(
     )
     monkeypatch.setattr(
         studio,
+        "get_shared_rerank_http_client",
+        lambda: http_client,
+    )
+    monkeypatch.setattr(
+        studio,
+        "BailianQwen3Reranker",
+        lambda **kwargs: calls.append(("reranker", kwargs))
+        or reranker,
+    )
+    monkeypatch.setattr(
+        studio,
         "create_document_retrieval_store",
         lambda **kwargs: calls.append(("store", kwargs)) or store,
     )
@@ -112,7 +129,17 @@ def test_rag_studio_assembles_without_probing_elasticsearch_index(
             "store": store,
             "index_name": "rag-documents",
             "options": options,
+            "reranker": reranker,
             "parent_chunk_cache": parent_chunk_cache,
+        },
+    ) in calls
+    assert (
+        "reranker",
+        {
+            "http_client": http_client,
+            "openai_base_url": settings.openai_base_url,
+            "api_key": settings.openai_api_key,
+            "timeout_seconds": options.timeout_seconds,
         },
     ) in calls
     assert (
@@ -131,6 +158,10 @@ def test_rag_studio_runs_without_langfuse(monkeypatch):
 
     settings = SimpleNamespace(
         openai_model="gpt-test",
+        openai_api_key="existing-key",
+        openai_base_url=(
+            "https://workspace.example.com/compatible-mode/v1"
+        ),
         elasticsearch_index="rag-documents",
         embedding_dimensions=1536,
     )
@@ -173,6 +204,16 @@ def test_rag_studio_runs_without_langfuse(monkeypatch):
         studio,
         "create_parent_chunk_cache",
         lambda value: object(),
+    )
+    monkeypatch.setattr(
+        studio,
+        "get_shared_rerank_http_client",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        studio,
+        "BailianQwen3Reranker",
+        lambda **kwargs: object(),
     )
     monkeypatch.setattr(
         studio,

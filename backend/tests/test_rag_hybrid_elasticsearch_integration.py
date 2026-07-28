@@ -29,6 +29,7 @@ from app.infrastructure.elasticsearch import (
     create_elasticsearch_client,
     ensure_vector_index,
 )
+from app.infrastructure.rerank import RerankResult, RerankScore
 
 
 pytestmark = pytest.mark.integration
@@ -38,6 +39,18 @@ if os.getenv("RUN_ELASTICSEARCH_INTEGRATION") != "1":
         "set RUN_ELASTICSEARCH_INTEGRATION=1 to run Elasticsearch tests",
         allow_module_level=True,
     )
+
+
+class _DeterministicReranker:
+    async def rerank(self, query, documents):
+        del query
+        return RerankResult(
+            request_id="integration-fake-rerank",
+            scores=tuple(
+                RerankScore(index=index, relevance_score=1.0)
+                for index in range(len(documents))
+            ),
+        )
 
 
 @pytest.mark.asyncio
@@ -114,6 +127,7 @@ async def test_custom_hybrid_retrieval_on_basic_elasticsearch():
             store=store,
             index_name=index_name,
             options=options,
+            reranker=_DeterministicReranker(),
         )
 
         team_a_results = await factory.create(

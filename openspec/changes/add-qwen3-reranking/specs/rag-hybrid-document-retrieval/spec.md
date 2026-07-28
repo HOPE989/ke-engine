@@ -182,7 +182,8 @@ The system SHALL expose sanitized request-level recall, parent expansion, RRF, a
 #### Scenario: Diagnostics are recorded
 - **WHEN** document retrieval completes successfully or with an empty filtered result
 - **THEN** diagnostics SHALL include total duration, final result count, RRF candidates, Rerank duration, model, request ID, threshold, and per-candidate Rerank rank and score
-- **AND** diagnostics MUST NOT expose credentials, Authorization headers, provider Base URLs, complete queries, complete parent text, raw provider responses, raw exception text, or unauthorized document metadata
+- **AND** RECALL, PARENT_EXPANSION, RRF, and RERANK candidate entries SHALL include a text preview limited to 200 characters
+- **AND** diagnostics MUST NOT expose credentials, Authorization headers, provider Base URLs, complete queries, unbounded document text, raw provider responses, raw exception text, or unauthorized document metadata
 
 #### Scenario: Default tests are offline
 - **WHEN** default pytest runs

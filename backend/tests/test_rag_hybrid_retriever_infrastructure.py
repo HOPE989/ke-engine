@@ -24,6 +24,35 @@ def _document(chunk_id: str, text: str | None = None) -> Document:
     )
 
 
+class _FakeReranker:
+    def __init__(self, scores=None, *, error=None):
+        self.scores = scores
+        self.error = error
+        self.calls = []
+
+    async def rerank(self, query, documents):
+        from app.infrastructure.rerank import (
+            RerankResult,
+            RerankScore,
+        )
+
+        self.calls.append((query, list(documents)))
+        if self.error is not None:
+            raise self.error
+        scores = (
+            list(self.scores)
+            if self.scores is not None
+            else [1.0] * len(documents)
+        )
+        return RerankResult(
+            request_id="fake-rerank-request",
+            scores=tuple(
+                RerankScore(index=index, relevance_score=score)
+                for index, score in enumerate(scores)
+            ),
+        )
+
+
 def test_retrieval_store_reuses_client_without_native_hybrid(monkeypatch):
     from app.infrastructure import elasticsearch as infrastructure
 
@@ -170,6 +199,7 @@ def test_request_scoped_factory_creates_custom_base_retrievers():
     client = object()
     store = object()
     parent_chunk_cache = object()
+    reranker = _FakeReranker()
     options = DocumentRetrievalOptions(
         result_limit=12,
         candidate_limit=60,
@@ -179,6 +209,7 @@ def test_request_scoped_factory_creates_custom_base_retrievers():
         store=store,
         index_name="rag-documents",
         options=options,
+        reranker=reranker,
         parent_chunk_cache=parent_chunk_cache,
     )
 
@@ -199,6 +230,7 @@ def test_request_scoped_factory_creates_custom_base_retrievers():
     assert first.index_name == "rag-documents"
     assert first.scope == first_scope
     assert first.options is options
+    assert first.reranker is reranker
     assert first.parent_chunk_cache is parent_chunk_cache
     assert second.scope == second_scope
 
@@ -239,7 +271,7 @@ def test_sync_hybrid_retriever_applies_identical_filters():
         def __init__(self):
             self.calls = []
 
-        def similarity_search_with_score(self, query, **kwargs):
+        async def asimilarity_search_with_score(self, query, **kwargs):
             self.calls.append((query, kwargs))
             return [
                 (_document("full-text"), 0.91),
@@ -261,6 +293,7 @@ def test_sync_hybrid_retriever_applies_identical_filters():
             result_limit=3,
             candidate_limit=5,
         ),
+        reranker=_FakeReranker(),
     )
 
     documents = retriever.invoke("合同付款周期")
@@ -302,7 +335,12 @@ def test_sync_hybrid_retriever_applies_identical_filters():
         )
     ]
     stages = retriever.retrieval_stages
-    assert list(stages) == ["RECALL", "PARENT_EXPANSION", "RRF"]
+    assert list(stages) == [
+        "RECALL",
+        "PARENT_EXPANSION",
+        "RRF",
+        "RERANK",
+    ]
     assert [
         item["chunkId"]
         for item in stages["PARENT_EXPANSION"]["VECTOR"]
@@ -310,6 +348,9 @@ def test_sync_hybrid_retriever_applies_identical_filters():
     assert [
         item["chunkId"] for item in stages["RRF"]
     ] == ["full-text", "vector"]
+    assert [
+        item["score"] for item in stages["RERANK"]["candidates"]
+    ] == [1.0, 1.0]
 
 
 @pytest.mark.asyncio
@@ -339,12 +380,14 @@ async def test_async_hybrid_retriever_starts_bm25_and_knn_concurrently():
             assert full_text_started.wait(timeout=1)
             return []
 
+    reranker = _FakeReranker()
     retriever = ElasticsearchHybridRetriever(
         client=FakeClient(),
         store=FakeStore(),
         index_name="rag-documents",
         scope=DocumentRetrievalScope(accessibleBy=["team-a"]),
         options=DocumentRetrievalOptions(),
+        reranker=reranker,
     )
 
     assert await retriever.ainvoke("合同") == []
@@ -352,7 +395,16 @@ async def test_async_hybrid_retriever_starts_bm25_and_knn_concurrently():
         "RECALL": {"BM25": [], "VECTOR": []},
         "PARENT_EXPANSION": {"BM25": [], "VECTOR": []},
         "RRF": [],
+        "RERANK": {
+            "model": "qwen3-rerank",
+            "durationMs": 0,
+            "threshold": 0.6,
+            "resultLimit": 5,
+            "skipped": True,
+            "candidates": [],
+        },
     }
+    assert reranker.calls == []
 
 
 @pytest.mark.asyncio
@@ -430,6 +482,7 @@ async def test_async_hybrid_retriever_replaces_and_deduplicates_parent_chunks():
             return {("1001", "parent-1"): "父分段完整正文"}
 
     parent_chunk_cache = FakeParentChunkCache()
+    reranker = _FakeReranker([0.9, 0.6])
 
     retriever = ElasticsearchHybridRetriever(
         client=FakeClient(),
@@ -440,6 +493,7 @@ async def test_async_hybrid_retriever_replaces_and_deduplicates_parent_chunks():
             result_limit=2,
             candidate_limit=4,
         ),
+        reranker=reranker,
         parent_chunk_cache=parent_chunk_cache,
     )
 
@@ -457,6 +511,7 @@ async def test_async_hybrid_retriever_replaces_and_deduplicates_parent_chunks():
         **child("child-a").metadata,
         "chunkId": "parent-1",
         "matchedChunkId": "child-a",
+        "rerankScore": 0.9,
     }
     assert [
         item["chunkId"]
@@ -524,6 +579,203 @@ async def test_async_hybrid_retriever_replaces_and_deduplicates_parent_chunks():
             "textPreview": "独立分段",
         },
     ]
+    assert reranker.calls == [
+        ("合同", ["父分段完整正文", "独立分段"])
+    ]
+    assert retriever.retrieval_stages["RERANK"][
+        "candidates"
+    ] == [
+        {
+            "rrfRank": 1,
+            "rerankRank": 1,
+            "chunkId": "parent-1",
+            "score": 0.9,
+            "passed": True,
+            "textPreview": "父分段完整正文",
+        },
+        {
+            "rrfRank": 2,
+            "rerankRank": 2,
+            "chunkId": "normal",
+            "score": 0.6,
+            "passed": True,
+            "textPreview": "独立分段",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_async_hybrid_retriever_reranks_ten_filters_and_returns_top_five():
+    from app.domains.rag.graph.retrieval import (
+        DocumentRetrievalOptions,
+        DocumentRetrievalScope,
+    )
+    from app.infrastructure.elasticsearch import (
+        ElasticsearchHybridRetriever,
+    )
+
+    documents = [_document(f"chunk-{index}") for index in range(10)]
+
+    class FakeClient:
+        def search(self, **kwargs):
+            assert kwargs["size"] == 10
+            return {
+                "hits": {
+                    "hits": [
+                        {
+                            "_score": float(10 - index),
+                            "_source": {
+                                "text": document.page_content,
+                                "metadata": document.metadata,
+                            },
+                        }
+                        for index, document in enumerate(documents)
+                    ]
+                }
+            }
+
+    class FakeStore:
+        async def asimilarity_search_with_score(self, query, **kwargs):
+            del query
+            assert kwargs["k"] == 10
+            return [
+                (document, 0.9)
+                for document in reversed(documents)
+            ]
+
+    scores = [0.61, 0.99, 0.6, 0.8, 0.7, 0.95, 0.59, 0.4, 0.3, 0.2]
+    reranker = _FakeReranker(scores)
+    retriever = ElasticsearchHybridRetriever(
+        client=FakeClient(),
+        store=FakeStore(),
+        index_name="rag-documents",
+        scope=DocumentRetrievalScope(accessibleBy=["team-a"]),
+        options=DocumentRetrievalOptions(),
+        reranker=reranker,
+    )
+
+    retained = await retriever.ainvoke("合同")
+
+    assert len(retriever.retrieval_stages["RRF"]) == 10
+    assert len(reranker.calls) == 1
+    assert len(reranker.calls[0][1]) == 10
+    assert [item.metadata["rerankScore"] for item in retained] == [
+        0.99,
+        0.95,
+        0.8,
+        0.7,
+        0.61,
+    ]
+    assert retained[0].page_content == reranker.calls[0][1][1]
+    assert all(
+        item.metadata["rerankScore"] >= 0.6
+        for item in retained
+    )
+
+
+@pytest.mark.asyncio
+async def test_async_hybrid_retriever_returns_empty_when_all_scores_fail():
+    from app.domains.rag.graph.retrieval import (
+        DocumentRetrievalOptions,
+        DocumentRetrievalScope,
+    )
+    from app.infrastructure.elasticsearch import (
+        ElasticsearchHybridRetriever,
+    )
+
+    document = _document("chunk-1")
+
+    class FakeClient:
+        def search(self, **kwargs):
+            del kwargs
+            return {
+                "hits": {
+                    "hits": [
+                        {
+                            "_score": 1.0,
+                            "_source": {
+                                "text": document.page_content,
+                                "metadata": document.metadata,
+                            },
+                        }
+                    ]
+                }
+            }
+
+    class FakeStore:
+        async def asimilarity_search_with_score(self, query, **kwargs):
+            del query, kwargs
+            return []
+
+    retriever = ElasticsearchHybridRetriever(
+        client=FakeClient(),
+        store=FakeStore(),
+        index_name="rag-documents",
+        scope=DocumentRetrievalScope(accessibleBy=["team-a"]),
+        options=DocumentRetrievalOptions(),
+        reranker=_FakeReranker([0.59]),
+    )
+
+    assert await retriever.ainvoke("合同") == []
+    assert retriever.retrieval_stages["RERANK"]["candidates"] == [
+        {
+            "rrfRank": 1,
+            "rerankRank": 1,
+            "chunkId": "chunk-1",
+            "score": 0.59,
+            "passed": False,
+            "textPreview": "chunk-1",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_async_hybrid_retriever_propagates_rerank_failure():
+    from app.domains.rag.graph.retrieval import (
+        DocumentRetrievalOptions,
+        DocumentRetrievalScope,
+    )
+    from app.infrastructure.elasticsearch import (
+        ElasticsearchHybridRetriever,
+    )
+
+    document = _document("chunk-1")
+
+    class FakeClient:
+        def search(self, **kwargs):
+            del kwargs
+            return {
+                "hits": {
+                    "hits": [
+                        {
+                            "_score": 1.0,
+                            "_source": {
+                                "text": document.page_content,
+                                "metadata": document.metadata,
+                            },
+                        }
+                    ]
+                }
+            }
+
+    class FakeStore:
+        async def asimilarity_search_with_score(self, query, **kwargs):
+            del query, kwargs
+            return []
+
+    retriever = ElasticsearchHybridRetriever(
+        client=FakeClient(),
+        store=FakeStore(),
+        index_name="rag-documents",
+        scope=DocumentRetrievalScope(accessibleBy=["team-a"]),
+        options=DocumentRetrievalOptions(),
+        reranker=_FakeReranker(
+            error=RuntimeError("provider unavailable")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await retriever.ainvoke("合同")
 
 
 @pytest.mark.asyncio
@@ -602,6 +854,7 @@ async def test_async_hybrid_retriever_propagates_subsearch_failure():
         index_name="rag-documents",
         scope=DocumentRetrievalScope(accessibleBy=["team-a"]),
         options=DocumentRetrievalOptions(),
+        reranker=_FakeReranker(),
     )
 
     with pytest.raises(RuntimeError, match="full text unavailable"):

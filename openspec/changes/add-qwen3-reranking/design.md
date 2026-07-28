@@ -112,13 +112,14 @@ Authorization 继续使用同一个 `OPENAI_API_KEY`。装配不得新增 `BAILI
 
 `RetrievalDiagnostics.stages` 保留现有 `RECALL`、`PARENT_EXPANSION`、`RRF`，并新增 `RERANK`：
 
+- 各阶段候选的最多 200 字符 `textPreview`；
 - 模型名；
 - 请求 ID；
 - Rerank 调用耗时；
 - 每个候选的原 RRF rank、Rerank rank、`chunkId`、score 和是否通过阈值；
 - 阈值与最终结果上限。
 
-诊断不得保存 API Key、Authorization header、完整 Query、完整父分段正文、原始响应或原始异常文本。最终总 `duration_ms` 包含 Rerank 调用。
+诊断不得保存 API Key、Authorization header、完整 Query、不受限的父分段正文、原始响应或原始异常文本。各阶段保留最多 200 字符的正文预览用于检索链路排查；最终总 `duration_ms` 包含 Rerank 调用。
 
 ### 7. 百炼是 Hybrid 请求的必需依赖
 
@@ -134,7 +135,7 @@ RRF 为空或所有合法 Rerank 分数低于 `0.6` 是正常 `EMPTY`，与依�
 - [父分段偶发超过 4,000 Token 后被服务端截断] → 接受该低概率边界；本 change 不改变父分段语义或加入复杂窗口逻辑。
 - [由 OpenAI Base URL 派生专用路径与百炼 URL 结构耦合] → 集中在一个经过单元测试的 URL 构造函数中，校验 scheme/host，并避免散落字符串替换。
 - [提供方响应结构变化导致调用失败] → 依赖公开的 `index` 与 `relevance_score` 契约，解析失败直接形成 `FAILED`，不猜测或修复响应。
-- [诊断泄露检索正文或凭证] → 诊断采用字段白名单，只记录 ID、rank、score、计数、时长和请求标识。
+- [诊断泄露检索正文或凭证] → 诊断采用字段白名单，正文只保留最多 200 字符的 `textPreview`，并记录 ID、rank、score、计数、时长和请求标识。
 
 ## Migration Plan
 

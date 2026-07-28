@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any, Sequence
 
 from elasticsearch import Elasticsearch, NotFoundError
@@ -18,6 +19,10 @@ from typing_extensions import override
 from app.domains.rag.graph.retrieval import (
     DocumentRetrievalOptions,
     DocumentRetrievalScope,
+)
+from app.infrastructure.rerank import (
+    QWEN3_RERANK_MIN_SCORE,
+    QWEN3_RERANK_MODEL,
 )
 
 VECTOR_FIELD = "vector"
@@ -226,6 +231,7 @@ class ElasticsearchHybridRetriever(BaseRetriever):
     index_name: str
     scope: DocumentRetrievalScope
     options: DocumentRetrievalOptions
+    reranker: Any = Field(exclude=True, repr=False)
     parent_chunk_cache: Any | None = Field(
         default=None,
         exclude=True,
@@ -258,10 +264,12 @@ class ElasticsearchHybridRetriever(BaseRetriever):
         *,
         run_manager: Any,
     ) -> list[Document]:
-        del run_manager
-        full_text_documents = self._full_text_search(query)
-        vector_documents = self._vector_search(query)
-        return self._fuse(full_text_documents, vector_documents)
+        return asyncio.run(
+            self._aget_relevant_documents(
+                query,
+                run_manager=run_manager,
+            )
+        )
 
     @override
     async def _aget_relevant_documents(
@@ -275,7 +283,14 @@ class ElasticsearchHybridRetriever(BaseRetriever):
             self._afull_text_search(query),
             self._avector_search(query),
         )
-        return self._fuse(full_text_documents, vector_documents)
+        documents = self._fuse(
+            full_text_documents,
+            vector_documents,
+        )
+        if not documents:
+            self._set_skipped_rerank_stage()
+            return []
+        return await self._rerank(query, documents)
 
     def _full_text_search(self, query: str) -> list[_ScoredDocument]:
         return self._expand_parent_chunks(
@@ -382,7 +397,7 @@ class ElasticsearchHybridRetriever(BaseRetriever):
                 "VECTOR": vector_documents,
             },
             rank_constant=self.options.rank_constant,
-            result_limit=self.options.result_limit,
+            result_limit=self.options.candidate_limit,
         )
         self._retrieval_stages = {
             "RECALL": {
@@ -402,6 +417,85 @@ class ElasticsearchHybridRetriever(BaseRetriever):
             "RRF": fusion_stage,
         }
         return documents
+
+    async def _rerank(
+        self,
+        query: str,
+        documents: Sequence[Document],
+    ) -> list[Document]:
+        started = perf_counter()
+        result = await self.reranker.rerank(
+            query,
+            [document.page_content for document in documents],
+        )
+        duration_ms = _elapsed_ms(started)
+        scored = [
+            (
+                item.relevance_score,
+                item.index + 1,
+                _document_chunk_id(documents[item.index]),
+                documents[item.index],
+            )
+            for item in result.scores
+        ]
+        scored.sort(
+            key=lambda item: (-item[0], item[1], item[2])
+        )
+
+        stage_candidates: list[dict[str, Any]] = []
+        retained: list[Document] = []
+        for rerank_rank, (
+            score,
+            rrf_rank,
+            chunk_id,
+            document,
+        ) in enumerate(scored, start=1):
+            passed = score >= QWEN3_RERANK_MIN_SCORE
+            stage_candidates.append(
+                {
+                    "rrfRank": rrf_rank,
+                    "rerankRank": rerank_rank,
+                    "chunkId": chunk_id,
+                    "score": score,
+                    "passed": passed,
+                    "textPreview": _text_preview(
+                        document.page_content
+                    ),
+                }
+            )
+            if passed and len(retained) < self.options.result_limit:
+                metadata = dict(document.metadata)
+                metadata["rerankScore"] = score
+                retained.append(
+                    Document(
+                        page_content=document.page_content,
+                        metadata=metadata,
+                    )
+                )
+
+        if self._retrieval_stages is None:
+            raise RuntimeError("RRF diagnostics are not initialized")
+        self._retrieval_stages["RERANK"] = {
+            "model": QWEN3_RERANK_MODEL,
+            "requestId": result.request_id,
+            "durationMs": duration_ms,
+            "threshold": QWEN3_RERANK_MIN_SCORE,
+            "resultLimit": self.options.result_limit,
+            "candidates": stage_candidates,
+        }
+        return retained
+
+    def _set_skipped_rerank_stage(self) -> None:
+        if self._retrieval_stages is None:
+            raise RuntimeError("RRF diagnostics are not initialized")
+        self._retrieval_stages["RERANK"] = {
+            "model": QWEN3_RERANK_MODEL,
+            "durationMs": 0,
+            "threshold": QWEN3_RERANK_MIN_SCORE,
+            "resultLimit": self.options.result_limit,
+            "skipped": True,
+            "candidates": [],
+        }
 
     def _expand_parent_chunks(
         self,
@@ -488,6 +582,7 @@ class DocumentHybridRetrieverFactory:
     store: Any
     index_name: str
     options: DocumentRetrievalOptions
+    reranker: Any
     parent_chunk_cache: Any | None = None
 
     def create(
@@ -500,6 +595,7 @@ class DocumentHybridRetrieverFactory:
             index_name=self.index_name,
             scope=scope,
             options=self.options,
+            reranker=self.reranker,
             parent_chunk_cache=self.parent_chunk_cache,
         )
 
@@ -824,6 +920,10 @@ def _document_chunk_id(document: Document) -> str:
 
 def _text_preview(text: str) -> str:
     return text[:_TEXT_PREVIEW_LIMIT]
+
+
+def _elapsed_ms(started: float) -> int:
+    return max(0, round((perf_counter() - started) * 1000))
 
 
 def _document_from_hit(hit: dict[str, Any]) -> Document:

@@ -91,6 +91,12 @@ class DocumentCandidate(BaseModel):
         alias="docId",
     )
     text: str = Field(min_length=1, pattern=r"\S")
+    rerank_score: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        alias="rerankScore",
+    )
     source_metadata: dict[str, JsonValue] = Field(
         default_factory=dict,
         alias="sourceMetadata",

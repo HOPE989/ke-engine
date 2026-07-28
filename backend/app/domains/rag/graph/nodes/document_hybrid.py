@@ -23,6 +23,7 @@ _SOURCE_METADATA_KEYS = frozenset(
         "documentCreatedAt",
         "fileName",
         "mimeType",
+        "matchedChunkId",
         "pageNumber",
         "section",
         "title",
@@ -93,12 +94,15 @@ def _document_candidate(document: Document) -> DocumentCandidate:
         for key in sorted(_SOURCE_METADATA_KEYS)
         if key in metadata
     }
-    return DocumentCandidate(
-        chunkId=str(metadata.get("chunkId", "")),
-        docId=str(metadata.get("docId", "")),
-        text=document.page_content,
-        sourceMetadata=source_metadata,
-    )
+    candidate = {
+        "chunkId": str(metadata.get("chunkId", "")),
+        "docId": str(metadata.get("docId", "")),
+        "text": document.page_content,
+        "sourceMetadata": source_metadata,
+    }
+    if "rerankScore" in metadata:
+        candidate["rerankScore"] = metadata["rerankScore"]
+    return DocumentCandidate.model_validate(candidate)
 
 
 def _elapsed_ms(started: float) -> int:

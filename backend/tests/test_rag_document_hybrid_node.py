@@ -36,6 +36,8 @@ async def test_document_hybrid_node_invokes_scoped_retriever_and_converts_docs()
                 url="https://files.example/contract.md",
                 accessibleBy="team-a",
                 secret="must-not-leak",
+                matchedChunkId="child-1",
+                rerankScore=0.88,
             )
         ],
         retrieval_stages={
@@ -82,8 +84,10 @@ async def test_document_hybrid_node_invokes_scoped_retriever_and_converts_docs()
             "chunkId": "chunk-1",
             "docId": "doc-1",
             "text": "合同付款周期为三十天。",
+            "rerankScore": 0.88,
             "sourceMetadata": {
                 "fileName": "contract.md",
+                "matchedChunkId": "child-1",
                 "url": "https://files.example/contract.md",
             },
         }
@@ -112,6 +116,45 @@ async def test_document_hybrid_node_returns_empty_outcome():
 
 
 @pytest.mark.asyncio
+async def test_document_hybrid_node_returns_empty_when_rerank_filters_all():
+    from app.domains.rag.graph.nodes.document_hybrid import (
+        document_hybrid_node,
+    )
+    from app.domains.rag.graph.retrieval import DocumentRetrievalOptions
+
+    update = await document_hybrid_node(
+        _state(),
+        retriever_factory=RecordingRetrieverFactory(
+            retrieval_stages={
+                "RERANK": {
+                    "model": "qwen3-rerank",
+                    "requestId": "request-1",
+                    "durationMs": 5,
+                    "threshold": 0.6,
+                    "resultLimit": 5,
+                    "candidates": [
+                        {
+                            "rrfRank": 1,
+                            "rerankRank": 1,
+                            "chunkId": "parent-1",
+                            "score": 0.59,
+                            "passed": False,
+                        }
+                    ],
+                }
+            }
+        ),
+        options=DocumentRetrievalOptions(),
+    )
+
+    outcome = update["retrieval_outcomes"]["DOCUMENT_HYBRID"]
+    assert outcome["status"] == "EMPTY"
+    assert outcome["diagnostics"]["stages"]["RERANK"][
+        "candidates"
+    ][0]["passed"] is False
+
+
+@pytest.mark.asyncio
 async def test_document_hybrid_node_sanitizes_dependency_failure():
     from app.domains.rag.graph.nodes.document_hybrid import (
         document_hybrid_node,
@@ -132,6 +175,30 @@ async def test_document_hybrid_node_sanitizes_dependency_failure():
     assert outcome["status"] == "FAILED"
     assert outcome["candidates"] == []
     assert "elastic" not in json.dumps(outcome)
+    assert "secret" not in json.dumps(outcome)
+
+
+@pytest.mark.asyncio
+async def test_document_hybrid_node_maps_rerank_failure_to_failed():
+    from app.domains.rag.graph.nodes.document_hybrid import (
+        document_hybrid_node,
+    )
+    from app.domains.rag.graph.retrieval import DocumentRetrievalOptions
+
+    update = await document_hybrid_node(
+        _state(),
+        retriever_factory=RecordingRetrieverFactory(
+            error=RuntimeError(
+                "bailian response included secret raw body"
+            )
+        ),
+        options=DocumentRetrievalOptions(),
+    )
+
+    outcome = update["retrieval_outcomes"]["DOCUMENT_HYBRID"]
+    assert outcome["status"] == "FAILED"
+    assert outcome["candidates"] == []
+    assert outcome["diagnostics"].get("stages") is None
     assert "secret" not in json.dumps(outcome)
 
 

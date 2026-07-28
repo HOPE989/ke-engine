@@ -53,6 +53,7 @@ def test_retrieval_contracts_are_serializable_and_do_not_require_scores():
                 chunk_id="chunk-1",
                 doc_id="doc-1",
                 text="合同的付款周期为三十天。",
+                rerank_score=0.6,
                 source_metadata={
                     "fileName": "contract.md",
                     "url": "https://files.example/contract.md",
@@ -69,6 +70,7 @@ def test_retrieval_contracts_are_serializable_and_do_not_require_scores():
         "chunkId": "chunk-1",
         "docId": "doc-1",
         "text": "合同的付款周期为三十天。",
+        "rerankScore": 0.6,
         "sourceMetadata": {
             "fileName": "contract.md",
             "url": "https://files.example/contract.md",
